@@ -13,6 +13,8 @@ Runs on CanvasTTY 1.8 with the host APIs it has; nothing in the core is specific
 - Loop alerts: a `loop?` badge when a card runs the same command five times in one turn with no file edit seen (shell edits count, polling does not); it clears on the next turn.
 - Card menu actions: Plan from flow…, Task board (orchestrators) and Report (every agent).
 - Badges and toasts follow CanvasTTY's language; the pages follow its palette.
+- In Russian the card menu shows План по сценарию…, Доска задач and Отчёт (`title.ru` on each card action). A core that does not accept `title.ru` on card actions (before the localized card action titles) rejects the manifest.
+- The settings page puts a row's control under its description when the row is too narrow for both, for example at a UI scale of 1.25.
 
 ## Unreleased
 

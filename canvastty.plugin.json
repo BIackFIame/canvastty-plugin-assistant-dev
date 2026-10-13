@@ -5,7 +5,7 @@
   "name.ru": "Ассистент CanvasTTY",
   "version": "0.2.0",
   "description": "The Assistant: reviews agents' shell commands and file writes before they run, and helps orchestrators: a route tool that suggests provider and model for a subagent, flows (roles and tasks an orchestrator asks you to approve), a task board, loop alerts on cards and a session report. Decision models (Jev, Laya, Eikos, Ollama) are optional. Settings → Plugins → CanvasTTY Assistant → Settings.",
-  "description.ru": "Помощник: проверяет команды и записи файлов агентов до запуска и помогает оркестраторам: инструмент route предлагает провайдера и модель для субагента, сценарии (роли и задачи, которые оркестратор просит одобрить), доска задач, сигнал «цикл?» на окне и отчёт о сессии. Модели решений (Jev, Laya, Eikos, Ollama) не обязательны. Настройки → Плагины → CanvasTTY Assistant → Настройки.",
+  "description.ru": "Помощник: проверяет команды и записи файлов агентов до запуска и помогает оркестраторам: инструмент route предлагает провайдера и модель для субагента, сценарии (роли и задачи, которые оркестратор просит одобрить), доска задач, сигнал «цикл?» на окне и отчёт о сессии. Модели решений (Jev, Laya, Eikos, Ollama) не обязательны. Настройки → Плагины → Ассистент CanvasTTY → Настройки.",
   "author": "CanvasTTY contributors",
   "permissions": [
     "storage",
@@ -24,13 +24,13 @@
     },
     {
       "path": "README.ru.md",
-      "bytes": 18083,
-      "sha256": "cf57e74f514e01bfc7eb7d24b222ba3317f7abc232dd179d55c2093d1d534946"
+      "bytes": 18132,
+      "sha256": "994071d5910a70417e6e2ecd21a27f5a8995b5b3203834ed7c8f6c64304120d5"
     },
     {
       "path": "services/assistant.mjs",
-      "bytes": 498718,
-      "sha256": "80d6dc3884d9d6acdbda9007ac7e7f175c994f8bf8cc1a16ed877b72b0ebf329"
+      "bytes": 498853,
+      "sha256": "06f0f1e80a3638df2fb8b37f07d1622e030ac3949afca6c96bc9303abc82c5d0"
     },
     {
       "path": "settings/assistant.html",
@@ -59,8 +59,8 @@
     },
     {
       "path": "apps/harness.css",
-      "bytes": 6306,
-      "sha256": "fe9c82fb14c31be7b5fff32959697b719fe225881faf19ba4753a423f75b9259"
+      "bytes": 6532,
+      "sha256": "607f3ac3315ba7b9376f59dcc60810847eee25941a3a4a130656aad7b4f0eef4"
     },
     {
       "path": "apps/flows.html",
@@ -358,6 +358,7 @@
         {
           "id": "flow-preview",
           "title": "Plan from flow…",
+          "title.ru": "План по сценарию…",
           "when": {
             "roles": [
               "orchestrator"
@@ -367,6 +368,7 @@
         {
           "id": "task-board",
           "title": "Task board",
+          "title.ru": "Доска задач",
           "when": {
             "roles": [
               "orchestrator"
@@ -376,6 +378,7 @@
         {
           "id": "report",
           "title": "Report",
+          "title.ru": "Отчёт",
           "when": {
             "roles": [
               "agent",
@@ -420,7 +423,7 @@
       "id": "flows",
       "kind": "canvas-app",
       "title": "Flow preview",
-      "title.ru": "Просмотр сценариев",
+      "title.ru": "Просмотр сценария",
       "description": "Roles and tasks of a proposed flow, for you to approve or cancel.",
       "entry": "apps/flows.html",
       "defaultSize": {

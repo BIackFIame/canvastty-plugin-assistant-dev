@@ -43,12 +43,14 @@ button, input, select, textarea { font: inherit; color: inherit; }
 
 /* Settings rows: label and help on the left, one control on the right. */
 .setting-group { display: grid; border-radius: var(--radius-md); background: var(--surface-soft); }
-.setting-row { display: flex; align-items: center; justify-content: space-between; gap: 1.23rem; padding: 0.92rem 1.08rem; }
+/* A row too narrow for an 18rem description beside its control wraps the control under the description; rem follows
+   --ui-scale, so a larger scale wraps sooner. */
+.setting-row { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 0.62rem 1.23rem; padding: 0.92rem 1.08rem; }
 .setting-row + .setting-row { border-top: 1px solid var(--line); }
-.setting-row__copy { min-width: 0; }
+.setting-row__copy { flex: 1 1 18rem; min-width: 0; }
 .setting-row__label { font-weight: 700; }
 .setting-row__help { margin-top: 0.15rem; color: var(--text-muted); font-size: 0.92rem; }
-.setting-row__control { flex: none; }
+.setting-row__control { flex: none; max-width: 100%; }
 
 .segmented { display: inline-flex; padding: 0.15rem; border-radius: var(--radius-sm); background: var(--surface); }
 .segmented button { min-height: 2.31rem; padding: 0.31rem 0.92rem; border: 0; border-radius: 0.54rem; background: transparent; color: var(--text-muted); cursor: pointer; }

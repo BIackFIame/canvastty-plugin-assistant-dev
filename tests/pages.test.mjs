@@ -163,6 +163,32 @@ test('no page or manifest text promises that the flow preview enforces anything'
   for (const text of texts) assert.doesNotMatch(text, /nothing starts before|before anything starts|Permissions are unchanged|до запуска ничего|Права не меняются/u);
 });
 
+test('Russian names: every card action has title.ru, and Russian text names the plugin as it is shown (Ассистент CanvasTTY)', () => {
+  const manifest = JSON.parse(readFileSync(join(root, 'canvastty.plugin.json'), 'utf8'));
+  const actions = manifest.services.flatMap(service => service.cardActions ?? []);
+  assert.deepEqual(actions.map(action => action['title.ru']), ['План по сценарию…', 'Доска задач', 'Отчёт']);
+  for (const action of actions) assert.ok(action['title.ru'].length <= 40 && action.title.length <= 40, action.id);
+  assert.equal(manifest['name.ru'], 'Ассистент CanvasTTY');
+  assert.match(manifest['description.ru'], /Плагины → Ассистент CanvasTTY → Настройки/u);
+  const flows = manifest.contributions.find(item => item.id === 'flows');
+  // The Russian strings name the shown titles: the plugin, and the Flow preview card as its manifest title says.
+  // The bundles escape non-ASCII text, so the sources are read (the coreFiles test ties the bundles to them).
+  const strings = readFileSync(join(root, 'src/harness/i18n.ts'), 'utf8');
+  const ru = strings.slice(strings.indexOf('const RU'));
+  assert.ok(ru.length < strings.length, 'the Russian strings are found');
+  for (const text of [manifest['description.ru'], readFileSync(join(root, 'README.ru.md'), 'utf8'), ru]) assert.doesNotMatch(text, /Плагины → CanvasTTY Assistant|Просмотр сценариев/u);
+  assert.match(ru, new RegExp(`Плагины → Ассистент CanvasTTY → ${flows['title.ru']}`, 'u'));
+});
+
+test('settings rows wrap the control under the description when the row is narrow, in rem so --ui-scale wraps sooner', () => {
+  const css = readFileSync(join(root, 'apps/harness.css'), 'utf8');
+  const rule = selector => css.match(new RegExp(`^\\${selector} \\{([^}]*)\\}`, 'mu'))?.[1] ?? '';
+  assert.match(rule('.setting-row'), /display: flex;.*flex-wrap: wrap;/u);
+  assert.match(rule('.setting-row__copy'), /flex: 1 1 \d+(\.\d+)?rem;/u);
+  assert.match(rule('.setting-row__control'), /flex: none;/u);
+  assert.match(css, /font-size: calc\(13px \* var\(--ui-scale, 1\)\)/u);
+});
+
 test('Task board: columns by status, assignee by card title, empty state', async () => {
   const ui = page('apps/board.js', {
     'harness.view': { focus: { board: 'o1' }, titles: { s1: 'Worker' }, boards: [{ orchestratorId: 'o1', title: 'Lead', tasks: [
