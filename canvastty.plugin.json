@@ -2,6 +2,7 @@
   "apiVersion": 2,
   "id": "canvastty-assistant",
   "name": "CanvasTTY Assistant",
+  "name.ru": "Ассистент CanvasTTY",
   "version": "0.2.0",
   "description": "The Assistant: reviews agents' shell commands and file writes before they run, and helps orchestrators: a route tool that suggests provider and model for a subagent, flows (roles and tasks an orchestrator asks you to approve), a task board, loop alerts on cards and a session report. Decision models (Jev, Laya, Eikos, Ollama) are optional. Settings → Plugins → CanvasTTY Assistant → Settings.",
   "description.ru": "Помощник: проверяет команды и записи файлов агентов до запуска и помогает оркестраторам: инструмент route предлагает провайдера и модель для субагента, сценарии (роли и задачи, которые оркестратор просит одобрить), доска задач, сигнал «цикл?» на окне и отчёт о сессии. Модели решений (Jev, Laya, Eikos, Ollama) не обязательны. Настройки → Плагины → CanvasTTY Assistant → Настройки.",
@@ -99,6 +100,7 @@
           {
             "key": "task",
             "label": "Task (for review and triage)",
+            "label.ru": "Задача (для проверки и разбора)",
             "kind": "text",
             "default": "",
             "maxLength": 200
@@ -106,6 +108,7 @@
           {
             "key": "dataClass",
             "label": "Data class of this card",
+            "label.ru": "Класс данных этого окна",
             "kind": "select",
             "default": "default",
             "options": [
@@ -389,6 +392,7 @@
       "id": "settings",
       "kind": "canvas-app",
       "title": "Assistant",
+      "title.ru": "Ассистент",
       "description": "Command review, automatic routing, loop alerts and flows.",
       "entry": "settings/harness.html",
       "defaultSize": {
@@ -404,6 +408,7 @@
       "id": "models",
       "kind": "canvas-app",
       "title": "Decision models",
+      "title.ru": "Модели решений",
       "description": "Optional decision models (Jev, Laya, Eikos, Ollama), data rules and recent reviews.",
       "entry": "settings/assistant.html",
       "defaultSize": {
@@ -415,6 +420,7 @@
       "id": "flows",
       "kind": "canvas-app",
       "title": "Flow preview",
+      "title.ru": "Просмотр сценариев",
       "description": "Roles and tasks of a proposed flow, for you to approve or cancel.",
       "entry": "apps/flows.html",
       "defaultSize": {
@@ -430,6 +436,7 @@
       "id": "board",
       "kind": "canvas-app",
       "title": "Task board",
+      "title.ru": "Доска задач",
       "description": "Tasks of an orchestrator and its subagents.",
       "entry": "apps/board.html",
       "defaultSize": {
