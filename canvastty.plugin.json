@@ -2,9 +2,9 @@
   "apiVersion": 2,
   "id": "canvastty-assistant",
   "name": "CanvasTTY Assistant",
-  "version": "0.1.0",
-  "description": "The Assistant: reviews agents' shell commands and file writes before they run (read-only allow list, a small decision model, a larger second reviewer, then you), triages the task you give a card, and advises orchestrators. Runs on Jev (TypeSafe, OpenRouter, Vercel), Laya, an Eikos server or a model on your Ollama. Off until you turn it on.",
-  "description.ru": "Помощник: проверяет команды и записи файлов агентов до запуска (белый список чтения, маленькая модель решений, большая модель второго просмотра, потом вы), разбирает задачу окна и советует оркестраторам. Работает на Jev (TypeSafe, OpenRouter, Vercel), Laya, сервере Eikos или модели в вашей Ollama. Выключен, пока вы его не включите.",
+  "version": "0.2.0",
+  "description": "The Assistant: reviews agents' shell commands and file writes before they run, and helps orchestrators: a route tool that suggests provider and model for a subagent, flows whose roles and tasks you preview before they start, a task board, loop alerts on cards and a session report. Decision models (Jev, Laya, Eikos, Ollama) are optional. Settings → Plugins → CanvasTTY Assistant → Settings.",
+  "description.ru": "Помощник: проверяет команды и записи файлов агентов до запуска и помогает оркестраторам: инструмент route предлагает провайдера и модель для субагента, сценарии показывают роли и задачи до запуска, доска задач, сигнал «цикл?» на окне и отчёт о сессии. Модели решений (Jev, Laya, Eikos, Ollama) не обязательны. Настройки → Плагины → CanvasTTY Assistant → Настройки.",
   "author": "CanvasTTY contributors",
   "permissions": [
     "storage",
@@ -18,40 +18,75 @@
   "coreFiles": [
     {
       "path": "README.md",
-      "bytes": 4918,
-      "sha256": "d96c9f984ca97759b623138be8445b63b2ee88f5db40a0da1c1e940b47e56e23"
+      "bytes": 8148,
+      "sha256": "b04dd6abd160c79e08b00d1def3ce4f7d444fbfdc9aca6100fa5211c122f4cf7"
     },
     {
       "path": "README.ru.md",
-      "bytes": 8100,
-      "sha256": "5dea2d0d75c31ab45b2cca8d91f910c0f448845dd2e34ddc814690c6eba2fad0"
+      "bytes": 13708,
+      "sha256": "28fa206b670df25d72066384240e4a2b5e7d9eabe325cc2a8011a4ca7268820e"
     },
     {
       "path": "services/assistant.mjs",
-      "bytes": 392171,
-      "sha256": "ae8f1b9dae46845f2ea4d6c4f8210a83eea5649b1ab9ea6ed90e9723d647ea67"
+      "bytes": 461538,
+      "sha256": "1402f4abaa23c234742194c75cc901f734076fb7bc7855e06ac1e7df398bc056"
     },
     {
       "path": "settings/assistant.html",
-      "bytes": 476,
-      "sha256": "f386dd195daa8e5b32ba802af13ec53cd11b32b3796f7620f1e069530f94478f"
+      "bytes": 537,
+      "sha256": "c9b3550adc67759cac7fbcdd040aba604cc1458eb4c1b6e616d380ddfb09d384"
     },
     {
       "path": "settings/assistant.js",
-      "bytes": 23458,
-      "sha256": "e18937a02ec0eb83f3faaaddc5567a33b0d67625c2d69f41417198645e123a4d"
+      "bytes": 22587,
+      "sha256": "5bb3e60543549b98a5cc88a18c9adcd45da281184fa73832a9ec9ee7a2ee586d"
     },
     {
       "path": "settings/assistant.css",
-      "bytes": 1089,
-      "sha256": "685bdf3b74c2bb535331e4985d1220cab16593910adb1f8cd1bce88430249c38"
+      "bytes": 1443,
+      "sha256": "8ad832c9e576034527a4f9f6e2dacdc3438feed00633348fd489e1007195a32e"
+    },
+    {
+      "path": "settings/harness.html",
+      "bytes": 478,
+      "sha256": "6a2a5d4830476468b48a67b15a7330120fd287459c6732a344c4ab4fcbdb7b1e"
+    },
+    {
+      "path": "settings/harness.js",
+      "bytes": 9399,
+      "sha256": "af3771eae359117b59d54640b4b9bbc2b6e8db00830c1c94e6699968354f3490"
+    },
+    {
+      "path": "apps/harness.css",
+      "bytes": 5792,
+      "sha256": "8a50321df63ab099d5f43239c9c9b6362797d0d8829802180f25047f94dcdc52"
+    },
+    {
+      "path": "apps/flows.html",
+      "bytes": 473,
+      "sha256": "ca281efe08c090b1440a7bccf561acbd3b1663badb7348e549cf251e0ce195be"
+    },
+    {
+      "path": "apps/flows.js",
+      "bytes": 14328,
+      "sha256": "e9dd0bdef975a85fbff3a49445e622807aeac1e21bcb0dbac5aff21f748f864a"
+    },
+    {
+      "path": "apps/board.html",
+      "bytes": 471,
+      "sha256": "ec2db19d909ee8858100d2669ded49deaeca8dbc5b9fe7b60b8196d134c7e530"
+    },
+    {
+      "path": "apps/board.js",
+      "bytes": 6370,
+      "sha256": "7a0c244b8b75867320e24ca89c5058a8de2ca162c2c6a30a0ca9bfee467641c7"
     }
   ],
   "services": [
     {
       "id": "assistant",
       "title": "Assistant",
-      "description": "Command review, launch triage and routing advice on a System One model or a local Ollama model.",
+      "description": "Command review, launch triage, routing, flows, task boards, loop alerts and session reports.",
       "entry": "services/assistant.mjs",
       "decide": {
         "events": [
@@ -130,6 +165,221 @@
           "roles": [
             "orchestrator"
           ]
+        },
+        {
+          "name": "route",
+          "description": "Before spawn_agent: suggests provider, model and effort for a subagent's task (a small model for routine work, the strongest offered for hard work). Pass list_providers().providers as `providers` so it picks from what is available. Pass the answer's spawn values to spawn_agent; nothing is started here. Uses a decision model when one is set up, else simple rules.",
+          "inputSchema": {
+            "type": "object",
+            "properties": {
+              "task": {
+                "type": "string",
+                "description": "The task text you would give the subagent."
+              },
+              "providers": {
+                "type": "array",
+                "description": "Optional: the providers array from list_providers, so the suggestion uses what is installed, signed in and its known models.",
+                "items": {
+                  "type": "object"
+                },
+                "maxItems": 16
+              },
+              "prefer": {
+                "type": "string",
+                "description": "Optional provider id to prefer when it is available."
+              },
+              "launchOptionTools": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                },
+                "description": "Optional: list_providers().launchOptionTools, to name the account tool to call."
+              }
+            },
+            "required": [
+              "task"
+            ],
+            "additionalProperties": false
+          },
+          "roles": [
+            "orchestrator"
+          ]
+        },
+        {
+          "name": "flows_list",
+          "description": "Lists flows: named sets of roles (for example executor and reviewer), built in and from this project's .canvastty/flows folder. Use flow_plan to propose one.",
+          "inputSchema": {
+            "type": "object",
+            "properties": {},
+            "additionalProperties": false
+          },
+          "roles": [
+            "orchestrator"
+          ]
+        },
+        {
+          "name": "flow_plan",
+          "description": "Proposes a flow for a goal: roles with provider/model and tasks. The person previews it in the Flow preview card and presses Start or Cancel; nothing starts before that. Then call flow_status.",
+          "inputSchema": {
+            "type": "object",
+            "properties": {
+              "flow": {
+                "type": "string",
+                "description": "A flow id from flows_list."
+              },
+              "goal": {
+                "type": "string",
+                "description": "What the flow should achieve."
+              },
+              "providers": {
+                "type": "array",
+                "description": "Optional: the providers array from list_providers, so the suggestion uses what is installed, signed in and its known models.",
+                "items": {
+                  "type": "object"
+                },
+                "maxItems": 16
+              }
+            },
+            "required": [
+              "flow",
+              "goal"
+            ],
+            "additionalProperties": false
+          },
+          "roles": [
+            "orchestrator"
+          ]
+        },
+        {
+          "name": "flow_status",
+          "description": "Whether the person started or cancelled your flow plan (waits up to 10 s). When approved, it lists exactly what to pass to spawn_agent for each role.",
+          "inputSchema": {
+            "type": "object",
+            "properties": {
+              "planId": {
+                "type": "string",
+                "description": "The plan id from flow_plan; omit for your newest plan (also one the person chose for you)."
+              },
+              "waitSeconds": {
+                "type": "number",
+                "description": "How long to wait for the person, 0 to 10 seconds (default 10)."
+              }
+            },
+            "additionalProperties": false
+          },
+          "roles": [
+            "orchestrator"
+          ]
+        },
+        {
+          "name": "task_add",
+          "description": "Adds a task to your task board (the person sees it in the Task board card). Optionally give it to one of your subagents by session id.",
+          "inputSchema": {
+            "type": "object",
+            "properties": {
+              "title": {
+                "type": "string",
+                "description": "Short task title."
+              },
+              "detail": {
+                "type": "string",
+                "description": "Optional details."
+              },
+              "assignee": {
+                "type": "string",
+                "description": "Optional session id of one of your subagents."
+              }
+            },
+            "required": [
+              "title"
+            ],
+            "additionalProperties": false
+          },
+          "roles": [
+            "orchestrator"
+          ]
+        },
+        {
+          "name": "task_update",
+          "description": "Updates a task on the board: status todo, doing, done or blocked, and a short note. A subagent may update a task given to it, or claim an unassigned one.",
+          "inputSchema": {
+            "type": "object",
+            "properties": {
+              "id": {
+                "type": "string",
+                "description": "The task id, for example t3."
+              },
+              "status": {
+                "type": "string",
+                "enum": [
+                  "todo",
+                  "doing",
+                  "done",
+                  "blocked"
+                ]
+              },
+              "note": {
+                "type": "string",
+                "description": "A short note (what changed, what blocks it)."
+              },
+              "assignee": {
+                "type": "string",
+                "description": "Orchestrator only: a subagent session id, or empty to clear."
+              }
+            },
+            "required": [
+              "id"
+            ],
+            "additionalProperties": false
+          },
+          "roles": [
+            "orchestrator",
+            "subagent"
+          ]
+        },
+        {
+          "name": "task_list",
+          "description": "The task board of your orchestrator (or your own, for an orchestrator): ids, titles, status, assignee and notes.",
+          "inputSchema": {
+            "type": "object",
+            "properties": {},
+            "additionalProperties": false
+          },
+          "roles": [
+            "orchestrator",
+            "subagent"
+          ]
+        }
+      ],
+      "cardActions": [
+        {
+          "id": "flow-preview",
+          "title": "Plan from flow…",
+          "when": {
+            "roles": [
+              "orchestrator"
+            ]
+          }
+        },
+        {
+          "id": "task-board",
+          "title": "Task board",
+          "when": {
+            "roles": [
+              "orchestrator"
+            ]
+          }
+        },
+        {
+          "id": "report",
+          "title": "Report",
+          "when": {
+            "roles": [
+              "agent",
+              "orchestrator",
+              "subagent"
+            ]
+          }
         }
       ]
     }
@@ -139,11 +389,56 @@
       "id": "settings",
       "kind": "canvas-app",
       "title": "Assistant",
-      "description": "Decision models, modes, review strictness and data checks of the Assistant.",
+      "description": "Command review, automatic routing, loop alerts and flows.",
+      "entry": "settings/harness.html",
+      "defaultSize": {
+        "width": 620,
+        "height": 420
+      },
+      "minSize": {
+        "width": 420,
+        "height": 300
+      }
+    },
+    {
+      "id": "models",
+      "kind": "canvas-app",
+      "title": "Decision models",
+      "description": "Optional decision models (Jev, Laya, Eikos, Ollama), data rules and recent reviews.",
       "entry": "settings/assistant.html",
       "defaultSize": {
         "width": 760,
         "height": 640
+      }
+    },
+    {
+      "id": "flows",
+      "kind": "canvas-app",
+      "title": "Flow preview",
+      "description": "Roles and tasks of a proposed flow, before anything starts.",
+      "entry": "apps/flows.html",
+      "defaultSize": {
+        "width": 720,
+        "height": 520
+      },
+      "minSize": {
+        "width": 420,
+        "height": 300
+      }
+    },
+    {
+      "id": "board",
+      "kind": "canvas-app",
+      "title": "Task board",
+      "description": "Tasks of an orchestrator and its subagents.",
+      "entry": "apps/board.html",
+      "defaultSize": {
+        "width": 720,
+        "height": 520
+      },
+      "minSize": {
+        "width": 420,
+        "height": 300
       }
     }
   ],

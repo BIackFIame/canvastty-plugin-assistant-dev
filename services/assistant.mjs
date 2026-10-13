@@ -25,8 +25,8 @@ function serve({ methods, notifications = {}, onInitialize, input = process.stdi
   let blocked = false;
   let dropped = 0;
   let onFlushed = null;
-  const write = (text4) => {
-    if (output.write(text4) === false && typeof output.once === "function") {
+  const write = (text5) => {
+    if (output.write(text5) === false && typeof output.once === "function") {
       blocked = true;
       output.once("drain", flush);
     }
@@ -47,12 +47,12 @@ function serve({ methods, notifications = {}, onInitialize, input = process.stdi
     if (!blocked && !queue.length) onFlushed?.();
   }
   const send = (message, droppable = false) => {
-    const text4 = `${JSON.stringify({ jsonrpc: "2.0", ...message })}
+    const text5 = `${JSON.stringify({ jsonrpc: "2.0", ...message })}
 `;
-    const bytes = Buffer.byteLength(text4);
+    const bytes = Buffer.byteLength(text5);
     if (bytes > limit.frameBytes && message.method !== "log") return false;
     if (!blocked) {
-      write(text4);
+      write(text5);
       return true;
     }
     if (droppable) {
@@ -72,7 +72,7 @@ function serve({ methods, notifications = {}, onInitialize, input = process.stdi
       }
       held += bytes;
     }
-    queue.push({ text: text4, bytes, droppable });
+    queue.push({ text: text5, bytes, droppable });
     return true;
   };
   const host = {
@@ -228,7 +228,7 @@ function serve({ methods, notifications = {}, onInitialize, input = process.stdi
 }
 
 // src/service/assistant.ts
-import { join as join6 } from "node:path";
+import { join as join8 } from "node:path";
 
 // src/engine/AssistantEngine.ts
 import { randomUUID } from "node:crypto";
@@ -700,40 +700,40 @@ function classifyStatus(status, detail = {}) {
 }
 var FORBIDDEN_KEYS = /* @__PURE__ */ new Set(["__proto__", "prototype", "constructor"]);
 var LITERAL = /-?(?:0|[1-9]\d*)(?:\.\d+)?(?:[eE][+-]?\d+)?|true|false|null/uy;
-function utf8Length(text4) {
+function utf8Length(text5) {
   let bytes = 0;
-  for (let i = 0; i < text4.length; i++) {
-    const c = text4.charCodeAt(i);
+  for (let i = 0; i < text5.length; i++) {
+    const c = text5.charCodeAt(i);
     if (c < 128) bytes += 1;
     else if (c < 2048) bytes += 2;
-    else if (c >= 55296 && c <= 56319 && i + 1 < text4.length) {
+    else if (c >= 55296 && c <= 56319 && i + 1 < text5.length) {
       bytes += 4;
       i++;
     } else bytes += 3;
   }
   return bytes;
 }
-function parseBoundedJson(text4, caps, errorClass = "invalid-response") {
+function parseBoundedJson(text5, caps, errorClass = "invalid-response") {
   const fail2 = (message) => {
     throw new SystemOneError(errorClass, message);
   };
-  if (utf8Length(text4) > caps.maxBytes) fail2("System One JSON exceeds its byte limit.");
+  if (utf8Length(text5) > caps.maxBytes) fail2("System One JSON exceeds its byte limit.");
   let i = 0, nodes = 0;
   const ws = () => {
     for (; ; ) {
-      const c = text4.charCodeAt(i);
+      const c = text5.charCodeAt(i);
       if (c === 32 || c === 9 || c === 10 || c === 13) i++;
       else return;
     }
   };
   const string = () => {
     const start = i++;
-    while (i < text4.length) {
-      const c = text4.charCodeAt(i++);
+    while (i < text5.length) {
+      const c = text5.charCodeAt(i++);
       if (c === 92) i++;
       else if (c === 34) {
         try {
-          return JSON.parse(text4.slice(start, i));
+          return JSON.parse(text5.slice(start, i));
         } catch {
           return fail2("Invalid JSON string.");
         }
@@ -744,47 +744,47 @@ function parseBoundedJson(text4, caps, errorClass = "invalid-response") {
   const value = (depth) => {
     if (depth > caps.maxDepth || ++nodes > caps.maxNodes) fail2("System One JSON structure limit exceeded.");
     ws();
-    const c = text4[i];
+    const c = text5[i];
     if (c === "{") {
       i++;
       ws();
-      if (text4[i] === "}") {
+      if (text5[i] === "}") {
         i++;
         return;
       }
       const keys = /* @__PURE__ */ new Set();
       for (; ; ) {
         ws();
-        if (text4[i] !== '"') fail2("Invalid JSON key.");
+        if (text5[i] !== '"') fail2("Invalid JSON key.");
         const key = string();
         if (keys.has(key) || FORBIDDEN_KEYS.has(key)) fail2("Duplicate or forbidden JSON key.");
         keys.add(key);
         ws();
-        if (text4[i++] !== ":") fail2("Invalid JSON object.");
+        if (text5[i++] !== ":") fail2("Invalid JSON object.");
         value(depth + 1);
         ws();
-        if (text4[i] === "}") {
+        if (text5[i] === "}") {
           i++;
           return;
         }
-        if (text4[i++] !== ",") fail2("Invalid JSON object.");
+        if (text5[i++] !== ",") fail2("Invalid JSON object.");
       }
     }
     if (c === "[") {
       i++;
       ws();
-      if (text4[i] === "]") {
+      if (text5[i] === "]") {
         i++;
         return;
       }
       for (; ; ) {
         value(depth + 1);
         ws();
-        if (text4[i] === "]") {
+        if (text5[i] === "]") {
           i++;
           return;
         }
-        if (text4[i++] !== ",") fail2("Invalid JSON array.");
+        if (text5[i++] !== ",") fail2("Invalid JSON array.");
       }
     }
     if (c === '"') {
@@ -792,15 +792,15 @@ function parseBoundedJson(text4, caps, errorClass = "invalid-response") {
       return;
     }
     LITERAL.lastIndex = i;
-    const match = LITERAL.exec(text4);
+    const match = LITERAL.exec(text5);
     if (!match) return fail2("Invalid JSON value.");
     i += match[0].length;
     if (match[0] !== "true" && match[0] !== "false" && match[0] !== "null" && !Number.isFinite(Number(match[0]))) fail2("Nonfinite JSON number.");
   };
   value(0);
   ws();
-  if (i !== text4.length) fail2("Trailing JSON.");
-  return JSON.parse(text4);
+  if (i !== text5.length) fail2("Trailing JSON.");
+  return JSON.parse(text5);
 }
 var S1_LIMITS = Object.freeze({
   questionsMax: 64,
@@ -893,9 +893,9 @@ function validateS1Request(request) {
   return serialized;
 }
 var CJK = /[぀-ヿ㐀-䶿一-鿿가-힯豈-﫿]/gu;
-function estimateTokens(text4) {
-  const cjk = text4.match(CJK)?.length ?? 0;
-  return Math.ceil(cjk + (text4.length - cjk) / 3.5);
+function estimateTokens(text5) {
+  const cjk = text5.match(CJK)?.length ?? 0;
+  return Math.ceil(cjk + (text5.length - cjk) / 3.5);
 }
 function stateText(state) {
   return typeof state === "string" ? state : JSON.stringify(state);
@@ -965,10 +965,10 @@ function isProbability(value) {
   return typeof value === "number" && Number.isFinite(value) && value >= 0 && value <= 1;
 }
 function decimalsOf(value) {
-  const text4 = String(value);
-  if (/e/iu.test(text4)) return 6;
-  const dot = text4.indexOf(".");
-  return dot < 0 ? 0 : Math.min(6, text4.length - dot - 1);
+  const text5 = String(value);
+  if (/e/iu.test(text5)) return 6;
+  const dot = text5.indexOf(".");
+  return dot < 0 ? 0 : Math.min(6, text5.length - dot - 1);
 }
 function sumTolerance(count2, decimals) {
   return Math.max(0.01, count2 * 0.5 * 10 ** -Math.max(2, decimals)) + 1e-9;
@@ -1287,11 +1287,11 @@ function detectHealthDialect(value) {
   return null;
 }
 var LOC_PART = /^[A-Za-z0-9_.-]{1,64}$/u;
-function decodeErrorBody(text4, status) {
+function decodeErrorBody(text5, status) {
   const facts = { unknownModel: false, unknownSession: false, loc: null };
   let value;
   try {
-    value = parseBoundedJson(text4, { maxBytes: 16 * 1024, maxNodes: 2048, maxDepth: 12 });
+    value = parseBoundedJson(text5, { maxBytes: 16 * 1024, maxNodes: 2048, maxDepth: 12 });
   } catch {
     return facts;
   }
@@ -1379,8 +1379,8 @@ var TYPESAFE_PRICE_USD_PER_MILLION_INPUT = 0.042;
 function layaCheckpoint(model) {
   return LAYA_CHECKPOINTS.includes(model) ? model : "english";
 }
-function sha256Hex(text4) {
-  return createHash("sha256").update(text4).digest("hex");
+function sha256Hex(text5) {
+  return createHash("sha256").update(text5).digest("hex");
 }
 function fingerprintVersion(prefix, label, context, reported) {
   if (context.unstable) return null;
@@ -1550,8 +1550,8 @@ var S1_PRESETS = Object.freeze({
     }
   }
 });
-function utf8Bytes(text4) {
-  return Buffer.byteLength(text4);
+function utf8Bytes(text5) {
+  return Buffer.byteLength(text5);
 }
 function modelBasename(reported) {
   const parts = reported.split(/[\\/]/u).filter(Boolean);
@@ -1672,8 +1672,8 @@ async function readBody(response, maxBytes, signal, onReader) {
     throw new SystemOneError("invalid-response", "System One response is not UTF-8.");
   }
 }
-function statusError(status, text4, preset) {
-  const facts = decodeErrorBody(text4, status);
+function statusError(status, text5, preset) {
+  const facts = decodeErrorBody(text5, status);
   const errorClass = classifyStatus(status, { unknownModel: facts.unknownModel, unknownSession: facts.unknownSession, quota409: preset === "vercel" });
   return new SystemOneError(errorClass, `System One ${errorClass} (${status})${facts.loc ? ` at ${facts.loc.join(".")}` : ""}.`, { status, loc: facts.loc, unknownSession: facts.unknownSession });
 }
@@ -1947,27 +1947,27 @@ var SystemOneHttpBackend = class {
         throw controller.signal.aborted ? controller.signal.reason : new SystemOneError("transport", "System One server unreachable.");
       }
       if (!response.ok) {
-        let text5 = "";
+        let text6 = "";
         try {
-          text5 = await readBody(response, ERROR_BODY_BYTES, controller.signal, (item) => {
+          text6 = await readBody(response, ERROR_BODY_BYTES, controller.signal, (item) => {
             reader = item;
           });
         } catch {
           if (controller.signal.aborted) throw controller.signal.reason;
         }
-        return { ok: false, error: statusError(response.status, text5, this.preset), headers: response.headers };
+        return { ok: false, error: statusError(response.status, text6, this.preset), headers: response.headers };
       }
-      const text4 = await readBody(response, caps.maxBytes, controller.signal, (item) => {
+      const text5 = await readBody(response, caps.maxBytes, controller.signal, (item) => {
         reader = item;
       });
       if (lenient) {
         try {
-          return { ok: true, status: response.status, json: text4.trim() ? parseBoundedJson(text4, caps) : null, headers: response.headers };
+          return { ok: true, status: response.status, json: text5.trim() ? parseBoundedJson(text5, caps) : null, headers: response.headers };
         } catch {
           return { ok: true, status: response.status, json: null, headers: response.headers };
         }
       }
-      return { ok: true, status: response.status, json: parseBoundedJson(text4, caps), headers: response.headers };
+      return { ok: true, status: response.status, json: parseBoundedJson(text5, caps), headers: response.headers };
     };
     try {
       return await Promise.race([work(), cancelled]);
@@ -1991,8 +1991,8 @@ var PROMPT_PROFILES = Object.freeze({
   "eikos-v1": Object.freeze({ id: "eikos-v1", letters: 26, initialTemperature: 1, promptVersion: "letter-v1-semif" })
 });
 var PY_ESCAPES = Object.freeze({ '"': '\\"', "\\": "\\\\", "\n": "\\n", "\r": "\\r", "	": "\\t", "\b": "\\b", "\f": "\\f" });
-function pyString(text4) {
-  const wellFormed = text4.replace(/[\ud800-\udbff](?![\udc00-\udfff])|(?<![\ud800-\udbff])[\udc00-\udfff]/gu, "\uFFFD");
+function pyString(text5) {
+  const wellFormed = text5.replace(/[\ud800-\udbff](?![\udc00-\udfff])|(?<![\ud800-\udbff])[\udc00-\udfff]/gu, "\uFFFD");
   return `"${wellFormed.replace(/["\\\u0000-\u001f]/gu, (char) => PY_ESCAPES[char] ?? `\\u${char.charCodeAt(0).toString(16).padStart(4, "0")}`)}"`;
 }
 function pyFloat(value) {
@@ -2024,17 +2024,17 @@ function pyJsonDumps(value) {
     if (typeof item === "object") return `{${Object.entries(item).map(([key, entry]) => `${pyString(key)}: ${render(entry)}`).join(", ")}}`;
     throw new SystemOneError("invalid-request", "Non-JSON value in a System One prompt.");
   };
-  let text4;
+  let text5;
   try {
-    text4 = JSON.stringify(value, (_key, item) => {
+    text5 = JSON.stringify(value, (_key, item) => {
       if (typeof item === "number" && !Number.isFinite(item)) throw new TypeError("non-finite");
       return item;
     });
   } catch {
-    text4 = void 0;
+    text5 = void 0;
   }
-  if (text4 === void 0) throw new SystemOneError("invalid-request", "Non-JSON value in a System One prompt.");
-  return render(JSON.parse(text4));
+  if (text5 === void 0) throw new SystemOneError("invalid-request", "Non-JSON value in a System One prompt.");
+  return render(JSON.parse(text5));
 }
 function semifOptions(question) {
   if (question.type === "noul") return [{ label: "true", description: `true: ${question.criteria.true}` }, { label: "false", description: `false: ${question.criteria.false}` }];
@@ -2072,8 +2072,8 @@ var TEMPLATE_CONTROL = new RegExp(
   `<[|\uFF5C][^\\s<>|\uFF5C]{1,64}[|\uFF5C]>|<\\/?(?:think|tool_call|tool_response)>|<(?:start_of_turn|end_of_turn|bos|eos)>|<<\\/?SYS>>|${BRACKET_MARKER.source}`,
   "u"
 );
-function carriesTemplateControl(text4) {
-  return TEMPLATE_CONTROL.test(text4);
+function carriesTemplateControl(text5) {
+  return TEMPLATE_CONTROL.test(text5);
 }
 function questionCarriesTemplateControl(question) {
   return carriesTemplateControl(pyJsonDumps({ criterion: flattenEntry(question.instructions), options: semifOptions(question).map((option) => option.description) }));
@@ -2157,8 +2157,8 @@ function jsonModeMaxTokens(questions) {
   const options = Object.values(questions).reduce((sum, question) => sum + questionLabels(question).length, 0);
   return Math.min(4096, 128 + 32 * Object.keys(questions).length + 16 * options);
 }
-function extractJson(text4) {
-  const trimmed = text4.trim();
+function extractJson(text5) {
+  const trimmed = text5.trim();
   const fenced = /^```(?:json)?\s*\n?([\s\S]*?)\n?```$/u.exec(trimmed);
   return fenced ? fenced[1].trim() : trimmed;
 }
@@ -2168,9 +2168,9 @@ var invalid3 = (message) => {
 function isRecord3(value) {
   return !!value && typeof value === "object" && !Array.isArray(value);
 }
-function readJsonAnswers(text4, questions) {
+function readJsonAnswers(text5, questions) {
   const options = Object.values(questions).reduce((sum, question) => sum + questionLabels(question).length, 0);
-  const body = parseBoundedJson(extractJson(text4), { maxBytes: 256 * 1024, maxNodes: 4 * options + 64 + 4 * Object.keys(questions).length, maxDepth: 8 });
+  const body = parseBoundedJson(extractJson(text5), { maxBytes: 256 * 1024, maxNodes: 4 * options + 64 + 4 * Object.keys(questions).length, maxDepth: 8 });
   if (!isRecord3(body) || !isRecord3(body.answers)) return invalid3("The JSON answer has no answers object.");
   const answers = {};
   for (const [id, question] of Object.entries(questions)) {
@@ -2333,8 +2333,8 @@ function canonicalOllamaName(name) {
   return name.slice(slash + 1).includes(":") ? name : `${name}:latest`;
 }
 function compareVersions(a, b) {
-  const parse = (text4) => {
-    const match = text4 ? /^v?(\d+)\.(\d+)(?:\.(\d+))?/u.exec(text4.trim()) : null;
+  const parse = (text5) => {
+    const match = text5 ? /^v?(\d+)\.(\d+)(?:\.(\d+))?/u.exec(text5.trim()) : null;
     return match ? [Number(match[1]), Number(match[2]), Number(match[3] ?? 0)] : null;
   };
   const left = parse(a), right = parse(b);
@@ -2662,18 +2662,18 @@ var EmulatedSystemOneBackend = class {
         throw controller.signal.aborted ? controller.signal.reason : new SystemOneError("transport", "Emulated System One server unreachable.");
       }
       const ok = response.status >= 200 && response.status < 300;
-      let text4;
+      let text5;
       try {
-        text4 = await readBounded(response, ok ? caps.maxBytes : ERROR_BODY_BYTES2, controller.signal);
+        text5 = await readBounded(response, ok ? caps.maxBytes : ERROR_BODY_BYTES2, controller.signal);
       } catch (error) {
         if (controller.signal.aborted) throw controller.signal.reason;
-        if (!ok) text4 = "";
+        if (!ok) text5 = "";
         else throw error;
       }
       let json = null;
-      if (text4.trim()) {
+      if (text5.trim()) {
         try {
-          json = parseBoundedJson(text4, ok ? caps : { maxBytes: ERROR_BODY_BYTES2, maxNodes: 2048, maxDepth: 12 });
+          json = parseBoundedJson(text5, ok ? caps : { maxBytes: ERROR_BODY_BYTES2, maxNodes: 2048, maxDepth: 12 });
         } catch (error) {
           if (ok) throw error;
           json = null;
@@ -3204,8 +3204,8 @@ function canonicalJson(value) {
   }
   return JSON.stringify(value) ?? "null";
 }
-function sha256(text4) {
-  return createHash2("sha256").update(text4).digest("hex");
+function sha256(text5) {
+  return createHash2("sha256").update(text5).digest("hex");
 }
 function questionSetHash(set) {
   return `sha256:${sha256(canonicalJson(set))}`;
@@ -3390,8 +3390,8 @@ var AssistantLog = class {
     const records = [];
     for (const file of await this.files()) {
       if (file.end < from) continue;
-      const text4 = await readFile(file.path, "utf8").catch(() => "");
-      for (const line of text4.split("\n")) {
+      const text5 = await readFile(file.path, "utf8").catch(() => "");
+      for (const line of text5.split("\n")) {
         if (!line) continue;
         try {
           const record2 = JSON.parse(line);
@@ -3963,23 +3963,23 @@ async function runConformance(backend, options) {
   caps.reportsVersion = stable ? preset.reportsVersion : "none";
   check("model-identity", stable ? "pass" : "warn", stable ? `Answers as ${modelLabel(reported, preset.id)}.` : "The reported model changes between calls: it cannot be pinned.");
   if (dialect === "eikos") {
-    const text4 = JSON.stringify(BATTERY_STATE), half = Math.floor(text4.length / 2);
+    const text5 = JSON.stringify(BATTERY_STATE), half = Math.floor(text5.length / 2);
     let sessionId = null;
     let sessionP = null, statelessP = null, sessionMs = 0, statelessMs = 0;
     try {
       requests++;
-      const created = await backend.call("POST", "/v1/sessions", { state: text4.slice(0, half) }, call());
+      const created = await backend.call("POST", "/v1/sessions", { state: text5.slice(0, half) }, call());
       const id = created.json?.session_id;
       if (created.status === 200 && typeof id === "string" && /^[0-9a-f]{16}$/u.test(id)) {
         sessionId = id;
         requests++;
-        const appended = await backend.call("POST", `/v1/sessions/${id}/append`, { text: text4.slice(half) }, call());
+        const appended = await backend.call("POST", `/v1/sessions/${id}/append`, { text: text5.slice(half) }, call());
         if (appended.status === 200) {
           requests++;
           let started = now();
           const asked = await backend.call("POST", `/v1/sessions/${id}/systemone`, { questions: { q_noul: Q_NOUL } }, call());
           sessionMs = now() - started;
-          const single = { model: backend.model, state: text4, questions: { q_noul: Q_NOUL } };
+          const single = { model: backend.model, state: text5, questions: { q_noul: Q_NOUL } };
           if (asked.status === 200) sessionP = decodeResponse("eikos", asked.json, single, { modelRule: "any" }).answers.q_noul.p;
           started = now();
           const stateless = await send(single);
@@ -4312,9 +4312,9 @@ function looksRandom(value) {
   }
   return entropy >= 4.2;
 }
-function redactCredentials(text4) {
-  if (typeof text4 !== "string" || text4.length === 0) return { text: typeof text4 === "string" ? text4 : "", count: 0 };
-  let count2 = 0, result = text4;
+function redactCredentials(text5) {
+  if (typeof text5 !== "string" || text5.length === 0) return { text: typeof text5 === "string" ? text5 : "", count: 0 };
+  let count2 = 0, result = text5;
   for (const rule of RULES) {
     result = result.replace(rule.pattern, (match, ...rest) => {
       const end = rest.findIndex((value) => typeof value === "number");
@@ -4343,8 +4343,8 @@ var EXTRA_RULES = [
   }
 ];
 var SENSITIVE_KEY = /api[_-]?key|credential|password|private[_-]?key|secret|token/iu;
-function extraPass(text4) {
-  let count2 = 0, result = text4;
+function extraPass(text5) {
+  let count2 = 0, result = text5;
   for (const rule of EXTRA_RULES) {
     result = result.replace(rule.pattern, (match, ...rest) => {
       const end = rest.findIndex((value) => typeof value === "number");
@@ -4356,8 +4356,8 @@ function extraPass(text4) {
   }
   return { text: result, count: count2 };
 }
-function redactForEgress(text4) {
-  const base = redactCredentials(text4);
+function redactForEgress(text5) {
+  const base = redactCredentials(text5);
   const extra = extraPass(base.text);
   return { text: extra.text, count: base.count + extra.count };
 }
@@ -4393,8 +4393,8 @@ function redactValue(value, depth = 0) {
   }
   return { value, count: 0 };
 }
-function redactAndBound(text4, maxChars) {
-  const redacted = redactForEgress(text4);
+function redactAndBound(text5, maxChars) {
+  const redacted = redactForEgress(text5);
   if (redacted.text.length <= maxChars) return { text: redacted.text, count: redacted.count, truncated: false };
   let cut = maxChars;
   const open = redacted.text.lastIndexOf("<redacted:", cut);
@@ -4490,11 +4490,11 @@ var SmartVerifier = class {
     } catch {
       throw new SystemOneError(signal.aborted ? "timeout" : "transport", "The smart verifier did not answer.");
     }
-    const text4 = await response.text();
-    if (text4.length > MAX_BYTES) throw new SystemOneError("invalid-response", "The smart verifier answer is too large.");
+    const text5 = await response.text();
+    if (text5.length > MAX_BYTES) throw new SystemOneError("invalid-response", "The smart verifier answer is too large.");
     let json = null;
     try {
-      json = text4 ? parseBoundedJson(text4, { maxBytes: MAX_BYTES, maxNodes: 2e5, maxDepth: 32 }) : null;
+      json = text5 ? parseBoundedJson(text5, { maxBytes: MAX_BYTES, maxNodes: 2e5, maxDepth: 32 }) : null;
     } catch {
       json = null;
     }
@@ -5175,24 +5175,24 @@ var ESCAPABLE = /* @__PURE__ */ new Set([" ", "	", "\n", "'", '"', "$", "`", "\\
 function emptyWord() {
   return { text: "", quoted: false, vars: [], substitution: false, inner: [], glob: false, tilde: false };
 }
-function closeParen(text4, open) {
+function closeParen(text5, open) {
   let depth = 0;
-  for (let i = open; i < text4.length; i++) {
-    const c = text4[i];
+  for (let i = open; i < text5.length; i++) {
+    const c = text5[i];
     if (c === "\\") {
       i++;
       continue;
     }
     if (c === "'") {
-      const end = text4.indexOf("'", i + 1);
+      const end = text5.indexOf("'", i + 1);
       if (end < 0) return -1;
       i = end;
       continue;
     }
     if (c === '"') {
       let j = i + 1;
-      for (; j < text4.length && text4[j] !== '"'; j++) if (text4[j] === "\\") j++;
-      if (j >= text4.length) return -1;
+      for (; j < text5.length && text5[j] !== '"'; j++) if (text5[j] === "\\") j++;
+      if (j >= text5.length) return -1;
       i = j;
       continue;
     }
@@ -5206,7 +5206,7 @@ function closeParen(text4, open) {
 }
 var MAX_INPUT = 65536;
 function lexShell(input) {
-  const text4 = input.length > MAX_INPUT ? input.slice(0, MAX_INPUT) : input;
+  const text5 = input.length > MAX_INPUT ? input.slice(0, MAX_INPUT) : input;
   const out = { segments: [], grouping: false, background: false, unterminated: input.length > MAX_INPUT, comment: false };
   let segment = { words: [], redirects: [], pipeIn: false, pipeOut: false, heredoc: null };
   let word = null;
@@ -5239,18 +5239,18 @@ function lexShell(input) {
     segment = { words: [], redirects: [], pipeIn: pipeOut, pipeOut: false, heredoc: null };
   };
   const current = () => word ??= emptyWord();
-  for (let i = 0; i < text4.length; i++) {
-    const c = text4[i];
+  for (let i = 0; i < text5.length; i++) {
+    const c = text5[i];
     if (c === "\n") {
       finishSegment(false);
       while (heredocs.length) {
         const doc = heredocs.shift();
         const lines = [];
         let closed = false;
-        while (i + 1 < text4.length) {
-          const end = text4.indexOf("\n", i + 1);
-          const line = text4.slice(i + 1, end < 0 ? text4.length : end);
-          i = end < 0 ? text4.length : end;
+        while (i + 1 < text5.length) {
+          const end = text5.indexOf("\n", i + 1);
+          const line = text5.slice(i + 1, end < 0 ? text5.length : end);
+          i = end < 0 ? text5.length : end;
           if ((doc.strip ? line.replace(/^\t+/u, "") : line) === doc.delimiter) {
             closed = true;
             break;
@@ -5268,12 +5268,12 @@ function lexShell(input) {
     }
     if (c === "#" && !word) {
       out.comment = true;
-      const end = text4.indexOf("\n", i);
-      i = (end < 0 ? text4.length : end) - 1;
+      const end = text5.indexOf("\n", i);
+      i = (end < 0 ? text5.length : end) - 1;
       continue;
     }
     if (c === "\\") {
-      const next = text4[i + 1];
+      const next = text5[i + 1];
       if (next === "\n") {
         i++;
         continue;
@@ -5288,16 +5288,16 @@ function lexShell(input) {
       continue;
     }
     if (c === "'") {
-      const end = text4.indexOf("'", i + 1);
+      const end = text5.indexOf("'", i + 1);
       const w2 = current();
       w2.quoted = true;
       if (end < 0) {
-        w2.text += text4.slice(i + 1);
+        w2.text += text5.slice(i + 1);
         out.unterminated = true;
-        i = text4.length;
+        i = text5.length;
         continue;
       }
-      w2.text += text4.slice(i + 1, end);
+      w2.text += text5.slice(i + 1, end);
       i = end;
       continue;
     }
@@ -5305,15 +5305,15 @@ function lexShell(input) {
       const w2 = current();
       w2.quoted = true;
       let j = i + 1;
-      for (; j < text4.length && text4[j] !== '"'; j++) {
-        const d = text4[j];
-        if (d === "\\" && j + 1 < text4.length && '"\\$`\n'.includes(text4[j + 1])) {
-          if (text4[j + 1] !== "\n") w2.text += text4[j + 1];
+      for (; j < text5.length && text5[j] !== '"'; j++) {
+        const d = text5[j];
+        if (d === "\\" && j + 1 < text5.length && '"\\$`\n'.includes(text5[j + 1])) {
+          if (text5[j + 1] !== "\n") w2.text += text5[j + 1];
           j++;
           continue;
         }
         if (d === "$" || d === "`") {
-          const used = dollar(text4, j, w2, out);
+          const used = dollar(text5, j, w2, out);
           if (used > j) {
             j = used - 1;
             continue;
@@ -5321,13 +5321,13 @@ function lexShell(input) {
         }
         w2.text += d;
       }
-      if (j >= text4.length) out.unterminated = true;
+      if (j >= text5.length) out.unterminated = true;
       i = j;
       continue;
     }
     if (c === "$" || c === "`") {
       const w2 = current();
-      const used = dollar(text4, i, w2, out);
+      const used = dollar(text5, i, w2, out);
       if (used > i) {
         i = used - 1;
         continue;
@@ -5335,23 +5335,23 @@ function lexShell(input) {
       w2.text += c;
       continue;
     }
-    if ((c === "<" || c === ">") && text4[i + 1] === "(") {
-      const end = closeParen(text4, i + 1);
+    if ((c === "<" || c === ">") && text5[i + 1] === "(") {
+      const end = closeParen(text5, i + 1);
       const w2 = current();
       w2.substitution = true;
       if (end < 0) {
         out.unterminated = true;
-        w2.text += text4.slice(i);
-        w2.inner.push(text4.slice(i + 2));
-        i = text4.length;
+        w2.text += text5.slice(i);
+        w2.inner.push(text5.slice(i + 2));
+        i = text5.length;
         continue;
       }
-      w2.text += text4.slice(i, end);
-      w2.inner.push(text4.slice(i + 2, end - 1));
+      w2.text += text5.slice(i, end);
+      w2.inner.push(text5.slice(i + 2, end - 1));
       i = end - 1;
       continue;
     }
-    if (c === "<" || c === ">" || c === "&" && text4[i + 1] === ">") {
+    if (c === "<" || c === ">" || c === "&" && text5[i + 1] === ">") {
       let fd = "";
       const before = word;
       if (before && !before.quoted && /^\d{1,2}$/u.test(before.text) && !pendingRedirect) {
@@ -5364,35 +5364,35 @@ function lexShell(input) {
       if (c === "&") {
         op = "&>";
         j = i + 2;
-        if (text4[j] === ">") {
+        if (text5[j] === ">") {
           op = "&>>";
           j++;
         }
       } else if (c === ">") {
-        if (text4[j] === ">") {
+        if (text5[j] === ">") {
           op = ">>";
           j++;
-        } else if (text4[j] === "|") {
+        } else if (text5[j] === "|") {
           op = ">|";
           j++;
-        } else if (text4[j] === "&") {
+        } else if (text5[j] === "&") {
           op = ">&";
           j++;
         }
-      } else if (text4[j] === "<") {
+      } else if (text5[j] === "<") {
         op = "<<";
         j++;
-        if (text4[j] === "<") {
+        if (text5[j] === "<") {
           op = "<<<";
           j++;
-        } else if (text4[j] === "-") {
+        } else if (text5[j] === "-") {
           op = "<<-";
           j++;
         }
-      } else if (text4[j] === "&") {
+      } else if (text5[j] === "&") {
         op = "<&";
         j++;
-      } else if (text4[j] === ">") {
+      } else if (text5[j] === ">") {
         op = "<>";
         j++;
       }
@@ -5400,7 +5400,7 @@ function lexShell(input) {
       const redirect = { op: `${fd}${op}`, target: null, fdDup: op === ">&" || op === "<&" };
       segment.redirects.push(redirect);
       if (redirect.fdDup) {
-        const m = /^(\d+|-)/u.exec(text4.slice(i + 1));
+        const m = /^(\d+|-)/u.exec(text5.slice(i + 1));
         if (m) {
           i += m[0].length;
           continue;
@@ -5409,8 +5409,8 @@ function lexShell(input) {
       }
       if (op === "<<" || op === "<<-") {
         let k = i + 1;
-        while (SPACE.has(text4[k] ?? "")) k++;
-        const m = /^(['"]?)([A-Za-z0-9_.-]+)\1/u.exec(text4.slice(k));
+        while (SPACE.has(text5[k] ?? "")) k++;
+        const m = /^(['"]?)([A-Za-z0-9_.-]+)\1/u.exec(text5.slice(k));
         if (m) {
           heredocs.push({ delimiter: m[2], strip: op === "<<-", segment });
           i = k + m[0].length - 1;
@@ -5425,11 +5425,11 @@ function lexShell(input) {
     }
     if (c === ";") {
       finishSegment(false);
-      if (text4[i + 1] === ";") i++;
+      if (text5[i + 1] === ";") i++;
       continue;
     }
     if (c === "&") {
-      if (text4[i + 1] === "&") {
+      if (text5[i + 1] === "&") {
         finishSegment(false);
         i++;
         continue;
@@ -5439,12 +5439,12 @@ function lexShell(input) {
       continue;
     }
     if (c === "|") {
-      if (text4[i + 1] === "|") {
+      if (text5[i + 1] === "|") {
         finishSegment(false);
         i++;
         continue;
       }
-      if (text4[i + 1] === "&") i++;
+      if (text5[i + 1] === "&") i++;
       finishSegment(true);
       continue;
     }
@@ -5457,7 +5457,7 @@ function lexShell(input) {
     if (!w.quoted && w.text === "" && c === "~") w.tilde = true;
     if (c === "*" || c === "?" || c === "[") w.glob = true;
     if (c === "%") {
-      const m = /^%([A-Za-z_][A-Za-z0-9_()]*)%/u.exec(text4.slice(i));
+      const m = /^%([A-Za-z_][A-Za-z0-9_()]*)%/u.exec(text5.slice(i));
       if (m) {
         w.vars.push(m[1].toUpperCase());
         w.text += m[0];
@@ -5472,67 +5472,67 @@ function lexShell(input) {
   if (heredocs.length) out.unterminated = true;
   return out;
 }
-function dollar(text4, i, w, out) {
-  const c = text4[i];
+function dollar(text5, i, w, out) {
+  const c = text5[i];
   if (c === "`") {
-    const end = text4.indexOf("`", i + 1);
+    const end = text5.indexOf("`", i + 1);
     w.substitution = true;
     if (end < 0) {
       out.unterminated = true;
-      w.inner.push(text4.slice(i + 1));
-      w.text += text4.slice(i);
-      return text4.length;
+      w.inner.push(text5.slice(i + 1));
+      w.text += text5.slice(i);
+      return text5.length;
     }
-    w.inner.push(text4.slice(i + 1, end));
-    w.text += text4.slice(i, end + 1);
+    w.inner.push(text5.slice(i + 1, end));
+    w.text += text5.slice(i, end + 1);
     return end + 1;
   }
-  const next = text4[i + 1];
+  const next = text5[i + 1];
   if (next === "(") {
-    const end = closeParen(text4, i + 1);
+    const end = closeParen(text5, i + 1);
     w.substitution = true;
     if (end < 0) {
       out.unterminated = true;
-      w.inner.push(text4.slice(i + 2));
-      w.text += text4.slice(i);
-      return text4.length;
+      w.inner.push(text5.slice(i + 2));
+      w.text += text5.slice(i);
+      return text5.length;
     }
-    w.inner.push(text4.slice(i + 2, end - 1));
-    w.text += text4.slice(i, end);
+    w.inner.push(text5.slice(i + 2, end - 1));
+    w.text += text5.slice(i, end);
     return end;
   }
   if (next === "{") {
-    const end = text4.indexOf("}", i + 2);
+    const end = text5.indexOf("}", i + 2);
     if (end < 0) {
       out.unterminated = true;
-      w.text += text4.slice(i);
+      w.text += text5.slice(i);
       w.vars.push("?");
-      return text4.length;
+      return text5.length;
     }
-    const name2 = text4.slice(i + 2, end);
+    const name2 = text5.slice(i + 2, end);
     w.vars.push(/^[A-Za-z_][A-Za-z0-9_]*$/u.test(name2) ? name2 : `{${name2.slice(0, 40)}}`);
-    w.text += text4.slice(i, end + 1);
+    w.text += text5.slice(i, end + 1);
     return end + 1;
   }
   if (next === "'") {
-    const end = text4.indexOf("'", i + 2);
+    const end = text5.indexOf("'", i + 2);
     w.quoted = true;
     w.vars.push("$'");
     if (end < 0) {
       out.unterminated = true;
-      w.text += text4.slice(i + 2);
-      return text4.length;
+      w.text += text5.slice(i + 2);
+      return text5.length;
     }
-    w.text += text4.slice(i + 2, end);
+    w.text += text5.slice(i + 2, end);
     return end + 1;
   }
-  const env = /^\$env:([A-Za-z_][A-Za-z0-9_]*)/iu.exec(text4.slice(i));
+  const env = /^\$env:([A-Za-z_][A-Za-z0-9_]*)/iu.exec(text5.slice(i));
   if (env) {
     w.vars.push(`ENV:${env[1].toUpperCase()}`);
     w.text += env[0];
     return i + env[0].length;
   }
-  const name = /^\$([A-Za-z_][A-Za-z0-9_]*|[0-9@*#?$!-])/u.exec(text4.slice(i));
+  const name = /^\$([A-Za-z_][A-Za-z0-9_]*|[0-9@*#?$!-])/u.exec(text5.slice(i));
   if (name) {
     w.vars.push(name[1]);
     w.text += name[0];
@@ -5718,10 +5718,10 @@ async function collectReferencedFiles(input) {
         complete = false;
         break;
       }
-      const text4 = entry.text.slice(0, REVIEW_LIMITS.referencedFileBytes);
-      const truncated = text4.length < entry.text.length;
+      const text5 = entry.text.slice(0, REVIEW_LIMITS.referencedFileBytes);
+      const truncated = text5.length < entry.text.length;
       if (truncated) complete = false;
-      files.push({ path: `package.json#scripts.${entry.name}`, kind: "script-entry", text: text4, truncated });
+      files.push({ path: `package.json#scripts.${entry.name}`, kind: "script-entry", text: text5, truncated });
     }
     for (const rel of [...input.facts.scripts, ...input.facts.buildFiles.filter((file) => /^(?:Makefile|makefile|GNUmakefile|justfile|Justfile)$/u.test(file))]) {
       if (files.some((file2) => file2.path === rel)) continue;
@@ -5905,7 +5905,7 @@ var HOME_VARS = /* @__PURE__ */ new Set(["HOME", "USERPROFILE", "ENV:USERPROFILE
 var TEMP_VARS = /* @__PURE__ */ new Set(["TMPDIR", "TEMP", "TMP", "ENV:TEMP", "ENV:TMP"]);
 function expand(word, cwd, ctx) {
   if (typeof word !== "string" && word.substitution) return null;
-  let text4 = typeof word === "string" ? word : word.text;
+  let text5 = typeof word === "string" ? word : word.text;
   const vars = typeof word === "string" ? [] : word.vars;
   for (const name of vars) {
     let value = null;
@@ -5913,30 +5913,30 @@ function expand(word, cwd, ctx) {
     else if (name === "PWD" || name === "ENV:PWD") value = cwd;
     else if (TEMP_VARS.has(name)) value = ctx.temp;
     if (value === null) return null;
-    text4 = text4.replace(new RegExp(`\\$\\{${name}\\}|\\$${name}(?![A-Za-z0-9_])|%${name}%|\\$env:${name.replace(/^ENV:/u, "")}`, "iu"), value);
+    text5 = text5.replace(new RegExp(`\\$\\{${name}\\}|\\$${name}(?![A-Za-z0-9_])|%${name}%|\\$env:${name.replace(/^ENV:/u, "")}`, "iu"), value);
   }
-  if (typeof word !== "string" ? word.tilde : text4.startsWith("~")) {
-    if (text4 === "~" || text4.startsWith("~/") || text4.startsWith("~\\")) text4 = ctx.home + text4.slice(1);
+  if (typeof word !== "string" ? word.tilde : text5.startsWith("~")) {
+    if (text5 === "~" || text5.startsWith("~/") || text5.startsWith("~\\")) text5 = ctx.home + text5.slice(1);
     else return null;
   }
-  return text4;
+  return text5;
 }
 function resolveTarget(word, cwd, ctx, noFollow = false) {
   const raw = typeof word === "string" ? word : word.text;
   const blank = { raw, abs: null, where: "unresolved", rel: null, protected: false, credential: isCredentialPath(raw), device: DEVICE.test(raw), root: false };
   const globbed = typeof word !== "string" && word.glob;
-  let text4 = expand(word, cwd, ctx);
-  if (text4 === null || text4 === "") return blank;
+  let text5 = expand(word, cwd, ctx);
+  if (text5 === null || text5 === "") return blank;
   if (typeof word !== "string" && word.glob) {
-    const first = text4.search(/[*?[]/u);
-    const cut = text4.slice(0, first).lastIndexOf("/");
-    text4 = cut < 0 ? "." : text4.slice(0, cut) || "/";
+    const first = text5.search(/[*?[]/u);
+    const cut = text5.slice(0, first).lastIndexOf("/");
+    text5 = cut < 0 ? "." : text5.slice(0, cut) || "/";
   }
-  if (DEVICE.test(text4)) return { ...blank, device: true, where: "outside", abs: text4 };
-  if (WINDOWS_ABSOLUTE.test(text4) && sep2 === "/") return { ...blank, abs: text4, where: "outside", credential: isCredentialPath(text4) };
-  if (!isAbsolute2(text4) && cwd === null) return blank;
-  const full = resolve2(cwd ?? ctx.root, text4);
-  const abs = noFollow && !/[\\/]$/u.test(text4) && basename(full) !== ".." && basename(full) !== "." && dirname(full) !== full ? join3(realish(dirname(full)), basename(full)) : realish(full);
+  if (DEVICE.test(text5)) return { ...blank, device: true, where: "outside", abs: text5 };
+  if (WINDOWS_ABSOLUTE.test(text5) && sep2 === "/") return { ...blank, abs: text5, where: "outside", credential: isCredentialPath(text5) };
+  if (!isAbsolute2(text5) && cwd === null) return blank;
+  const full = resolve2(cwd ?? ctx.root, text5);
+  const abs = noFollow && !/[\\/]$/u.test(text5) && basename(full) !== ".." && basename(full) !== "." && dirname(full) !== full ? join3(realish(dirname(full)), basename(full)) : realish(full);
   const rel = relative2(ctx.rootReal, abs);
   const inside = rel === "" || !rel.startsWith("..") && !isAbsolute2(rel);
   const relPath = inside ? rel.split(sep2).join("/") : null;
@@ -5985,14 +5985,14 @@ var isFlag = (value, windows = false) => value.startsWith("-") && value !== "-" 
 function classify(acc, cls, program, args = [], subcommand) {
   acc.cls = worseClass(acc.cls, cls);
   if (program === void 0) return;
-  const rank = CLASS_RANK[cls];
-  if (acc.shape && rank <= acc.shapeRank) return;
+  const rank2 = CLASS_RANK[cls];
+  if (acc.shape && rank2 <= acc.shapeRank) return;
   const flags = [...new Set(args.filter((arg) => arg.startsWith("-")).map((arg) => arg.split("=")[0]).filter((flag) => /^--?[A-Za-z0-9][A-Za-z0-9-]{0,40}$/u.test(flag)))].slice(0, 16);
   acc.shape = { program: program.slice(0, 40), ...subcommand && /^[a-z][a-z0-9-]{0,30}$/u.test(subcommand) ? { subcommand } : {}, flags };
-  acc.shapeRank = rank;
+  acc.shapeRank = rank2;
 }
-function wordOf(text4) {
-  return { text: text4, quoted: false, vars: [], substitution: false, inner: [], glob: false, tilde: false };
+function wordOf(text5) {
+  return { text: text5, quoted: false, vars: [], substitution: false, inner: [], glob: false, tilde: false };
 }
 function analyzeText(command, cwd, acc) {
   if (acc.depth > 4 || --acc.budget < 0) {
@@ -6075,14 +6075,14 @@ function analyzeArgv(argvWords, cwd, acc, stdin, downloadedHere) {
     let i = 0;
     const takesValue = /* @__PURE__ */ new Set(["-n", "-u", "-s", "-k", "-i", "-o", "-e", "-c", "-C", "-I", "-L", "-P", "-d", "--signal", "--kill-after", "--adjustment", "--unset", "--chdir", "--max-args", "--max-procs", "--replace", "--delimiter"]);
     for (; i < argWords.length; i++) {
-      const text4 = argWords[i].text;
-      if (program === "env" && /^[A-Za-z_][A-Za-z0-9_]*=/u.test(text4)) continue;
-      if (text4.startsWith("-")) {
-        if (takesValue.has(text4) && program !== "xargs" || program === "xargs" && ["-n", "-P", "-I", "-L", "-d", "-s", "-E"].includes(text4)) i++;
+      const text5 = argWords[i].text;
+      if (program === "env" && /^[A-Za-z_][A-Za-z0-9_]*=/u.test(text5)) continue;
+      if (text5.startsWith("-")) {
+        if (takesValue.has(text5) && program !== "xargs" || program === "xargs" && ["-n", "-P", "-I", "-L", "-d", "-s", "-E"].includes(text5)) i++;
         continue;
       }
-      if ((program === "timeout" || program === "gtimeout") && /^\d/u.test(text4)) continue;
-      if (program === "nice" && /^-?\d+$/u.test(text4)) continue;
+      if ((program === "timeout" || program === "gtimeout") && /^\d/u.test(text5)) continue;
+      if (program === "nice" && /^-?\d+$/u.test(text5)) continue;
       break;
     }
     if (i >= argWords.length) {
@@ -6146,8 +6146,8 @@ function analyzeArgv(argvWords, cwd, acc, stdin, downloadedHere) {
   classifyProgram(program, argWords, cwd, acc, stdin, downloadedHere);
   return cwd;
 }
-function fetchesIn(text4) {
-  return /(?:^|[\s;|&(`])(?:curl|wget|iwr|irm|invoke-webrequest|invoke-restmethod|fetch|http|aria2c|lwp-download)(?:\.exe)?(?=\s|$)/iu.test(text4);
+function fetchesIn(text5) {
+  return /(?:^|[\s;|&(`])(?:curl|wget|iwr|irm|invoke-webrequest|invoke-restmethod|fetch|http|aria2c|lwp-download)(?:\.exe)?(?=\s|$)/iu.test(text5);
 }
 function runScript(file, acc, program, args, downloadedHere) {
   if (downloadedHere.some((item) => item.abs && item.abs === file.abs)) acc.flags.downloadExec = true;
@@ -6163,14 +6163,14 @@ function runShell(program, argWords, cwd, acc, stdin, downloadedHere, innerFetch
   const args = argWords.map((word) => word.text);
   const powershell = POWERSHELLS.has(program);
   for (let i = 0; i < argWords.length; i++) {
-    const text4 = args[i];
-    const lower = text4.toLowerCase();
-    if (powershell && /^-(?:e|ec|enc|encodedcommand|encoded)$/iu.test(text4)) {
+    const text5 = args[i];
+    const lower = text5.toLowerCase();
+    if (powershell && /^-(?:e|ec|enc|encodedcommand|encoded)$/iu.test(text5)) {
       acc.flags.encoded = true;
       classify(acc, "unknown", program, args);
       return cwd;
     }
-    const inline = program === "cmd" ? /^\/[ck]$/iu.test(text4) : powershell ? /^-(?:c|command)$/iu.test(text4) : /^-[a-z]*c[a-z]*$/u.test(text4) && !text4.startsWith("--");
+    const inline = program === "cmd" ? /^\/[ck]$/iu.test(text5) : powershell ? /^-(?:c|command)$/iu.test(text5) : /^-[a-z]*c[a-z]*$/u.test(text5) && !text5.startsWith("--");
     if (inline) {
       const rest = program === "cmd" || powershell ? args.slice(i + 1).join(" ") : args[i + 1];
       if (rest === void 0 || argWords[i + 1]?.substitution && program !== "cmd") {
@@ -6183,18 +6183,18 @@ function runShell(program, argWords, cwd, acc, stdin, downloadedHere, innerFetch
       analyzeText(rest, cwd, acc);
       return cwd;
     }
-    if (powershell && /^-(?:f|file)$/iu.test(text4)) {
+    if (powershell && /^-(?:f|file)$/iu.test(text5)) {
       const file2 = argWords[i + 1];
       if (!file2) break;
       runScript(resolveTarget(file2, cwd, acc.ctx), acc, program, args, downloadedHere);
       return cwd;
     }
     if (lower === "-s" && !powershell) break;
-    if (isFlag(text4, program === "cmd")) {
-      if (/^--?(?:rcfile|init-file|o)$/u.test(text4)) i++;
+    if (isFlag(text5, program === "cmd")) {
+      if (/^--?(?:rcfile|init-file|o)$/u.test(text5)) i++;
       continue;
     }
-    if (powershell && /^-/u.test(text4)) continue;
+    if (powershell && /^-/u.test(text5)) continue;
     const file = argWords[i];
     if (file.substitution) {
       acc.flags.evalGenerated = true;
@@ -6244,8 +6244,8 @@ function runInterpreter(program, argWords, cwd, acc, stdin, downloadedHere, inne
   }
   const python = program.startsWith("python") || program.startsWith("pypy");
   for (let i = 0; i < argWords.length; i++) {
-    const text4 = args[i];
-    if (python && text4 === "-m") {
+    const text5 = args[i];
+    if (python && text5 === "-m") {
       const module = args[i + 1] ?? "";
       const cls = PYTHON_MODULES[module] ?? "unknown";
       if (module === "pip") {
@@ -6256,38 +6256,38 @@ function runInterpreter(program, argWords, cwd, acc, stdin, downloadedHere, inne
       classify(acc, cls, program, args, module.replace(/\..*$/u, ""));
       return cwd;
     }
-    if (/^(?:-c|-e|--eval|-p|--print|-r|-E)$/u.test(text4) || program === "deno" && text4 === "eval" || program === "osascript" && text4 === "-e") {
+    if (/^(?:-c|-e|--eval|-p|--print|-r|-E)$/u.test(text5) || program === "deno" && text5 === "eval" || program === "osascript" && text5 === "-e") {
       acc.flags.inlineCode = true;
       if (innerFetch) acc.flags.downloadExec = true;
       if (argWords[i + 1] && fetchesIn(args[i + 1]) && /\b(?:exec|eval|system|spawn|child_process|subprocess|os\.system)\b/u.test(args[i + 1])) acc.flags.downloadExec = true;
       classify(acc, "unknown", program, args);
       return cwd;
     }
-    if (text4.startsWith("-")) {
-      if (/^(?:-W|-X|--require|-r|--import|--loader|-I)$/u.test(text4)) i++;
+    if (text5.startsWith("-")) {
+      if (/^(?:-W|-X|--require|-r|--import|--loader|-I)$/u.test(text5)) i++;
       continue;
     }
     if (program === "deno" || program === "bun") {
-      if (["run", "x", "test", "task", "check", "lint", "fmt", "compile", "build", "install", "add"].includes(text4)) {
-        if (text4 === "test" || text4 === "check" || text4 === "lint" || text4 === "build" || text4 === "compile") {
+      if (["run", "x", "test", "task", "check", "lint", "fmt", "compile", "build", "install", "add"].includes(text5)) {
+        if (text5 === "test" || text5 === "check" || text5 === "lint" || text5 === "build" || text5 === "compile") {
           addBuildFiles(program, acc);
-          classify(acc, "build_test", program, args, text4);
+          classify(acc, "build_test", program, args, text5);
           return cwd;
         }
-        if (text4 === "fmt") {
-          classify(acc, "edit_in_project", program, args, text4);
+        if (text5 === "fmt") {
+          classify(acc, "edit_in_project", program, args, text5);
           return cwd;
         }
-        if (text4 === "install" || text4 === "add" || text4 === "x") {
+        if (text5 === "install" || text5 === "add" || text5 === "x") {
           acc.network = acc.network === "upload" ? "upload" : "download";
-          classify(acc, "install_deps", program, args, text4);
+          classify(acc, "install_deps", program, args, text5);
           return cwd;
         }
-        if (text4 === "task" || program === "bun" && text4 === "run" && argWords[i + 1] && !/[./\\]/u.test(args[i + 1])) {
+        if (text5 === "task" || program === "bun" && text5 === "run" && argWords[i + 1] && !/[./\\]/u.test(args[i + 1])) {
           const name = args[i + 1];
           if (name) acc.npmScripts.add(name);
           acc.buildFiles.add(program === "deno" ? "deno.json" : "package.json");
-          classify(acc, "build_test", program, args, text4);
+          classify(acc, "build_test", program, args, text5);
           return cwd;
         }
         continue;
@@ -6791,9 +6791,9 @@ function classifyProgram(program, argWords, cwd, acc, stdin, downloadedHere) {
   }
   classify(acc, "unknown", program, args, sub && /^[a-z]/u.test(sub) ? sub : void 0);
 }
-function isLoopbackUrl(text4) {
+function isLoopbackUrl(text5) {
   try {
-    const url = new URL(/^[a-z]+:\/\//iu.test(text4) ? text4 : `http://${text4}`);
+    const url = new URL(/^[a-z]+:\/\//iu.test(text5) ? text5 : `http://${text5}`);
     return /^(?:localhost|127\.\d+\.\d+\.\d+|\[::1\]|0\.0\.0\.0)$/iu.test(url.hostname);
   } catch {
     return false;
@@ -7980,11 +7980,1243 @@ function mentionedExistingPaths(task, cwd) {
   return found;
 }
 
+// src/harness/harness.ts
+import { mkdirSync, readFileSync as readFileSync2, renameSync, writeFileSync } from "node:fs";
+import { join as join7 } from "node:path";
+
+// src/harness/badges.ts
+var PRIORITY = { loop: 0, flow: 1, review: 2, tasks: 3, triage: 4 };
+var MAX_CARDS = 1024;
+var BadgeBoard = class {
+  cards = /* @__PURE__ */ new Map();
+  shown = /* @__PURE__ */ new Map();
+  publish;
+  constructor(publish) {
+    this.publish = publish;
+  }
+  set(sessionId, kind, badge) {
+    let entries = this.cards.get(sessionId);
+    if (!badge) {
+      if (!entries?.delete(kind)) return Promise.resolve();
+    } else {
+      if (!entries) {
+        entries = /* @__PURE__ */ new Map();
+        this.cards.set(sessionId, entries);
+        while (this.cards.size > MAX_CARDS) {
+          const oldest = this.cards.keys().next().value;
+          this.cards.delete(oldest);
+          this.shown.delete(oldest);
+        }
+      }
+      entries.set(kind, { text: badge.text.slice(0, 24), tone: badge.tone, ...badge.tooltip ? { tooltip: badge.tooltip.slice(0, 200) } : {} });
+    }
+    return this.refresh(sessionId);
+  }
+  get(sessionId, kind) {
+    return this.cards.get(sessionId)?.get(kind) ?? null;
+  }
+  /** The card is gone: its badges went with it. */
+  forget(sessionId) {
+    this.cards.delete(sessionId);
+    this.shown.delete(sessionId);
+  }
+  refresh(sessionId) {
+    const entries = this.cards.get(sessionId);
+    const top = entries && [...entries.entries()].sort(([a], [b]) => PRIORITY[a] - PRIORITY[b])[0]?.[1] || null;
+    if (entries && !entries.size) this.cards.delete(sessionId);
+    const key = top ? JSON.stringify(top) : "";
+    if ((this.shown.get(sessionId) ?? "") === key) return Promise.resolve();
+    if (key) this.shown.set(sessionId, key);
+    else this.shown.delete(sessionId);
+    return this.publish(sessionId, top);
+  }
+};
+
+// src/harness/flows.ts
+import { randomBytes as randomBytes3 } from "node:crypto";
+import { lstatSync, readdirSync, readFileSync } from "node:fs";
+import { basename as basename2, extname, join as join6 } from "node:path";
+
+// src/harness/flowFile.ts
+var FLOW_LIMITS = Object.freeze({ files: 32, fileBytes: 32768, roles: 8, name: 80, description: 400, task: 2e3, title: 60 });
+var ID2 = /^[a-z0-9][a-z0-9_-]{0,39}$/u;
+var NAME_PART = /^[A-Za-z0-9._:/-]{1,200}$/u;
+var control = /[\u0000-\u0008\u000b-\u001f\u007f]/u;
+function unquote(raw, line) {
+  const value = raw.trim();
+  if (value.startsWith('"')) {
+    if (!value.endsWith('"') || value.length < 2) throw new Error(`line ${line}: unclosed quote`);
+    return JSON.parse(value);
+  }
+  if (value.startsWith("'")) {
+    if (!value.endsWith("'") || value.length < 2) throw new Error(`line ${line}: unclosed quote`);
+    return value.slice(1, -1).replace(/''/gu, "'");
+  }
+  if (/^[[{&*!%@`]/u.test(value)) throw new Error(`line ${line}: this YAML feature is not supported, use JSON`);
+  return value.replace(/\s+#.*$/u, "");
+}
+function parseFlowYaml(text5) {
+  const lines = text5.replace(/\r\n?/gu, "\n").split("\n");
+  let index = 0;
+  const indentOf = (line) => line.length - line.trimStart().length;
+  const skip = () => {
+    while (index < lines.length && /^\s*(#.*)?$/u.test(lines[index])) index++;
+  };
+  function block(indent) {
+    const out = [];
+    let base = -1;
+    while (index < lines.length) {
+      const line = lines[index];
+      if (line.trim() === "") {
+        out.push("");
+        index++;
+        continue;
+      }
+      const own = indentOf(line);
+      if (own <= indent) break;
+      if (base < 0) base = own;
+      out.push(line.slice(Math.min(base, own)));
+      index++;
+    }
+    return out.join("\n").replace(/\n+$/u, "");
+  }
+  function mapping(indent, first) {
+    const result2 = {};
+    const entry = (key, rest, line) => {
+      if (Object.hasOwn(result2, key)) throw new Error(`line ${line}: "${key}" twice`);
+      if (rest === "|" || rest === "|-" || rest === ">") {
+        result2[key] = rest === ">" ? block(indent).replace(/\n(?!\n)/gu, " ") : block(indent);
+        return;
+      }
+      if (rest !== "") {
+        result2[key] = unquote(rest, line);
+        return;
+      }
+      skip();
+      const next = lines[index];
+      if (next !== void 0 && indentOf(next) === indent && next.trimStart().startsWith("-")) {
+        result2[key] = list(indent);
+        return;
+      }
+      if (next === void 0 || indentOf(next) <= indent) {
+        result2[key] = "";
+        return;
+      }
+      result2[key] = node(indentOf(next));
+    };
+    if (first) entry(first.key, first.rest, index);
+    for (; ; ) {
+      skip();
+      const line = lines[index];
+      if (line === void 0 || indentOf(line) !== indent || line.trimStart().startsWith("- ")) {
+        if (line !== void 0 && indentOf(line) > indent) throw new Error(`line ${index + 1}: unexpected indentation`);
+        return result2;
+      }
+      const match = /^([A-Za-z_][A-Za-z0-9_-]*):(?:\s+(.*)|\s*)$/u.exec(line.trim());
+      if (!match) throw new Error(`line ${index + 1}: expected "key: value"`);
+      index++;
+      entry(match[1], (match[2] ?? "").trim(), index);
+    }
+  }
+  function list(indent) {
+    const items = [];
+    for (; ; ) {
+      skip();
+      const line = lines[index];
+      if (line === void 0 || indentOf(line) !== indent || !line.trimStart().startsWith("-")) return items;
+      const rest = line.trimStart().slice(1).trim();
+      index++;
+      const pair = /^([A-Za-z_][A-Za-z0-9_-]*):(?:\s+(.*)|\s*)$/u.exec(rest);
+      const itemIndent = indent + (line.trimStart().length - rest.length);
+      if (pair) items.push(mapping(itemIndent, { key: pair[1], rest: (pair[2] ?? "").trim() }));
+      else items.push(unquote(rest, index));
+    }
+  }
+  function node(indent) {
+    skip();
+    const line = lines[index];
+    if (line === void 0) return "";
+    return line.trimStart().startsWith("-") ? list(indent) : mapping(indent);
+  }
+  if (text5.length > FLOW_LIMITS.fileBytes) throw new Error("the file is too large");
+  const result = node(0);
+  skip();
+  if (index < lines.length) throw new Error(`line ${index + 1}: unexpected text`);
+  return result;
+}
+var str = (value, max, field, required = true) => {
+  if (value === void 0 && !required) return "";
+  if (typeof value !== "string" || control.test(value) || value.trim() === "" && required || value.length > max) throw new Error(`${field} must be text of at most ${max} characters`);
+  return value.trim();
+};
+function validateFlow(value, fileId, source = "project") {
+  if (!value || typeof value !== "object" || Array.isArray(value)) throw new Error("a flow is a mapping with name and roles");
+  const record2 = value;
+  const allowed = ["id", "name", "description", "roles"];
+  const extra = Object.keys(record2).find((key) => !allowed.includes(key));
+  if (extra) throw new Error(`unknown key "${extra}"`);
+  const id = record2.id === void 0 ? fileId.toLowerCase() : str(record2.id, 40, "id");
+  if (!ID2.test(id)) throw new Error("id must be lower-case letters, digits, - or _");
+  if (!Array.isArray(record2.roles) || record2.roles.length === 0 || record2.roles.length > FLOW_LIMITS.roles) throw new Error(`roles must list 1 to ${FLOW_LIMITS.roles} roles`);
+  const ids = /* @__PURE__ */ new Set();
+  const roles = record2.roles.map((candidate, position) => {
+    if (!candidate || typeof candidate !== "object" || Array.isArray(candidate)) throw new Error(`role ${position + 1} must be a mapping`);
+    const role = candidate;
+    const unknown = Object.keys(role).find((key) => !["id", "title", "task", "difficulty", "provider", "model", "effort"].includes(key));
+    if (unknown) throw new Error(`role ${position + 1}: unknown key "${unknown}"`);
+    const roleId = str(role.id, 40, `role ${position + 1} id`);
+    if (!ID2.test(roleId) || ids.has(roleId)) throw new Error(`role ${position + 1}: id must be unique lower-case letters, digits, - or _`);
+    ids.add(roleId);
+    const difficulty = role.difficulty === void 0 ? "normal" : role.difficulty;
+    if (difficulty !== "simple" && difficulty !== "normal" && difficulty !== "hard") throw new Error(`role ${roleId}: difficulty is simple, normal or hard`);
+    const part = (key) => {
+      if (role[key] === void 0 || role[key] === "") return void 0;
+      const text5 = str(role[key], 200, `role ${roleId} ${key}`);
+      if (!NAME_PART.test(text5)) throw new Error(`role ${roleId}: ${key} has characters it cannot have`);
+      return text5;
+    };
+    const provider = part("provider"), model = part("model"), effort = part("effort");
+    return {
+      id: roleId,
+      title: str(role.title ?? roleId, FLOW_LIMITS.title, `role ${roleId} title`),
+      task: str(role.task, FLOW_LIMITS.task, `role ${roleId} task`),
+      difficulty,
+      ...provider ? { provider } : {},
+      ...model ? { model } : {},
+      ...effort ? { effort } : {}
+    };
+  });
+  return { id, name: str(record2.name, FLOW_LIMITS.name, "name"), description: str(record2.description, FLOW_LIMITS.description, "description", false), source, roles };
+}
+
+// src/harness/router.ts
+var HARD = /\b(?:design|architect\w*|migrat\w*|security|threat|auth\w*|permission model|concurren\w*|race|deadlock|intermittent|protocol|schema|refactor\w* (?:the|all|across)|across (?:services|modules|the codebase)|root cause|investigate|performance regression|data loss)\b|архитектур|миграц|безопасн|гонк|взаимоблок|протокол|расследова/iu;
+var SIMPLE = /\b(?:typo|rename|format\w*|lint\w*|bump|changelog|readme|comment\w*|label|sort|import|spelling|whitespace|version string|run (?:the )?(?:unit )?tests)\b|опечатк|переименова|форматир|отсортир/iu;
+function ruleDifficulty(task) {
+  const text5 = task.slice(0, 4e3);
+  if (HARD.test(text5)) return "hard";
+  if (SIMPLE.test(text5) && text5.length < 400) return "simple";
+  return "normal";
+}
+var SMALL_MODEL = /(?:flash|mini|haiku|small|fast|lite|nano|instant|luna)/iu;
+var STRONG_MODEL = /(?:opus|\bo[13]\b|-pro\b|\bpro\b|ultra|large|reasoner|thinking|astra|max)/iu;
+function modelRank(name) {
+  return SMALL_MODEL.test(name) ? 1 : STRONG_MODEL.test(name) ? 5 : 3;
+}
+var PREFERENCE = ["codex", "claude", "opencode", "qwen", "grok", "kimi", "hermes"];
+function usable(entry) {
+  return entry.available !== false && entry.subagent !== false && entry.signIn !== "signed_out" && entry.signIn !== "expired";
+}
+function pickModel(entry, difficulty) {
+  const known = entry?.model?.supported === false ? [] : (entry?.model?.known ?? []).filter((name) => typeof name === "string" && name.length > 0 && name.length <= 200);
+  if (!known.length || difficulty === "normal") return void 0;
+  const ranked = [...known].sort((a, b) => modelRank(a) - modelRank(b));
+  const chosen = difficulty === "simple" ? ranked[0] : ranked.at(-1);
+  return modelRank(chosen) === 3 && ranked.every((name) => modelRank(name) === 3) ? void 0 : chosen;
+}
+function pickEffort(entry, difficulty) {
+  const efforts = entry?.efforts ?? [];
+  if (difficulty === "simple") return efforts.find((effort) => effort === "low");
+  if (difficulty === "hard") return efforts.find((effort) => effort === "high") ?? efforts.find((effort) => effort === "xhigh");
+  return void 0;
+}
+function suggestRoute(input) {
+  const listed = input.providers.filter((entry2) => entry2 && typeof entry2.id === "string");
+  const candidates = listed.filter(usable);
+  const byId = (id) => id ? candidates.find((entry2) => entry2.id === id) : void 0;
+  let entry = byId(input.prefer) ?? byId(input.callerProvider);
+  if (!entry) entry = [...candidates].sort((a, b) => rank(a.id) - rank(b.id))[0];
+  let provider = entry?.id ?? null;
+  if (!provider && !listed.length) provider = input.prefer || input.callerProvider;
+  if (!provider) return null;
+  const model = pickModel(entry, input.difficulty);
+  const effort = pickEffort(entry, input.difficulty);
+  const accountTool = (input.launchOptionTools ?? []).find((name) => /__(?:pick_account|pick_route)$/u.test(name));
+  const why = input.difficulty === "simple" ? "a routine task: a small, quick model is enough" : input.difficulty === "hard" ? "a difficult task: use the strongest model offered" : "a task of ordinary difficulty: the provider default fits";
+  const from = input.source === "model" ? "the decision model" : "word rules (no decision model answered)";
+  const keep = entry && entry.id === input.callerProvider ? "your own provider" : entry ? "the first available provider" : "your own provider (no provider list was given)";
+  return {
+    provider,
+    ...model ? { model } : {},
+    ...effort ? { effort } : {},
+    difficulty: input.difficulty,
+    source: input.source,
+    reason: `${why} (difficulty from ${from}; ${keep}).`,
+    ...accountTool ? { accountTool } : {}
+  };
+}
+var rank = (id) => {
+  const index = PREFERENCE.indexOf(id);
+  return index < 0 ? PREFERENCE.length : index;
+};
+function routeAnswer(suggestion) {
+  const spawn = { provider: suggestion.provider, ...suggestion.model ? { model: suggestion.model } : {}, ...suggestion.effort ? { effort: suggestion.effort } : {} };
+  const lines = [
+    `Suggested: ${suggestion.provider}${suggestion.model ? ` / ${suggestion.model}` : " (its default model)"}${suggestion.effort ? `, effort ${suggestion.effort}` : ""}. Why: ${suggestion.reason}`,
+    `Pass these to spawn_agent: ${JSON.stringify(spawn)}.`,
+    suggestion.accountTool ? `To choose an account, call ${suggestion.accountTool} and pass what it returns as spawn_agent.launchOptions.` : ""
+  ].filter(Boolean);
+  return `${lines.join("\n")}
+${JSON.stringify({ ...suggestion, spawn })}`;
+}
+
+// src/harness/flows.ts
+var BUILT_IN = [
+  {
+    id: "executor-reviewer",
+    name: { en: "Executor and reviewer", ru: "\u0418\u0441\u043F\u043E\u043B\u043D\u0438\u0442\u0435\u043B\u044C \u0438 \u043F\u0440\u043E\u0432\u0435\u0440\u044F\u044E\u0449\u0438\u0439" },
+    description: { en: "One agent implements, a second one reviews the diff and reports problems.", ru: "\u041E\u0434\u0438\u043D \u0430\u0433\u0435\u043D\u0442 \u0434\u0435\u043B\u0430\u0435\u0442 \u0440\u0430\u0431\u043E\u0442\u0443, \u0432\u0442\u043E\u0440\u043E\u0439 \u043F\u0440\u043E\u0432\u0435\u0440\u044F\u0435\u0442 \u0438\u0437\u043C\u0435\u043D\u0435\u043D\u0438\u044F \u0438 \u0441\u043E\u043E\u0431\u0449\u0430\u0435\u0442 \u043E \u043F\u0440\u043E\u0431\u043B\u0435\u043C\u0430\u0445." },
+    roles: [
+      {
+        id: "executor",
+        difficulty: "normal",
+        title: { en: "Executor", ru: "\u0418\u0441\u043F\u043E\u043B\u043D\u0438\u0442\u0435\u043B\u044C" },
+        task: { en: "Implement: {goal}. Keep the change focused and run the relevant tests.", ru: "\u0421\u0434\u0435\u043B\u0430\u0439\u0442\u0435: {goal}. \u0414\u0435\u0440\u0436\u0438\u0442\u0435 \u0438\u0437\u043C\u0435\u043D\u0435\u043D\u0438\u044F \u0443\u0437\u043A\u0438\u043C\u0438 \u0438 \u0437\u0430\u043F\u0443\u0441\u0442\u0438\u0442\u0435 \u043D\u0443\u0436\u043D\u044B\u0435 \u0442\u0435\u0441\u0442\u044B." }
+      },
+      {
+        id: "reviewer",
+        difficulty: "hard",
+        title: { en: "Reviewer", ru: "\u041F\u0440\u043E\u0432\u0435\u0440\u044F\u044E\u0449\u0438\u0439" },
+        task: { en: "Review the executor's changes for: {goal}. Report bugs and risks; change nothing.", ru: "\u041F\u0440\u043E\u0432\u0435\u0440\u044C\u0442\u0435 \u0438\u0437\u043C\u0435\u043D\u0435\u043D\u0438\u044F \u0438\u0441\u043F\u043E\u043B\u043D\u0438\u0442\u0435\u043B\u044F \u0434\u043B\u044F \u0437\u0430\u0434\u0430\u0447\u0438: {goal}. \u0421\u043E\u043E\u0431\u0449\u0438\u0442\u0435 \u043E\u0431 \u043E\u0448\u0438\u0431\u043A\u0430\u0445 \u0438 \u0440\u0438\u0441\u043A\u0430\u0445; \u043D\u0438\u0447\u0435\u0433\u043E \u043D\u0435 \u043C\u0435\u043D\u044F\u0439\u0442\u0435." }
+      }
+    ]
+  },
+  {
+    id: "research-implement",
+    name: { en: "Research, then implement", ru: "\u0420\u0430\u0437\u043E\u0431\u0440\u0430\u0442\u044C\u0441\u044F, \u0437\u0430\u0442\u0435\u043C \u0441\u0434\u0435\u043B\u0430\u0442\u044C" },
+    description: { en: "A researcher reads the code and writes a short plan; an implementer follows it.", ru: "\u0418\u0441\u0441\u043B\u0435\u0434\u043E\u0432\u0430\u0442\u0435\u043B\u044C \u0447\u0438\u0442\u0430\u0435\u0442 \u043A\u043E\u0434 \u0438 \u043F\u0438\u0448\u0435\u0442 \u043A\u043E\u0440\u043E\u0442\u043A\u0438\u0439 \u043F\u043B\u0430\u043D; \u0438\u0441\u043F\u043E\u043B\u043D\u0438\u0442\u0435\u043B\u044C \u0434\u0435\u043B\u0430\u0435\u0442 \u043F\u043E \u043D\u0435\u043C\u0443." },
+    roles: [
+      {
+        id: "researcher",
+        difficulty: "hard",
+        title: { en: "Researcher", ru: "\u0418\u0441\u0441\u043B\u0435\u0434\u043E\u0432\u0430\u0442\u0435\u043B\u044C" },
+        task: { en: "Read the code related to: {goal}. Write a short plan (files, steps, risks). Change nothing.", ru: "\u041F\u0440\u043E\u0447\u0438\u0442\u0430\u0439\u0442\u0435 \u043A\u043E\u0434, \u0441\u0432\u044F\u0437\u0430\u043D\u043D\u044B\u0439 \u0441 \u0437\u0430\u0434\u0430\u0447\u0435\u0439: {goal}. \u041D\u0430\u043F\u0438\u0448\u0438\u0442\u0435 \u043A\u043E\u0440\u043E\u0442\u043A\u0438\u0439 \u043F\u043B\u0430\u043D (\u0444\u0430\u0439\u043B\u044B, \u0448\u0430\u0433\u0438, \u0440\u0438\u0441\u043A\u0438). \u041D\u0438\u0447\u0435\u0433\u043E \u043D\u0435 \u043C\u0435\u043D\u044F\u0439\u0442\u0435." }
+      },
+      {
+        id: "implementer",
+        difficulty: "normal",
+        title: { en: "Implementer", ru: "\u0418\u0441\u043F\u043E\u043B\u043D\u0438\u0442\u0435\u043B\u044C" },
+        task: { en: "Implement the researcher's plan for: {goal}. Run the relevant tests.", ru: "\u0412\u044B\u043F\u043E\u043B\u043D\u0438\u0442\u0435 \u043F\u043B\u0430\u043D \u0438\u0441\u0441\u043B\u0435\u0434\u043E\u0432\u0430\u0442\u0435\u043B\u044F \u0434\u043B\u044F \u0437\u0430\u0434\u0430\u0447\u0438: {goal}. \u0417\u0430\u043F\u0443\u0441\u0442\u0438\u0442\u0435 \u043D\u0443\u0436\u043D\u044B\u0435 \u0442\u0435\u0441\u0442\u044B." }
+      }
+    ]
+  },
+  {
+    id: "test-fix",
+    name: { en: "Test first, then fix", ru: "\u0421\u043D\u0430\u0447\u0430\u043B\u0430 \u0442\u0435\u0441\u0442, \u043F\u043E\u0442\u043E\u043C \u0438\u0441\u043F\u0440\u0430\u0432\u043B\u0435\u043D\u0438\u0435" },
+    description: { en: "One agent writes a failing test that shows the problem; another makes it pass.", ru: "\u041E\u0434\u0438\u043D \u0430\u0433\u0435\u043D\u0442 \u043F\u0438\u0448\u0435\u0442 \u043F\u0430\u0434\u0430\u044E\u0449\u0438\u0439 \u0442\u0435\u0441\u0442, \u043A\u043E\u0442\u043E\u0440\u044B\u0439 \u043F\u043E\u043A\u0430\u0437\u044B\u0432\u0430\u0435\u0442 \u043F\u0440\u043E\u0431\u043B\u0435\u043C\u0443; \u0434\u0440\u0443\u0433\u043E\u0439 \u0434\u043E\u0431\u0438\u0432\u0430\u0435\u0442\u0441\u044F, \u0447\u0442\u043E\u0431\u044B \u043E\u043D \u043F\u0440\u043E\u0448\u0451\u043B." },
+    roles: [
+      {
+        id: "tester",
+        difficulty: "normal",
+        title: { en: "Tester", ru: "\u0422\u0435\u0441\u0442\u0438\u0440\u043E\u0432\u0449\u0438\u043A" },
+        task: { en: "Write a test that fails because of: {goal}. Do not fix the code.", ru: "\u041D\u0430\u043F\u0438\u0448\u0438\u0442\u0435 \u0442\u0435\u0441\u0442, \u043A\u043E\u0442\u043E\u0440\u044B\u0439 \u043F\u0430\u0434\u0430\u0435\u0442 \u0438\u0437-\u0437\u0430 \u043F\u0440\u043E\u0431\u043B\u0435\u043C\u044B: {goal}. \u041A\u043E\u0434 \u043D\u0435 \u0438\u0441\u043F\u0440\u0430\u0432\u043B\u044F\u0439\u0442\u0435." }
+      },
+      {
+        id: "fixer",
+        difficulty: "normal",
+        title: { en: "Fixer", ru: "\u0418\u0441\u043F\u0440\u0430\u0432\u043B\u044F\u044E\u0449\u0438\u0439" },
+        task: { en: "Make the new test pass without weakening it: {goal}.", ru: "\u0414\u043E\u0431\u0435\u0439\u0442\u0435\u0441\u044C, \u0447\u0442\u043E\u0431\u044B \u043D\u043E\u0432\u044B\u0439 \u0442\u0435\u0441\u0442 \u043F\u0440\u043E\u0448\u0451\u043B, \u043D\u0435 \u043E\u0441\u043B\u0430\u0431\u043B\u044F\u044F \u0435\u0433\u043E: {goal}." }
+      }
+    ]
+  }
+];
+function builtInFlows(locale) {
+  return BUILT_IN.map((flow) => ({
+    id: flow.id,
+    name: flow.name[locale],
+    description: flow.description[locale],
+    source: "built-in",
+    roles: flow.roles.map((role) => ({ ...role, title: role.title[locale], task: role.task[locale] }))
+  }));
+}
+function projectFlows(cwd) {
+  const flows = [];
+  const problems = [];
+  if (!cwd) return { flows, problems };
+  const dir = join6(cwd, ".canvastty", "flows");
+  let names;
+  try {
+    names = readdirSync(dir).filter((name) => /\.(json|ya?ml)$/iu.test(name)).sort().slice(0, FLOW_LIMITS.files);
+  } catch {
+    return { flows, problems };
+  }
+  for (const name of names) {
+    const path = join6(dir, name);
+    try {
+      const info = lstatSync(path);
+      if (!info.isFile()) {
+        if (info.isSymbolicLink()) problems.push({ file: name, problem: "a link is not read; copy the file here" });
+        continue;
+      }
+      if (info.size > FLOW_LIMITS.fileBytes) throw new Error("the file is too large");
+      const text5 = readFileSync(path, "utf8");
+      const parsed = extname(name).toLowerCase() === ".json" ? JSON.parse(text5) : parseFlowYaml(text5);
+      const flow = validateFlow(parsed, basename2(name, extname(name)));
+      if (flows.some((item) => item.id === flow.id)) throw new Error(`a flow with id "${flow.id}" is already listed`);
+      flows.push(flow);
+    } catch (error) {
+      problems.push({ file: name, problem: (error instanceof Error ? error.message : String(error)).slice(0, 200) });
+    }
+  }
+  return { flows, problems };
+}
+var MAX_PLANS = 64;
+function planFlow(flow, input) {
+  const roles = flow.roles.map((role) => {
+    const task = role.task.split("{goal}").join(input.goal);
+    if (role.provider) {
+      return { id: role.id, title: role.title, task, provider: role.provider, ...role.model ? { model: role.model } : {}, ...role.effort ? { effort: role.effort } : {}, reason: "set by the flow" };
+    }
+    if (!input.routing) return { id: role.id, title: role.title, task, provider: null, reason: "automatic routing is off: the orchestrator chooses" };
+    const suggestion = suggestRoute({ difficulty: role.difficulty, source: "rules", callerProvider: input.callerProvider, providers: input.providers });
+    return suggestion ? { id: role.id, title: role.title, task, provider: suggestion.provider, ...suggestion.model ? { model: suggestion.model } : {}, ...suggestion.effort ? { effort: suggestion.effort } : {}, reason: `${role.difficulty} role` } : { id: role.id, title: role.title, task, provider: null, reason: "no available provider was listed: the orchestrator chooses" };
+  });
+  return {
+    id: `p${randomBytes3(5).toString("hex")}`,
+    orchestratorId: input.orchestratorId,
+    orchestratorTitle: input.orchestratorTitle.slice(0, 120),
+    flowId: flow.id,
+    source: flow.source,
+    name: flow.name,
+    description: flow.description,
+    goal: input.goal,
+    roles,
+    status: "pending",
+    requestedBy: input.requestedBy,
+    createdAt: input.now,
+    decidedAt: null,
+    delivered: false
+  };
+}
+function approvedInstructions(plan) {
+  const spawns = plan.roles.map((role) => ({
+    title: role.title,
+    ...role.provider ? { provider: role.provider } : {},
+    ...role.model ? { model: role.model } : {},
+    ...role.effort ? { effort: role.effort } : {},
+    prompt: role.task
+  }));
+  return [
+    `The person approved flow "${plan.name}" (${plan.source === "project" ? "from this project" : "built in"}) for: ${plan.goal}`,
+    "Start one subagent per role with spawn_agent, passing provider, model, effort, title and prompt as listed (pick a provider yourself where none is given). Keep your usual profile and folder. The roles are already on your task board: update them with task_update as they progress.",
+    JSON.stringify({ planId: plan.id, spawn: spawns })
+  ].join("\n");
+}
+var PlanStore = class {
+  plans = [];
+  save;
+  waiters = /* @__PURE__ */ new Set();
+  constructor(initial, save) {
+    this.save = save;
+    if (Array.isArray(initial)) this.plans = initial.filter((plan) => plan && typeof plan === "object" && typeof plan.id === "string").slice(-MAX_PLANS);
+  }
+  list() {
+    return structuredClone(this.plans);
+  }
+  get(id) {
+    return this.plans.find((plan) => plan.id === id) ?? null;
+  }
+  add(plan) {
+    for (const other of this.plans) if (other.orchestratorId === plan.orchestratorId && other.status === "pending") {
+      other.status = "cancelled";
+      other.decidedAt = plan.createdAt;
+    }
+    this.plans.push(plan);
+    while (this.plans.length > MAX_PLANS) this.plans.shift();
+    this.changed();
+  }
+  decide(id, decision, now) {
+    const plan = this.get(id);
+    if (!plan) throw new Error("Unknown plan.");
+    if (plan.status !== "pending") throw new Error(plan.status === "approved" ? "This plan was already started." : "This plan was cancelled.");
+    plan.status = decision;
+    plan.decidedAt = now;
+    this.changed();
+    return structuredClone(plan);
+  }
+  delivered(id) {
+    const plan = this.get(id);
+    if (plan && !plan.delivered) {
+      plan.delivered = true;
+      this.changed();
+    }
+  }
+  /** The newest plan of this orchestrator: the one named, else an undelivered approved one, else a pending one. */
+  current(orchestratorId, planId) {
+    const own = this.plans.filter((plan) => plan.orchestratorId === orchestratorId);
+    if (planId) return own.find((plan) => plan.id === planId) ?? null;
+    return [...own].reverse().find((plan) => plan.status === "approved" && !plan.delivered) ?? [...own].reverse().find((plan) => plan.status === "pending") ?? null;
+  }
+  forgetOrchestrator(orchestratorId) {
+    const before = this.plans.length;
+    this.plans = this.plans.filter((plan) => plan.orchestratorId !== orchestratorId || plan.status === "approved");
+    if (this.plans.length !== before) this.changed();
+  }
+  /** Resolves on the next change or after `ms`. */
+  waitForChange(ms) {
+    return new Promise((resolve4) => {
+      const done = () => {
+        clearTimeout(timer);
+        this.waiters.delete(done);
+        resolve4();
+      };
+      const timer = setTimeout(done, ms);
+      this.waiters.add(done);
+    });
+  }
+  changed() {
+    this.save(this.plans);
+    for (const waiter of [...this.waiters]) waiter();
+  }
+};
+
+// src/harness/i18n.ts
+var localeOf = (value) => value === "ru" ? "ru" : "en";
+var EN = {
+  loopBadge: "loop?",
+  loopTip: (count2, what) => `The agent ran the same ${what} ${count2} times without changing a file in between. Look at the card.`,
+  flowBadge: "flow: preview",
+  flowTip: "The orchestrator proposed a flow. Open Flow preview (Settings \u2192 Plugins \u2192 CanvasTTY Assistant) to see roles and tasks, then Start or Cancel.",
+  tasksBadge: (done, total) => `tasks ${done}/${total}`,
+  tasksTip: "Tasks on this orchestrator's board. Open Task board from the card menu.",
+  reviewFine: "review: fine",
+  reviewRisky: "review: risky",
+  reviewAsk: "review: ask me",
+  reviewTip: (summary) => `Assistant suggestion (not enforced): ${summary}`,
+  boardToast: (title, done, total) => total ? `Task board now shows "${title}" (${done}/${total} done). Open it from Settings \u2192 Plugins \u2192 CanvasTTY Assistant \u2192 Task board; an open board switches by itself.` : `"${title}" has no tasks yet. The board fills when the orchestrator adds tasks or starts a flow.`,
+  flowToast: (title) => `Flow preview now shows "${title}". Open it from Settings \u2192 Plugins \u2192 CanvasTTY Assistant \u2192 Flow preview, pick a flow and a goal, then press Start. Tell the orchestrator to run the approved flow.`,
+  flowsOff: "Flows are off in the Assistant settings.",
+  report: {
+    title: (title) => `Report: ${title}`,
+    role: { agent: "agent", orchestrator: "orchestrator", subagent: "subagent" },
+    started: "Started",
+    ran: "Ran",
+    status: "Status",
+    exit: "Exit code",
+    turns: "Turns",
+    children: "Subagents",
+    commands: "Commands seen",
+    reviewed: (deny, ask) => `declined ${deny}, sent to you ${ask}`,
+    loops: "Loop alerts",
+    tasks: "Tasks",
+    none: "none",
+    cost: "Tokens and cost: not available to plugins on this CanvasTTY version.",
+    minutes: (m) => m < 1 ? "under a minute" : `${Math.round(m)} min`
+  }
+};
+var RU = {
+  loopBadge: "\u0446\u0438\u043A\u043B?",
+  loopTip: (count2, what) => `\u0410\u0433\u0435\u043D\u0442 ${count2} \u0440\u0430\u0437 \u0437\u0430\u043F\u0443\u0441\u0442\u0438\u043B \u043E\u0434\u043D\u0443 \u0438 \u0442\u0443 \u0436\u0435 ${what === "command" ? "\u043A\u043E\u043C\u0430\u043D\u0434\u0443" : "\u043E\u043F\u0435\u0440\u0430\u0446\u0438\u044E"}, \u043D\u0435 \u043C\u0435\u043D\u044F\u044F \u0444\u0430\u0439\u043B\u043E\u0432 \u043C\u0435\u0436\u0434\u0443 \u0437\u0430\u043F\u0443\u0441\u043A\u0430\u043C\u0438. \u041F\u043E\u0441\u043C\u043E\u0442\u0440\u0438\u0442\u0435 \u043D\u0430 \u043E\u043A\u043D\u043E.`,
+  flowBadge: "\u0441\u0446\u0435\u043D\u0430\u0440\u0438\u0439: \u043F\u0440\u043E\u0441\u043C\u043E\u0442\u0440",
+  flowTip: "\u041E\u0440\u043A\u0435\u0441\u0442\u0440\u0430\u0442\u043E\u0440 \u043F\u0440\u0435\u0434\u043B\u043E\u0436\u0438\u043B \u0441\u0446\u0435\u043D\u0430\u0440\u0438\u0439. \u041E\u0442\u043A\u0440\u043E\u0439\u0442\u0435 \xAB\u041F\u0440\u043E\u0441\u043C\u043E\u0442\u0440 \u0441\u0446\u0435\u043D\u0430\u0440\u0438\u044F\xBB (\u041D\u0430\u0441\u0442\u0440\u043E\u0439\u043A\u0438 \u2192 \u041F\u043B\u0430\u0433\u0438\u043D\u044B \u2192 CanvasTTY Assistant), \u043F\u043E\u0441\u043C\u043E\u0442\u0440\u0438\u0442\u0435 \u0440\u043E\u043B\u0438 \u0438 \u0437\u0430\u0434\u0430\u0447\u0438, \u0437\u0430\u0442\u0435\u043C \xAB\u0417\u0430\u043F\u0443\u0441\u0442\u0438\u0442\u044C\xBB \u0438\u043B\u0438 \xAB\u041E\u0442\u043C\u0435\u043D\u0430\xBB.",
+  tasksBadge: (done, total) => `\u0437\u0430\u0434\u0430\u0447\u0438 ${done}/${total}`,
+  tasksTip: "\u0417\u0430\u0434\u0430\u0447\u0438 \u043D\u0430 \u0434\u043E\u0441\u043A\u0435 \u044D\u0442\u043E\u0433\u043E \u043E\u0440\u043A\u0435\u0441\u0442\u0440\u0430\u0442\u043E\u0440\u0430. \u041E\u0442\u043A\u0440\u043E\u0439\u0442\u0435 \xAB\u0414\u043E\u0441\u043A\u0443 \u0437\u0430\u0434\u0430\u0447\xBB \u0438\u0437 \u043C\u0435\u043D\u044E \u043E\u043A\u043D\u0430.",
+  reviewFine: "\u043F\u0440\u043E\u0432\u0435\u0440\u043A\u0430: \u043E\u043A",
+  reviewRisky: "\u043F\u0440\u043E\u0432\u0435\u0440\u043A\u0430: \u0440\u0438\u0441\u043A",
+  reviewAsk: "\u043F\u0440\u043E\u0432\u0435\u0440\u043A\u0430: \u0440\u0435\u0448\u0438\u0442\u0435 \u0432\u044B",
+  reviewTip: (summary) => `\u041F\u043E\u0434\u0441\u043A\u0430\u0437\u043A\u0430 \u041F\u043E\u043C\u043E\u0449\u043D\u0438\u043A\u0430 (\u043D\u0435 \u043F\u0440\u0438\u043C\u0435\u043D\u044F\u0435\u0442\u0441\u044F): ${summary}`,
+  boardToast: (title, done, total) => total ? `\u0414\u043E\u0441\u043A\u0430 \u0437\u0430\u0434\u0430\u0447 \u043F\u043E\u043A\u0430\u0437\u044B\u0432\u0430\u0435\u0442 \xAB${title}\xBB (\u0433\u043E\u0442\u043E\u0432\u043E ${done} \u0438\u0437 ${total}). \u041E\u0442\u043A\u0440\u043E\u0439\u0442\u0435 \u0435\u0451: \u041D\u0430\u0441\u0442\u0440\u043E\u0439\u043A\u0438 \u2192 \u041F\u043B\u0430\u0433\u0438\u043D\u044B \u2192 CanvasTTY Assistant \u2192 \u0414\u043E\u0441\u043A\u0430 \u0437\u0430\u0434\u0430\u0447; \u043E\u0442\u043A\u0440\u044B\u0442\u0430\u044F \u0434\u043E\u0441\u043A\u0430 \u043F\u0435\u0440\u0435\u043A\u043B\u044E\u0447\u0438\u0442\u0441\u044F \u0441\u0430\u043C\u0430.` : `\u0423 \xAB${title}\xBB \u043F\u043E\u043A\u0430 \u043D\u0435\u0442 \u0437\u0430\u0434\u0430\u0447. \u0414\u043E\u0441\u043A\u0430 \u0437\u0430\u043F\u043E\u043B\u043D\u0438\u0442\u0441\u044F, \u043A\u043E\u0433\u0434\u0430 \u043E\u0440\u043A\u0435\u0441\u0442\u0440\u0430\u0442\u043E\u0440 \u0434\u043E\u0431\u0430\u0432\u0438\u0442 \u0437\u0430\u0434\u0430\u0447\u0438 \u0438\u043B\u0438 \u0437\u0430\u043F\u0443\u0441\u0442\u0438\u0442 \u0441\u0446\u0435\u043D\u0430\u0440\u0438\u0439.`,
+  flowToast: (title) => `\xAB\u041F\u0440\u043E\u0441\u043C\u043E\u0442\u0440 \u0441\u0446\u0435\u043D\u0430\u0440\u0438\u044F\xBB \u043F\u043E\u043A\u0430\u0437\u044B\u0432\u0430\u0435\u0442 \xAB${title}\xBB. \u041E\u0442\u043A\u0440\u043E\u0439\u0442\u0435 \u0435\u0433\u043E: \u041D\u0430\u0441\u0442\u0440\u043E\u0439\u043A\u0438 \u2192 \u041F\u043B\u0430\u0433\u0438\u043D\u044B \u2192 CanvasTTY Assistant \u2192 \u041F\u0440\u043E\u0441\u043C\u043E\u0442\u0440 \u0441\u0446\u0435\u043D\u0430\u0440\u0438\u044F, \u0432\u044B\u0431\u0435\u0440\u0438\u0442\u0435 \u0441\u0446\u0435\u043D\u0430\u0440\u0438\u0439 \u0438 \u0446\u0435\u043B\u044C, \u043D\u0430\u0436\u043C\u0438\u0442\u0435 \xAB\u0417\u0430\u043F\u0443\u0441\u0442\u0438\u0442\u044C\xBB. \u0417\u0430\u0442\u0435\u043C \u043F\u043E\u043F\u0440\u043E\u0441\u0438\u0442\u0435 \u043E\u0440\u043A\u0435\u0441\u0442\u0440\u0430\u0442\u043E\u0440 \u0432\u044B\u043F\u043E\u043B\u043D\u0438\u0442\u044C \u043E\u0434\u043E\u0431\u0440\u0435\u043D\u043D\u044B\u0439 \u0441\u0446\u0435\u043D\u0430\u0440\u0438\u0439.`,
+  flowsOff: "\u0421\u0446\u0435\u043D\u0430\u0440\u0438\u0438 \u0432\u044B\u043A\u043B\u044E\u0447\u0435\u043D\u044B \u0432 \u043D\u0430\u0441\u0442\u0440\u043E\u0439\u043A\u0430\u0445 \u041F\u043E\u043C\u043E\u0449\u043D\u0438\u043A\u0430.",
+  report: {
+    title: (title) => `\u041E\u0442\u0447\u0451\u0442: ${title}`,
+    role: { agent: "\u0430\u0433\u0435\u043D\u0442", orchestrator: "\u043E\u0440\u043A\u0435\u0441\u0442\u0440\u0430\u0442\u043E\u0440", subagent: "\u0441\u0443\u0431\u0430\u0433\u0435\u043D\u0442" },
+    started: "\u0417\u0430\u043F\u0443\u0449\u0435\u043D",
+    ran: "\u0420\u0430\u0431\u043E\u0442\u0430\u043B",
+    status: "\u0421\u043E\u0441\u0442\u043E\u044F\u043D\u0438\u0435",
+    exit: "\u041A\u043E\u0434 \u0432\u044B\u0445\u043E\u0434\u0430",
+    turns: "\u0425\u043E\u0434\u043E\u0432",
+    children: "\u0421\u0443\u0431\u0430\u0433\u0435\u043D\u0442\u044B",
+    commands: "\u041A\u043E\u043C\u0430\u043D\u0434 \u043F\u0440\u043E\u0432\u0435\u0440\u0435\u043D\u043E",
+    reviewed: (deny, ask) => `\u043E\u0442\u043A\u043B\u043E\u043D\u0435\u043D\u043E ${deny}, \u043F\u0435\u0440\u0435\u0434\u0430\u043D\u043E \u0432\u0430\u043C ${ask}`,
+    loops: "\u0421\u0438\u0433\u043D\u0430\u043B\u044B \u0446\u0438\u043A\u043B\u0430",
+    tasks: "\u0417\u0430\u0434\u0430\u0447\u0438",
+    none: "\u043D\u0435\u0442",
+    cost: "\u0422\u043E\u043A\u0435\u043D\u044B \u0438 \u0441\u0442\u043E\u0438\u043C\u043E\u0441\u0442\u044C: \u044D\u0442\u043E\u0439 \u0432\u0435\u0440\u0441\u0438\u0438 CanvasTTY \u043F\u043B\u0430\u0433\u0438\u043D\u0430\u043C \u043D\u0435\u0434\u043E\u0441\u0442\u0443\u043F\u043D\u044B.",
+    minutes: (m) => m < 1 ? "\u043C\u0435\u043D\u044C\u0448\u0435 \u043C\u0438\u043D\u0443\u0442\u044B" : `${Math.round(m)} \u043C\u0438\u043D`
+  }
+};
+var STRINGS = { en: EN, ru: RU };
+
+// src/harness/loops.ts
+import { createHash as createHash4 } from "node:crypto";
+var MAX_SESSIONS2 = 512;
+var MAX_FINGERPRINTS = 64;
+var normalize = (text5) => text5.replace(/\s+/gu, " ").trim().slice(0, 4096);
+var LoopWatch = class {
+  sessions = /* @__PURE__ */ new Map();
+  threshold;
+  constructor(options = {}) {
+    this.threshold = Number.isInteger(options.threshold) ? Math.max(2, Math.min(20, options.threshold)) : 5;
+  }
+  /** One tool call seen before it ran. Returns a signal once per streak, when it reaches the threshold. */
+  action(sessionId, tool) {
+    if (typeof sessionId !== "string" || !sessionId) return null;
+    let state = this.sessions.get(sessionId);
+    if (tool.kind === "edit") {
+      if (state) state.counts.clear();
+      return null;
+    }
+    const subject = tool.command !== null && tool.command !== void 0 ? normalize(String(tool.command)) : (tool.paths ?? []).join("\n");
+    if (!subject) return null;
+    const fingerprint = createHash4("sha256").update(`${String(tool.name).slice(0, 80)}\0${subject}`).digest("hex");
+    if (!state) {
+      state = { counts: /* @__PURE__ */ new Map(), alerted: false };
+      this.sessions.set(sessionId, state);
+      while (this.sessions.size > MAX_SESSIONS2) this.sessions.delete(this.sessions.keys().next().value);
+    }
+    const count2 = (state.counts.get(fingerprint) ?? 0) + 1;
+    state.counts.delete(fingerprint);
+    state.counts.set(fingerprint, count2);
+    while (state.counts.size > MAX_FINGERPRINTS) state.counts.delete(state.counts.keys().next().value);
+    if (count2 < this.threshold || state.alerted) return null;
+    state.alerted = true;
+    return { sessionId, count: count2, toolName: String(tool.name).slice(0, 40), what: tool.kind === "shell" ? "command" : "action" };
+  }
+  /** Whether a loop is flagged on this card in its current turn. */
+  flagged(sessionId) {
+    return this.sessions.get(sessionId)?.alerted === true;
+  }
+  /** A new turn started (the person or the orchestrator gave new input): the evidence of the last one is dropped. */
+  turnStarted(sessionId) {
+    const had = this.flagged(sessionId);
+    this.sessions.delete(sessionId);
+    return had;
+  }
+  forget(sessionId) {
+    this.sessions.delete(sessionId);
+  }
+};
+
+// src/harness/report.ts
+var MAX_JOURNALS = 512;
+var Journals = class {
+  journals = /* @__PURE__ */ new Map();
+  now;
+  constructor(now = Date.now) {
+    this.now = now;
+  }
+  entry(id) {
+    let journal = this.journals.get(id);
+    if (!journal) {
+      journal = {
+        id,
+        title: "",
+        provider: "",
+        role: "agent",
+        parentSessionId: null,
+        startedAt: null,
+        status: "unavailable",
+        exitCode: null,
+        turns: 0,
+        workingMs: 0,
+        workingSince: null,
+        children: [],
+        commands: 0,
+        denied: 0,
+        asked: 0,
+        loops: 0
+      };
+      this.journals.set(id, journal);
+      while (this.journals.size > MAX_JOURNALS) this.journals.delete(this.journals.keys().next().value);
+    }
+    return journal;
+  }
+  /** A session event's summary. Returns true when a new turn started (working after idle or unavailable). */
+  observe(summary) {
+    const journal = this.entry(summary.id);
+    if (typeof summary.title === "string") journal.title = summary.title.slice(0, 120);
+    if (typeof summary.provider === "string") journal.provider = summary.provider;
+    if (typeof summary.role === "string") journal.role = summary.role;
+    if (typeof summary.parentSessionId === "string" && summary.parentSessionId) {
+      journal.parentSessionId = summary.parentSessionId;
+      const parent = this.entry(summary.parentSessionId);
+      if (!parent.children.includes(summary.id) && parent.children.length < 64) parent.children.push(summary.id);
+    }
+    if (typeof summary.startedAt === "number" && journal.startedAt === null) journal.startedAt = summary.startedAt;
+    if (summary.exitCode !== void 0) journal.exitCode = summary.exitCode;
+    const now = this.now();
+    let turnStarted = false;
+    if (typeof summary.status === "string" && summary.status !== journal.status) {
+      if (summary.status === "working") {
+        journal.workingSince = now;
+        if (journal.status !== "needs_approval") {
+          journal.turns++;
+          turnStarted = true;
+        }
+      } else if (journal.workingSince !== null && summary.status !== "needs_approval") {
+        journal.workingMs += Math.max(0, now - journal.workingSince);
+        journal.workingSince = null;
+      }
+      journal.status = summary.status;
+    }
+    return { turnStarted };
+  }
+  command(sessionId, verdict) {
+    const journal = this.entry(sessionId);
+    journal.commands++;
+    if (verdict === "deny") journal.denied++;
+    if (verdict === "ask") journal.asked++;
+  }
+  loop(sessionId) {
+    this.entry(sessionId).loops++;
+  }
+  get(sessionId) {
+    const journal = this.journals.get(sessionId);
+    return journal ? { ...journal, children: [...journal.children] } : null;
+  }
+  forget(sessionId) {
+    this.journals.delete(sessionId);
+  }
+  titleOf(sessionId) {
+    return this.journals.get(sessionId)?.title || sessionId.slice(0, 8);
+  }
+};
+function reportText(journal, strings, extra) {
+  const r = strings.report;
+  const working = journal.workingMs + (journal.workingSince !== null ? Math.max(0, extra.now - journal.workingSince) : 0);
+  const time = (at) => new Date(at).toISOString().slice(11, 16) + " UTC";
+  const lines = [
+    `${r.title(journal.title || journal.id.slice(0, 8))} (${journal.provider || "?"}, ${r.role[journal.role] ?? journal.role})`,
+    journal.startedAt !== null ? `${r.started}: ${time(journal.startedAt)}` : "",
+    `${r.ran}: ${r.minutes(working / 6e4)} \xB7 ${r.turns}: ${journal.turns}`,
+    `${r.status}: ${journal.status}${journal.exitCode !== null ? ` \xB7 ${r.exit}: ${journal.exitCode}` : ""}`,
+    `${r.commands}: ${journal.commands} (${r.reviewed(journal.denied, journal.asked)})`,
+    `${r.loops}: ${journal.loops || r.none}`,
+    extra.childTitles.length ? `${r.children}: ${extra.childTitles.slice(0, 12).join(", ")}${extra.childTitles.length > 12 ? "\u2026" : ""}` : "",
+    extra.tasks && extra.tasks.total ? `${r.tasks}: ${extra.tasks.done}/${extra.tasks.total}` : "",
+    r.cost
+  ].filter(Boolean);
+  return lines.join("\n").slice(0, 1900);
+}
+
+// src/harness/settings.ts
+var COMMAND_REVIEW_LEVELS = ["strict", "warn", "off"];
+var DEFAULT_HARNESS_SETTINGS = Object.freeze({ routing: true, loopAlerts: true, flows: true });
+var KEYS = Object.keys(DEFAULT_HARNESS_SETTINGS);
+function validateHarnessSettings(value) {
+  if (!value || typeof value !== "object" || Array.isArray(value)) throw new Error("Invalid harness settings.");
+  const record2 = value;
+  if (Object.keys(record2).some((key) => !KEYS.includes(key)) || KEYS.some((key) => typeof record2[key] !== "boolean")) {
+    throw new Error("Invalid harness settings.");
+  }
+  return { routing: record2.routing, loopAlerts: record2.loopAlerts, flows: record2.flows };
+}
+function normalizeHarnessSettings(value) {
+  const record2 = value && typeof value === "object" && !Array.isArray(value) ? value : {};
+  return Object.fromEntries(KEYS.map((key) => [key, typeof record2[key] === "boolean" ? record2[key] : DEFAULT_HARNESS_SETTINGS[key]]));
+}
+function commandReviewLevel(settings) {
+  const mode = settings.enabled ? settings.modes["command.review"] : "off";
+  if (mode === "off") return "off";
+  return mode === "auto" ? "strict" : "warn";
+}
+function withCommandReview(settings, level) {
+  const next = structuredClone(settings);
+  if (level === "off") {
+    next.modes["command.review"] = "off";
+    next.enabled = next.modes["task.route"] !== "off";
+  } else {
+    next.enabled = true;
+    next.modes["command.review"] = level === "strict" ? "auto" : "suggest";
+    next.reviewStrictness = level === "strict" ? "strict" : "triage";
+  }
+  return next;
+}
+function firstRunAssistantSettings() {
+  return withCommandReview(structuredClone(DEFAULT_ASSISTANT_SETTINGS), "warn");
+}
+
+// src/harness/tasks.ts
+var TASK_STATUSES = ["todo", "doing", "done", "blocked"];
+var TASK_LIMITS = Object.freeze({ boards: 32, tasks: 100, title: 200, detail: 2e3, note: 500 });
+var clean = (value, max) => typeof value === "string" ? value.replace(/[\u0000-\u0008\u000b-\u001f\u007f]/gu, " ").trim().slice(0, max) : "";
+var TaskBoards = class {
+  boards = /* @__PURE__ */ new Map();
+  save;
+  onChange;
+  constructor(initial, deps) {
+    this.save = deps.save;
+    this.onChange = deps.changed;
+    if (Array.isArray(initial)) {
+      for (const board of initial.slice(-TASK_LIMITS.boards)) {
+        if (board && typeof board === "object" && typeof board.orchestratorId === "string" && Array.isArray(board.tasks)) this.boards.set(board.orchestratorId, board);
+      }
+    }
+  }
+  list() {
+    return structuredClone([...this.boards.values()]);
+  }
+  get(orchestratorId) {
+    const board = this.boards.get(orchestratorId);
+    return board ? structuredClone(board) : null;
+  }
+  progress(orchestratorId) {
+    const tasks = this.boards.get(orchestratorId)?.tasks ?? [];
+    return { done: tasks.filter((task) => task.status === "done").length, total: tasks.length };
+  }
+  add(orchestratorId, title, input, now) {
+    const text5 = clean(input.title, TASK_LIMITS.title);
+    if (!text5) throw new Error("A task needs a title.");
+    let board = this.boards.get(orchestratorId);
+    if (!board) {
+      if (this.boards.size >= TASK_LIMITS.boards) {
+        const oldest = [...this.boards.values()].sort((a, b) => latest(a) - latest(b))[0];
+        this.boards.delete(oldest.orchestratorId);
+      }
+      board = { orchestratorId, title: clean(title, 120) || orchestratorId.slice(0, 8), tasks: [], nextId: 1 };
+      this.boards.set(orchestratorId, board);
+    } else if (title) board.title = clean(title, 120) || board.title;
+    if (board.tasks.length >= TASK_LIMITS.tasks) throw new Error(`A board holds at most ${TASK_LIMITS.tasks} tasks; mark finished ones done and keep the list short.`);
+    const task = {
+      id: `t${board.nextId++}`,
+      title: text5,
+      detail: clean(input.detail, TASK_LIMITS.detail),
+      status: "todo",
+      assignee: input.assignee ?? null,
+      note: "",
+      addedBy: input.addedBy ?? "orchestrator",
+      createdAt: now,
+      updatedAt: now
+    };
+    board.tasks.push(task);
+    this.changed(board);
+    return structuredClone(task);
+  }
+  /**
+   * `actor` is the orchestrator itself or one of its subagents. A subagent may change only a task given to it, or
+   * claim an unassigned one (it becomes the assignee).
+   */
+  update(orchestratorId, actor, input, now) {
+    const board = this.boards.get(orchestratorId);
+    const task = board?.tasks.find((item) => item.id === input.id);
+    if (!board || !task) throw new Error("No such task on this board; call task_list.");
+    if (input.status !== void 0 && !TASK_STATUSES.includes(input.status)) throw new Error(`status is one of ${TASK_STATUSES.join(", ")}.`);
+    if (!actor.isOrchestrator) {
+      if (task.assignee && task.assignee !== actor.sessionId) throw new Error("This task belongs to another subagent.");
+      if (input.assignee !== void 0) throw new Error("Only the orchestrator assigns tasks.");
+      task.assignee = actor.sessionId;
+    } else if (input.assignee !== void 0) {
+      task.assignee = typeof input.assignee === "string" && input.assignee ? input.assignee : null;
+    }
+    if (input.status !== void 0) task.status = input.status;
+    if (input.note !== void 0) task.note = clean(input.note, TASK_LIMITS.note);
+    task.updatedAt = now;
+    this.changed(board);
+    return structuredClone(task);
+  }
+  rename(orchestratorId, title) {
+    const board = this.boards.get(orchestratorId);
+    const text5 = clean(title, 120);
+    if (board && text5 && board.title !== text5) {
+      board.title = text5;
+      this.changed(board);
+    }
+  }
+  forget(orchestratorId) {
+    const board = this.boards.get(orchestratorId);
+    if (!board) return false;
+    this.boards.delete(orchestratorId);
+    this.save([...this.boards.values()]);
+    this.onChange({ ...board, tasks: [] });
+    return true;
+  }
+  changed(board) {
+    this.save([...this.boards.values()]);
+    this.onChange(structuredClone(board));
+  }
+};
+var latest = (board) => Math.max(0, ...board.tasks.map((task) => task.updatedAt));
+function boardText(board) {
+  if (!board || !board.tasks.length) return "The board is empty. The orchestrator adds tasks with task_add.";
+  const lines = board.tasks.map((task) => `${task.id} [${task.status}] ${task.title}${task.assignee ? ` (assignee ${task.assignee.slice(0, 8)})` : ""}${task.note ? ` \u2014 ${task.note}` : ""}`);
+  const done = board.tasks.filter((task) => task.status === "done").length;
+  return `${done}/${board.tasks.length} done
+${lines.join("\n")}
+${JSON.stringify(board.tasks.map(({ id, title, status, assignee, note, detail }) => ({ id, title, status, assignee, note, detail })))}`;
+}
+
+// src/harness/harness.ts
+var HARNESS_TOOLS = ["route", "flows_list", "flow_plan", "flow_status", "task_add", "task_update", "task_list"];
+var SETTINGS_KEY = "harness";
+var ROUTE_DEADLINE_MS = 9e3;
+var STATUS_WAIT_MAX_MS = 1e4;
+var text3 = (value, max) => typeof value === "string" ? value.replace(/[\u0000-\u0008\u000b-\u001f\u007f]+/gu, " ").trim().slice(0, max) : "";
+var Harness = class {
+  settings = { ...DEFAULT_HARNESS_SETTINGS };
+  badges;
+  loops = new LoopWatch();
+  journals;
+  plans;
+  boards;
+  host;
+  dir;
+  locale;
+  now;
+  modelDifficulty;
+  sessions = /* @__PURE__ */ new Map();
+  /** What the person last opened from a card menu: the board and the preview cards follow it. */
+  focus = { board: null, flows: null };
+  constructor(options) {
+    this.host = options.host;
+    this.locale = options.locale;
+    this.now = options.now ?? Date.now;
+    this.modelDifficulty = options.modelDifficulty;
+    this.dir = join7(options.dataDir, "harness");
+    this.badges = new BadgeBoard(options.publishBadge);
+    this.journals = new Journals(this.now);
+    this.plans = new PlanStore(this.read("plans.json"), (plans) => this.write("plans.json", plans));
+    this.boards = new TaskBoards(this.read("boards.json"), {
+      save: (boards) => this.write("boards.json", boards),
+      changed: (board) => this.boardChanged(board)
+    });
+  }
+  get strings() {
+    return STRINGS[this.locale];
+  }
+  loadSettings(saved) {
+    this.settings = normalizeHarnessSettings(saved);
+  }
+  async saveSettings(value) {
+    const next = validateHarnessSettings(value);
+    await this.host.callHost("storage.set", { key: SETTINGS_KEY, value: next });
+    this.settings = next;
+    if (!next.loopAlerts) for (const id of this.sessions.keys()) {
+      this.loops.forget(id);
+      void this.badges.set(id, "loop", null);
+    }
+    return next;
+  }
+  // ---------------------------------------------------------------------------------------------------------------
+  // Files in the plugin's data folder
+  // ---------------------------------------------------------------------------------------------------------------
+  read(name) {
+    try {
+      return JSON.parse(readFileSync2(join7(this.dir, name), "utf8"));
+    } catch {
+      return null;
+    }
+  }
+  write(name, value) {
+    try {
+      mkdirSync(this.dir, { recursive: true, mode: 448 });
+      const path = join7(this.dir, name);
+      writeFileSync(`${path}.tmp`, JSON.stringify(value), { mode: 384 });
+      renameSync(`${path}.tmp`, path);
+    } catch (error) {
+      this.host.log("warn", `harness: could not save ${name}: ${error instanceof Error ? error.message : String(error)}`);
+    }
+  }
+  // ---------------------------------------------------------------------------------------------------------------
+  // Session events and decision calls
+  // ---------------------------------------------------------------------------------------------------------------
+  sessionsKnown(list) {
+    if (!Array.isArray(list)) return;
+    for (const session of list) this.sessionEvent({ type: "restored", session });
+  }
+  sessionEvent(event) {
+    const session = event.session;
+    if (!session || typeof session.id !== "string") return;
+    if (event.type === "closed") {
+      this.sessions.delete(session.id);
+      this.loops.forget(session.id);
+      this.badges.forget(session.id);
+      this.journals.forget(session.id);
+      if (session.role === "orchestrator") {
+        this.boards.forget(session.id);
+        this.plans.forgetOrchestrator(session.id);
+      }
+      this.surfacesChanged();
+      return;
+    }
+    const before = this.sessions.get(session.id);
+    this.sessions.set(session.id, session);
+    const { turnStarted } = this.journals.observe(session);
+    if (turnStarted && this.loops.turnStarted(session.id)) void this.badges.set(session.id, "loop", null);
+    if (event.type === "exited") {
+      this.loops.forget(session.id);
+      void this.badges.set(session.id, "loop", null);
+    }
+    if (session.role === "orchestrator" && before?.title !== session.title) this.boards.rename(session.id, session.title);
+    if (!before || before.title !== session.title || before.status !== session.status) this.surfacesChanged();
+  }
+  /** Every pre-tool call CanvasTTY asked the plugin about, with the answer it got. */
+  observeDecision(request, verdict) {
+    const sessionId = typeof request.sessionId === "string" ? request.sessionId : "";
+    const tool = request.tool;
+    if (!sessionId || !tool || typeof tool.name !== "string") return;
+    this.journals.command(sessionId, verdict);
+    if (!this.settings.loopAlerts) return;
+    const signal = this.loops.action(sessionId, {
+      name: tool.name,
+      kind: typeof tool.kind === "string" ? tool.kind : "other",
+      command: typeof tool.command === "string" ? tool.command : null,
+      paths: Array.isArray(tool.paths) ? tool.paths.filter((path) => typeof path === "string").slice(0, 16) : []
+    });
+    if (!signal) return;
+    this.journals.loop(sessionId);
+    void this.badges.set(sessionId, "loop", { text: this.strings.loopBadge, tone: "warn", tooltip: this.strings.loopTip(signal.count, signal.what) });
+  }
+  // ---------------------------------------------------------------------------------------------------------------
+  // Agent tools
+  // ---------------------------------------------------------------------------------------------------------------
+  handles(name) {
+    return HARNESS_TOOLS.includes(name);
+  }
+  async tool(name, caller, input) {
+    if (!caller || typeof caller.id !== "string") return { content: "CanvasTTY did not say which card is calling.", isError: true };
+    if (!this.sessions.has(caller.id)) this.sessions.set(caller.id, caller);
+    switch (name) {
+      case "route":
+        return this.route(caller, input);
+      case "flows_list":
+        return this.flowsList(caller);
+      case "flow_plan":
+        return this.flowPlan(caller, input);
+      case "flow_status":
+        return this.flowStatus(caller, input);
+      case "task_add":
+        return this.taskAdd(caller, input);
+      case "task_update":
+        return this.taskUpdate(caller, input);
+      case "task_list":
+        return this.taskList(caller);
+      default:
+        return { content: `Unknown tool ${name.slice(0, 40)}.`, isError: true };
+    }
+  }
+  providersOf(input) {
+    const raw = Array.isArray(input.providers) ? input.providers : input.providers && typeof input.providers === "object" && Array.isArray(input.providers.providers) ? input.providers.providers : [];
+    return raw.filter((entry) => !!entry && typeof entry === "object" && typeof entry.id === "string").slice(0, 16);
+  }
+  async route(caller, input) {
+    const task = text3(input.task, 4e3);
+    if (!task) return { content: "Give the subagent's task in `task`.", isError: true };
+    if (!this.settings.routing) return { content: "Automatic routing is off in the Assistant settings: choose the provider and model yourself." };
+    let difficulty = null;
+    try {
+      difficulty = await this.modelDifficulty?.(task, caller, ROUTE_DEADLINE_MS) ?? null;
+    } catch {
+      difficulty = null;
+    }
+    const source = difficulty ? "model" : "rules";
+    const suggestion = suggestRoute({
+      difficulty: difficulty ?? ruleDifficulty(task),
+      source,
+      callerProvider: caller.provider ?? null,
+      providers: this.providersOf(input),
+      prefer: text3(input.prefer, 40) || null,
+      launchOptionTools: Array.isArray(input.launchOptionTools) ? input.launchOptionTools.filter((name) => typeof name === "string").slice(0, 8) : []
+    });
+    if (!suggestion) return { content: "No listed provider is available for a subagent. Call list_providers and pick one yourself." };
+    return { content: routeAnswer(suggestion) };
+  }
+  /** Built-in and project flows for this card's project (project flows are read from its own folder only). */
+  flowsFor(session) {
+    const project = projectFlows(session ? session.workingDirectory || session.cwd || null : null);
+    return { flows: [...builtInFlows(this.locale), ...project.flows], problems: project.problems };
+  }
+  flowsList(caller) {
+    if (!this.settings.flows) return { content: "Flows are off in the Assistant settings." };
+    const { flows, problems } = this.flowsFor(caller);
+    return {
+      content: [
+        "Flows (call flow_plan with an id and the goal; the person approves the plan before anything starts):",
+        ...flows.map((flow) => `- ${flow.id} (${flow.source === "project" ? "from this project" : "built in"}): ${flow.name}. ${flow.description} Roles: ${flow.roles.map((role) => role.id).join(", ")}.`),
+        ...problems.map((problem) => `- not loaded: .canvastty/flows/${problem.file}: ${problem.problem}`)
+      ].join("\n")
+    };
+  }
+  flowPlan(caller, input) {
+    if (!this.settings.flows) return { content: "Flows are off in the Assistant settings." };
+    const goal = text3(input.goal, 1e3);
+    const flowId = text3(input.flow, 40);
+    if (!goal || !flowId) return { content: "Give `flow` (an id from flows_list) and `goal`.", isError: true };
+    const flow = this.flowsFor(caller).flows.find((item) => item.id === flowId);
+    if (!flow) return { content: `No flow "${flowId}"; call flows_list.`, isError: true };
+    const plan = planFlow(flow, {
+      goal,
+      orchestratorId: caller.id,
+      orchestratorTitle: caller.title || caller.id.slice(0, 8),
+      callerProvider: caller.provider ?? null,
+      providers: this.providersOf(input),
+      requestedBy: "orchestrator",
+      now: this.now(),
+      routing: this.settings.routing
+    });
+    this.plans.add(plan);
+    this.focus.flows = caller.id;
+    void this.badges.set(caller.id, "flow", { text: this.strings.flowBadge, tone: "info", tooltip: this.strings.flowTip });
+    this.surfacesChanged();
+    return {
+      content: `Plan ${plan.id} waits for the person: they see it in the Flow preview card and press Start or Cancel. Do not start these subagents yet. Call flow_status with planId "${plan.id}" (it waits up to 10 s per call) until it says approved or cancelled. Tell the person briefly that a plan is waiting for them.
+${JSON.stringify({ planId: plan.id, roles: plan.roles })}`
+    };
+  }
+  async flowStatus(caller, input) {
+    if (!this.settings.flows) return { content: "Flows are off in the Assistant settings." };
+    const planId = text3(input.planId, 40) || void 0;
+    const waitMs = Math.max(0, Math.min(STATUS_WAIT_MAX_MS, Number.isFinite(input.waitSeconds) ? Number(input.waitSeconds) * 1e3 : STATUS_WAIT_MAX_MS));
+    const deadline = this.now() + waitMs;
+    let plan = this.plans.current(caller.id, planId);
+    while (plan && plan.status === "pending" && this.now() < deadline) {
+      await this.plans.waitForChange(Math.max(1, deadline - this.now()));
+      plan = this.plans.current(caller.id, planId);
+    }
+    if (!plan) return { content: planId ? `No plan "${planId}" for this card.` : "No plan waits for you. Call flow_plan, or ask the person to choose a flow in the Flow preview card." };
+    if (plan.status === "pending") return { content: `Plan ${plan.id} still waits for the person. Call flow_status again, or go on with other work and check later.` };
+    if (plan.status === "cancelled") return { content: `The person cancelled plan ${plan.id}. Do not start its subagents; ask the person how to go on.` };
+    this.plans.delivered(plan.id);
+    return { content: approvedInstructions(plan) };
+  }
+  /** The orchestrator a caller's board belongs to: its own card, or a subagent's parent. */
+  boardOwner(caller) {
+    if (caller.role === "orchestrator") return { orchestratorId: caller.id, isOrchestrator: true };
+    if (caller.role === "subagent" && caller.parentSessionId) return { orchestratorId: caller.parentSessionId, isOrchestrator: false };
+    return null;
+  }
+  taskAdd(caller, input) {
+    if (caller.role !== "orchestrator") return { content: "Only an orchestrator adds tasks.", isError: true };
+    const assignee = text3(input.assignee, 80) || null;
+    if (assignee && this.sessions.get(assignee)?.parentSessionId !== caller.id) return { content: "assignee must be the session id of one of your subagents.", isError: true };
+    try {
+      const task = this.boards.add(caller.id, caller.title, { title: input.title, detail: input.detail, assignee }, this.now());
+      return { content: `Added ${task.id}. Subagents see the board with task_list and update their tasks with task_update.
+${JSON.stringify(task)}` };
+    } catch (error) {
+      return { content: error instanceof Error ? error.message : String(error), isError: true };
+    }
+  }
+  taskUpdate(caller, input) {
+    const owner = this.boardOwner(caller);
+    if (!owner) return { content: "Only an orchestrator and its subagents have a task board.", isError: true };
+    if (input.assignee !== void 0 && owner.isOrchestrator && input.assignee !== "" && this.sessions.get(String(input.assignee))?.parentSessionId !== caller.id) {
+      return { content: 'assignee must be the session id of one of your subagents (or "" to clear it).', isError: true };
+    }
+    try {
+      const task = this.boards.update(owner.orchestratorId, { sessionId: caller.id, isOrchestrator: owner.isOrchestrator }, { ...input, id: input.id }, this.now());
+      return { content: `Updated ${task.id}: ${task.status}.
+${JSON.stringify(task)}` };
+    } catch (error) {
+      return { content: error instanceof Error ? error.message : String(error), isError: true };
+    }
+  }
+  taskList(caller) {
+    const owner = this.boardOwner(caller);
+    if (!owner) return { content: "Only an orchestrator and its subagents have a task board.", isError: true };
+    return { content: boardText(this.boards.get(owner.orchestratorId)) };
+  }
+  boardChanged(board) {
+    const { done, total } = this.boards.progress(board.orchestratorId);
+    void this.badges.set(board.orchestratorId, "tasks", total ? { text: this.strings.tasksBadge(done, total), tone: "info", tooltip: this.strings.tasksTip } : null);
+    this.host.emit("board", { orchestratorId: board.orchestratorId });
+  }
+  // ---------------------------------------------------------------------------------------------------------------
+  // Card actions
+  // ---------------------------------------------------------------------------------------------------------------
+  cardAction(actionId, sessionId, session) {
+    const card = (session && typeof session.id === "string" ? session : null) ?? this.sessions.get(sessionId) ?? null;
+    if (card) {
+      this.sessions.set(card.id, card);
+      this.journals.observe(card);
+    }
+    const title = card?.title || this.journals.titleOf(sessionId);
+    if (actionId === "task-board") {
+      this.focus.board = sessionId;
+      this.host.emit("focus", { ...this.focus });
+      const { done, total } = this.boards.progress(sessionId);
+      return { message: this.strings.boardToast(title, done, total), tone: "info" };
+    }
+    if (actionId === "flow-preview") {
+      if (!this.settings.flows) return { message: this.strings.flowsOff, tone: "warn" };
+      this.focus.flows = sessionId;
+      this.host.emit("focus", { ...this.focus });
+      return { message: this.strings.flowToast(title), tone: "info" };
+    }
+    if (actionId === "report") {
+      const journal = this.journals.get(sessionId);
+      if (!journal) return { message: this.strings.report.title(title), tone: "info" };
+      const childTitles = journal.children.map((id) => this.journals.titleOf(id));
+      const tasks = journal.role === "orchestrator" ? this.boards.progress(sessionId) : null;
+      return { message: reportText(journal, this.strings, { tasks, childTitles, now: this.now() }), tone: "info" };
+    }
+    return { message: `Unknown action ${actionId.slice(0, 40)}.`, tone: "error" };
+  }
+  // ---------------------------------------------------------------------------------------------------------------
+  // The plugin's own cards (Flow preview, Task board) and settings page. No folder paths reach a page.
+  // ---------------------------------------------------------------------------------------------------------------
+  orchestrators() {
+    return [...this.sessions.values()].filter((session) => session.role === "orchestrator").map((session) => ({ id: session.id, title: session.title || session.id.slice(0, 8), status: session.status }));
+  }
+  view() {
+    return {
+      settings: this.settings,
+      locale: this.locale,
+      focus: { ...this.focus },
+      orchestrators: this.orchestrators(),
+      titles: Object.fromEntries([...this.sessions.values()].map((session) => [session.id, session.title || session.id.slice(0, 8)])),
+      plans: this.plans.list().filter((plan) => plan.status === "pending" || this.now() - plan.createdAt < 864e5).reverse(),
+      boards: this.boards.list()
+    };
+  }
+  /** Flows the preview card offers for an orchestrator: names, descriptions and role titles, no paths. */
+  flowChoices(orchestratorId) {
+    if (!this.settings.flows) return { flows: [], problems: [], off: true };
+    const { flows, problems } = this.flowsFor(this.sessions.get(orchestratorId) ?? null);
+    return { flows, problems, off: false };
+  }
+  createPlan(orchestratorId, flowId, goalText) {
+    if (!this.settings.flows) throw new Error(this.strings.flowsOff);
+    const orchestrator = this.sessions.get(orchestratorId);
+    if (!orchestrator || orchestrator.role !== "orchestrator") throw new Error("Choose an open orchestrator card.");
+    const goal = text3(goalText, 1e3);
+    if (!goal) throw new Error("Write the goal first.");
+    const flow = this.flowsFor(orchestrator).flows.find((item) => item.id === flowId);
+    if (!flow) throw new Error("Unknown flow.");
+    const plan = planFlow(flow, {
+      goal,
+      orchestratorId,
+      orchestratorTitle: orchestrator.title,
+      callerProvider: orchestrator.provider,
+      providers: [],
+      requestedBy: "person",
+      now: this.now(),
+      routing: this.settings.routing
+    });
+    this.plans.add(plan);
+    this.surfacesChanged();
+    return plan;
+  }
+  decidePlan(planId, decision) {
+    if (decision !== "approved" && decision !== "cancelled") throw new Error("Start or Cancel.");
+    const plan = this.plans.decide(planId, decision, this.now());
+    void this.badges.set(plan.orchestratorId, "flow", null);
+    if (decision === "approved") {
+      for (const role of plan.roles) {
+        try {
+          this.boards.add(plan.orchestratorId, plan.orchestratorTitle, { title: `${role.title}: ${plan.goal}`.slice(0, 200), detail: role.task, addedBy: "flow" }, this.now());
+        } catch {
+          break;
+        }
+      }
+    }
+    this.surfacesChanged();
+    return plan;
+  }
+  surfacesChanged() {
+    this.host.emit("changed", null);
+  }
+  setBadge(sessionId, kind, badge) {
+    return this.badges.set(sessionId, kind, badge);
+  }
+};
+
 // src/service/assistant.ts
 var DECIDE_BUDGET_MS = 45e3;
 var TRIAGE_DEADLINE_MS = 2e4;
-var SETTINGS_KEY = "settings";
-var text3 = (value, max) => typeof value === "string" ? value.replace(/[\u0000-\u001f\u007f]+/gu, " ").trim().slice(0, max) : "";
+var TOOL_ADVICE_DEADLINE_MS = 12e3;
+var SETTINGS_KEY2 = "settings";
+var text4 = (value, max) => typeof value === "string" ? value.replace(/[\u0000-\u001f\u007f]+/gu, " ").trim().slice(0, max) : "";
 var Assistant = class {
   settings;
   engine;
@@ -7994,9 +9226,23 @@ var Assistant = class {
   generations = /* @__PURE__ */ new Map();
   checks = /* @__PURE__ */ new Map();
   registered = /* @__PURE__ */ new Set();
+  harness;
   constructor(options) {
     this.host = options.host;
-    this.settings = normalizeAssistantSettings(options.settings);
+    this.settings = options.settings === null || options.settings === void 0 ? firstRunAssistantSettings() : normalizeAssistantSettings(options.settings);
+    const locale = localeOf(options.locale);
+    this.harness = new Harness({
+      host: options.host,
+      dataDir: options.dataDir,
+      locale,
+      ...options.now ? { now: options.now } : {},
+      publishBadge: (sessionId, badge) => this.host.callHost("cards.setBadge", { sessionId, badge }).then(() => void 0, () => void 0),
+      modelDifficulty: async (task, caller, deadlineMs) => {
+        const answer = await this.advice(task, null, caller.workingDirectory || caller.cwd || process.cwd(), caller.id, deadlineMs);
+        return answer.kind === "advice" ? answer.advice.difficulty : null;
+      }
+    });
+    this.harness.loadSettings(options.harness);
     const secrets = {
       statusFor: async (owner) => {
         const stored = await this.readKey(owner);
@@ -8012,7 +9258,7 @@ var Assistant = class {
     };
     this.engine = new AssistantEngine({
       settings: () => this.settings,
-      directory: join6(options.dataDir, "assistant"),
+      directory: join8(options.dataDir, "assistant"),
       secrets,
       ...options.transport ? { transport: options.transport } : {}
     });
@@ -8021,7 +9267,7 @@ var Assistant = class {
       settings: () => this.settings,
       ...options.git === null ? { git: null } : {},
       suggest: (sessionId, verdict, summary) => {
-        void this.badge(sessionId, suggestionBadge(verdict, summary));
+        void this.harness.setBadge(sessionId, "review", suggestionBadge(verdict, summary, this.harness.strings));
       }
     });
   }
@@ -8048,19 +9294,18 @@ var Assistant = class {
     }
     return null;
   }
-  async badge(sessionId, badge) {
-    await this.host.callHost("cards.setBadge", { sessionId, badge }).catch(() => void 0);
-  }
   // -------------------------------------------------------------------------
   // Sessions (sessions:events)
   // -------------------------------------------------------------------------
   sessionsKnown(list) {
     if (!Array.isArray(list)) return;
+    this.harness.sessionsKnown(list);
     for (const session of list) if (session && typeof session === "object" && typeof session.id === "string") this.sessions.set(session.id, session);
   }
   sessionEvent(event) {
     const session = event.session;
     if (!session || typeof session.id !== "string") return;
+    this.harness.sessionEvent(event);
     if (event.type === "closed") {
       this.sessions.delete(session.id);
       this.review.forget(session.id);
@@ -8071,9 +9316,14 @@ var Assistant = class {
   // -------------------------------------------------------------------------
   // EP-5: the decision hook
   // -------------------------------------------------------------------------
-  decide(params) {
+  async decide(params) {
     const budget = typeof params.budgetMs === "number" && Number.isFinite(params.budgetMs) ? params.budgetMs : 3e3;
-    return this.review.decide(params, Math.min(budget, DECIDE_BUDGET_MS));
+    const answer = await this.review.decide(params, Math.min(budget, DECIDE_BUDGET_MS));
+    try {
+      this.harness.observeDecision(params, answer?.verdict ?? null);
+    } catch {
+    }
+    return answer;
   }
   // -------------------------------------------------------------------------
   // EP-2: launch triage
@@ -8087,7 +9337,7 @@ var Assistant = class {
   launch(context) {
     if (context.chosen === false) return null;
     const options = context.options ?? {};
-    const task = text3(options.task, 2e3) || null;
+    const task = text4(options.task, 2e3) || null;
     const dataClass = DATA_CLASSES.includes(options.dataClass) ? options.dataClass : null;
     const mode = this.engine.mode("task.route");
     const triage = !!task && (mode === "suggest" || mode === "auto" || mode === "shadow");
@@ -8102,12 +9352,12 @@ var Assistant = class {
       return;
     }
     this.review.noteTriage(sessionId, advice.advice.reviewStrict);
-    await this.badge(sessionId, triageBadge(advice.advice));
+    await this.harness.setBadge(sessionId, "triage", triageBadge(advice.advice));
   }
   /** task.route + the policy. `kind` says why there is no advice (off, learning, no answer). */
-  async advice(task, dataClass, cwd, sessionId) {
+  async advice(task, dataClass, cwd, sessionId, deadlineMs = TRIAGE_DEADLINE_MS) {
     const controller = new AbortController();
-    const timer = setTimeout(() => controller.abort(), TRIAGE_DEADLINE_MS);
+    const timer = setTimeout(() => controller.abort(), deadlineMs);
     try {
       const { decision, triage } = await askTaskRoute(this.engine, { task, dataClass: dataClass ?? this.settings.defaultDataClass }, {
         signal: controller.signal,
@@ -8128,11 +9378,12 @@ var Assistant = class {
   // EP-6: orchestrator tools
   // -------------------------------------------------------------------------
   async tool(name, caller, input) {
+    if (this.harness.handles(name)) return this.harness.tool(name, caller, input);
     if (name === "recommend") {
-      const task = text3(input.task, 2e3);
+      const task = text4(input.task, 2e3);
       if (!task) return { content: "Give the task text in `task`.", isError: true };
       const cwd = caller?.workingDirectory || caller?.cwd || process.cwd();
-      const answer = await this.advice(task, null, cwd, caller?.id);
+      const answer = await this.advice(task, null, cwd, caller?.id, TOOL_ADVICE_DEADLINE_MS);
       if (answer.kind === "off") return { content: "The Assistant's task triage is off (Assistant settings in CanvasTTY)." };
       if (answer.kind === "learning") return { content: "The Assistant's task triage is learning and gives no advice yet." };
       if (answer.kind !== "advice") return { content: `No decision model answered (${answer.reason ?? "unavailable"}); decide as you would without the Assistant.` };
@@ -8178,9 +9429,21 @@ ${JSON.stringify({ ...a, model: answer.model })}` };
     }));
     return { settings: this.settings, status, slots, checks: Object.fromEntries(this.checks), recent: this.review.recent() };
   }
+  /** The harness page: its four controls (command review here, the rest in the harness) and nothing else. */
+  harnessState() {
+    return { commandReview: commandReviewLevel(this.settings), ...this.harness.settings, models: this.settings.backends.filter((entry) => entry.enabled).length };
+  }
+  async saveHarness(value) {
+    const record2 = value && typeof value === "object" && !Array.isArray(value) ? value : {};
+    const { commandReview, ...rest } = record2;
+    if (!COMMAND_REVIEW_LEVELS.includes(commandReview)) throw new Error("Command review is Strict, Warn or Off.");
+    await this.harness.saveSettings(rest);
+    if (commandReview !== commandReviewLevel(this.settings)) await this.save(withCommandReview(this.settings, commandReview));
+    return this.harnessState();
+  }
   async save(value) {
     const next = validateAssistantSettings(value);
-    await this.host.callHost("storage.set", { key: SETTINGS_KEY, value: next });
+    await this.host.callHost("storage.set", { key: SETTINGS_KEY2, value: next });
     this.settings = next;
     this.engine.settingsChanged();
     return next;
@@ -8208,11 +9471,11 @@ ${JSON.stringify({ ...a, model: answer.model })}` };
     this.engine.keyChanged();
   }
 };
-function suggestionBadge(verdict, summary) {
-  if (verdict.outcome === "allow") return { text: "review: fine", tone: "info", tooltip: `Assistant suggestion (not enforced): ${summary}` };
-  if (verdict.outcome === "deny") return { text: "review: risky", tone: "warn", tooltip: `Assistant suggestion (not enforced): do not run ${summary}` };
+function suggestionBadge(verdict, summary, strings) {
+  if (verdict.outcome === "allow") return { text: strings.reviewFine, tone: "info", tooltip: strings.reviewTip(summary) };
+  if (verdict.outcome === "deny") return { text: strings.reviewRisky, tone: "warn", tooltip: strings.reviewTip(summary) };
   if (verdict.reason === "unavailable") return null;
-  return { text: "review: ask me", tone: "warn", tooltip: `Assistant suggestion (not enforced): the person should decide on ${summary} (${verdict.reason})` };
+  return { text: strings.reviewAsk, tone: "warn", tooltip: strings.reviewTip(`${summary} (${verdict.reason})`) };
 }
 function triageBadge(advice) {
   const label = `${advice.difficulty} \xB7 ${advice.category}`.slice(0, 24);
@@ -8232,11 +9495,13 @@ var ready = new Promise((resolve4) => {
   resolveReady = resolve4;
 });
 var assistant = null;
+var str2 = (value) => typeof value === "string" ? value : "";
 serve({
   onInitialize: async (params, host) => {
     const dataDir = typeof params.dataDir === "string" ? params.dataDir : process.cwd();
     const saved = await host.callHost("storage.get", { key: "settings" }).catch(() => null);
-    assistant = new Assistant({ host, dataDir, settings: saved });
+    const harness = await host.callHost("storage.get", { key: "harness" }).catch(() => null);
+    assistant = new Assistant({ host, dataDir, settings: saved, harness, locale: params.locale });
     resolveReady(assistant);
     try {
       const answer = await host.callHost("sessions.subscribe", {});
@@ -8255,7 +9520,8 @@ serve({
     "canvastty.decide": async (params) => (await ready).decide(params),
     "canvastty.launch.prepare": async (params) => (await ready).launch(params),
     "canvastty.tools.call": async (params) => (await ready).tool(String(params.tool), params.caller, params.input ?? {}),
-    // The settings page.
+    "canvastty.cards.invoke": async (params) => (await ready).harness.cardAction(str2(params.actionId), str2(params.sessionId), params.session),
+    // The decision models page.
     state: async () => (await ready).state(),
     save: async (params) => (await ready).save(params.settings),
     check: async (params) => (await ready).check(String(params.backendId)),
@@ -8263,6 +9529,14 @@ serve({
       (await ready).keyChanged(String(params.backendId));
       return null;
     },
-    feedback: async (params) => (await ready).review.feedback(String(params.auditId), params.verdict === "right" ? "right" : "wrong")
+    feedback: async (params) => (await ready).review.feedback(String(params.auditId), params.verdict === "right" ? "right" : "wrong"),
+    // The settings page (four controls).
+    "harness.settings": async () => (await ready).harnessState(),
+    "harness.saveSettings": async (params) => (await ready).saveHarness(params.settings),
+    // The Flow preview and Task board cards.
+    "harness.view": async () => (await ready).harness.view(),
+    "flows.choices": async (params) => (await ready).harness.flowChoices(str2(params.orchestratorId)),
+    "flows.create": async (params) => (await ready).harness.createPlan(str2(params.orchestratorId), str2(params.flowId), str2(params.goal)),
+    "flows.decide": async (params) => (await ready).harness.decidePlan(str2(params.planId), params.decision)
   }
 });

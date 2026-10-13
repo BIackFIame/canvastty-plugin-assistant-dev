@@ -8,11 +8,14 @@ let resolveReady: (assistant: Assistant) => void;
 const ready = new Promise<Assistant>(resolve => { resolveReady = resolve; });
 let assistant: Assistant | null = null;
 
+const str = (value: unknown): string => typeof value === 'string' ? value : '';
+
 serve({
   onInitialize: async (params, host: Host) => {
     const dataDir = typeof params.dataDir === 'string' ? params.dataDir : process.cwd();
     const saved = await host.callHost('storage.get', { key: 'settings' }).catch(() => null);
-    assistant = new Assistant({ host, dataDir, settings: saved });
+    const harness = await host.callHost('storage.get', { key: 'harness' }).catch(() => null);
+    assistant = new Assistant({ host, dataDir, settings: saved, harness, locale: params.locale });
     resolveReady(assistant);
     try {
       const answer = await host.callHost('sessions.subscribe', {}) as { sessions?: SessionSummary[] } | null;
@@ -29,11 +32,20 @@ serve({
     'canvastty.decide': async params => (await ready).decide(params),
     'canvastty.launch.prepare': async params => (await ready).launch(params as unknown as LaunchContext),
     'canvastty.tools.call': async params => (await ready).tool(String(params.tool), params.caller as SessionSummary | undefined, (params.input ?? {}) as Record<string, unknown>),
-    // The settings page.
+    'canvastty.cards.invoke': async params => (await ready).harness.cardAction(str(params.actionId), str(params.sessionId), params.session as SessionSummary | undefined),
+    // The decision models page.
     state: async () => (await ready).state(),
     save: async params => (await ready).save(params.settings),
     check: async params => (await ready).check(String(params.backendId)),
     keyChanged: async params => { (await ready).keyChanged(String(params.backendId)); return null; },
-    feedback: async params => (await ready).review.feedback(String(params.auditId), params.verdict === 'right' ? 'right' : 'wrong')
+    feedback: async params => (await ready).review.feedback(String(params.auditId), params.verdict === 'right' ? 'right' : 'wrong'),
+    // The settings page (four controls).
+    'harness.settings': async () => (await ready).harnessState(),
+    'harness.saveSettings': async params => (await ready).saveHarness(params.settings),
+    // The Flow preview and Task board cards.
+    'harness.view': async () => (await ready).harness.view(),
+    'flows.choices': async params => (await ready).harness.flowChoices(str(params.orchestratorId)),
+    'flows.create': async params => (await ready).harness.createPlan(str(params.orchestratorId), str(params.flowId), str(params.goal)),
+    'flows.decide': async params => (await ready).harness.decidePlan(str(params.planId), params.decision)
   }
 });

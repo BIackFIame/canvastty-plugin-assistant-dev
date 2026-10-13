@@ -24,7 +24,7 @@ test('the manifest\'s coreFiles match the package bytes, and the service and pag
     assert.equal(bytes.length, file.bytes, file.path);
     assert.equal(createHash('sha256').update(bytes).digest('hex'), file.sha256, `${file.path}: run npm run build`);
   }
-  for (const path of ['services/assistant.mjs', 'settings/assistant.js']) {
+  for (const path of ['services/assistant.mjs', 'settings/assistant.js', 'settings/harness.js', 'apps/flows.js', 'apps/board.js']) {
     assert.ok(manifest.coreFiles.some(file => file.path === path), path);
     assert.doesNotMatch(readFileSync(join(root, path), 'utf8'), /^import .* from ["']\.\.?\//mu, `${path} is bundled`);
   }
@@ -35,7 +35,9 @@ test('the manifest passes CanvasTTY\'s own validator (when CANVASTTY_REPO points
   const checked = validatePluginManifest(manifest);
   assert.deepEqual(checked.services[0].decide, { events: ['pre-tool'], timeoutMs: 45_000 });
   assert.equal(checked.services[0].launch.policy, undefined);
-  assert.deepEqual(checked.services[0].tools.map(tool => tool.name), ['recommend', 'review_status']);
+  assert.deepEqual(checked.services[0].tools.map(tool => tool.name), ['recommend', 'review_status', 'route', 'flows_list', 'flow_plan', 'flow_status', 'task_add', 'task_update', 'task_list']);
+  assert.deepEqual(checked.services[0].cardActions.map(action => action.id), ['flow-preview', 'task-board', 'report']);
+  assert.equal(checked.settingsContribution, 'settings');
 });
 
 function startService(t, { dataDir, host = {} }) {
@@ -97,10 +99,15 @@ test('end to end over JSON-RPC: off answers nothing; on in Auto the rule allows 
       'cards.setBadge': () => null
     }
   });
-  // Off by default: no opinion, no model.
+  // A fresh install: command review on Warn. Hard rules deny, nothing else is enforced, and no model is asked.
+  assert.equal((await service.request('canvastty.decide', decide('sudo ls'))).verdict, 'deny');
+  assert.equal(await service.request('canvastty.decide', decide('npm install left-pad')), null);
+  assert.equal(ollama.requests.length, 0);
+  assert.deepEqual(await service.request('harness.settings'), { commandReview: 'warn', routing: true, loopAlerts: true, flows: true, models: 0 });
+  await service.request('harness.saveSettings', { settings: { commandReview: 'off', routing: true, loopAlerts: true, flows: true } });
   assert.equal(await service.request('canvastty.decide', decide('sudo ls')), null);
   const { settings } = await service.request('state');
-  assert.equal(settings.enabled, false);
+  assert.equal(settings.modes['command.review'], 'off');
   const port = Number(new URL(ollama.url).port);
   await service.request('save', { settings: { ...settings, enabled: true, modes: { 'task.route': 'suggest', 'command.review': 'auto' },
     backends: [{ id: 'emulated-1', preset: 'emulated', runtime: 'ollama', model: 'qwen3.5:9b', url: ollama.url, enabled: true, localConfirmed: { port, at: 1 } }] } });
@@ -123,7 +130,8 @@ test('end to end over JSON-RPC: off answers nothing; on in Auto the rule allows 
   const state = await service.request('state');
   assert.equal(state.checks['emulated-1'].added, true);
   assert.equal(state.status.backends[0].tested, true);
-  assert.equal(state.recent.length, 3);
+  // Warn's sudo deny and its background review of npm install, then the three in Auto.
+  assert.equal(state.recent.length, 5);
 
   // Tools and a launch through the same process.
   const caller = { id: 'orch-1', provider: 'claude', role: 'orchestrator', title: 'o', status: 'idle', cwd: project, workingDirectory: project };

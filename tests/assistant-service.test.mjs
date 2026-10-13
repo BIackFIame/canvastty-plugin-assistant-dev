@@ -310,7 +310,8 @@ test('launch triage: the person\'s task feeds review and, when a model answers, 
 
 test('tools: recommend reports off, learning or advice; review_status lists only the caller\'s own cards', async () => {
   const host = hostFake();
-  const assistant = new Assistant({ host, dataDir: mkdtempSync(join(base, 'data-')), git: null });
+  // Saved settings with the Assistant off (a fresh install starts with command review on Warn instead).
+  const assistant = new Assistant({ host, dataDir: mkdtempSync(join(base, 'data-')), git: null, settings: {} });
   const caller = { id: 'orch-1234567', provider: 'claude', role: 'orchestrator', title: 'o', status: 'idle', cwd: project, workingDirectory: project };
   assert.match((await assistant.tool('recommend', caller, { task: 'Fix the flaky test' })).content, /triage is off/u);
   assert.equal((await assistant.tool('recommend', caller, {})).isError, true);

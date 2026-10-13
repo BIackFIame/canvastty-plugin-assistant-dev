@@ -1,12 +1,51 @@
 # CanvasTTY Assistant
 
-> **Requires the CanvasTTY core with plugin API v2** (plugin services, launch contributors, session environments, decision hooks, plugin tools and card actions, and the `profile`/`canAsk` decide fields): the upcoming release after 1.7.0. CanvasTTY 1.7.0 and earlier do not have these extension points, so installing it there fails the manifest check.
+> **Requires CanvasTTY 1.8 or later** (plugin API v2: plugin services, launch contributors, decision hooks with the `profile`/`canAsk` fields, plugin tools, session events, card badges and actions). It uses only host APIs CanvasTTY has; nothing in the core is specific to this plugin. CanvasTTY 1.7.0 and earlier do not have these extension points, so installing it there fails the manifest check.
 
 [English](README.md) · [Русский](README.ru.md)
 
 The Assistant («Помощник») for [CanvasTTY](https://github.com/howdeploy/CanvasTTY): a small decision model that
-reviews agents' commands before they run, triages the task you give a card, and advises orchestrators. It is off
-until you turn it on in its settings page; while off it answers nothing and calls nothing.
+reviews agents' commands before they run, triages the task you give a card, and helps orchestrators (routing, flows,
+a task board, loop alerts, session reports). Once you trust its native code it works by itself: command review starts
+on Warn (hard rules only; nothing else enforced) and no model is called unless you set one up.
+
+## Settings
+
+Settings → Plugins → CanvasTTY Assistant → **Settings** has four controls:
+
+| Control | Values | Default |
+|:--|:--|:--|
+| Command review | Strict (anything but read-only commands goes to you) · Warn (hard rules deny; suggestions show on the card) · Off | Warn |
+| Automatic routing | on/off: the `route` tool suggests provider, model and effort | on |
+| Loop alerts | on/off: a `loop?` badge when an agent repeats a command without changing files | on |
+| Flows | on/off: the flow tools and the Flow preview card | on |
+
+Decision models are optional and have their own page (**Decision models…** at the bottom).
+
+## For orchestrators
+
+Nothing is added to HOME, the dock, the launcher or CanvasTTY's own settings. Orchestrators get these tools
+(`canvastty-assistant__<name>`), the cards get three menu actions, and the plugin has two canvas cards you open from
+Settings → Plugins → CanvasTTY Assistant.
+
+- **`route`** `{ task, providers? }`: provider, model and effort for a subagent. Pass `list_providers().providers` so it
+  picks from what is installed and signed in; pass the answer's `spawn` values to CanvasTTY's `spawn_agent`. The
+  difficulty comes from a decision model when one is set up, else from word rules. Accounts stay with the accounts
+  plugin: when `launchOptionTools` lists its `pick_account`, the answer names it.
+- **Flows**: `flows_list`, `flow_plan { flow, goal }`, `flow_status { planId? }`. A plan waits for you in the
+  **Flow preview** card (roles, provider/model, tasks; built-in flows in your language, flows from the project's
+  `.canvastty/flows/*.json|yaml` marked "From this project" and shown as written). Only after **Start** does
+  `flow_status` give the orchestrator what to pass to `spawn_agent`; the roles are added to its task board. The card
+  menu action **Plan from flow…** points the preview at that orchestrator, so you can choose a flow yourself.
+- **Task board**: `task_add` (orchestrator), `task_update` and `task_list` (orchestrator and its subagents; a subagent
+  changes only its own tasks or claims a free one). The **Task board** card shows them by status; the orchestrator
+  card shows `tasks 2/5`, and its menu action **Task board** points the card at it.
+- **Loop alerts**: every shell command reaches the plugin before it runs. The same command five times in one turn with
+  no file write in between puts `loop?` on the card; it clears when the next turn starts. Advisory only.
+- **Report** (card menu, every agent): start time, working time, turns, status and exit code, subagents, commands seen
+  and what review declined or sent to you, loop alerts and tasks. Token use and cost are not available to plugins.
+
+A card has one badge per plugin; the most important signal is shown (loop, flow waiting, review, tasks, triage).
 
 ## What it does
 
@@ -64,6 +103,10 @@ the `profile` and `canAsk` decide fields). Trust the plugin's native code in Set
 
 ```sh
 npm install        # esbuild, typescript
-npm run build      # bundles services/assistant.mjs and settings/assistant.js, stamps the manifest
+npm run build      # bundles the service and the pages, stamps the manifest
 npm test
+CANVASTTY_REPO=/path/to/CanvasTTY npm test   # also: CanvasTTY's validator and an install into its PluginManager
 ```
+
+The end-to-end test needs a CanvasTTY checkout with its `node_modules` and runs with
+`NODE_OPTIONS='--experimental-strip-types --experimental-sqlite'`.

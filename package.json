@@ -1,7 +1,7 @@
 {
   "license": "MIT",
   "name": "canvastty-plugin-assistant",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "private": true,
   "type": "module",
   "description": "CanvasTTY plugin: the Assistant («Помощник») — command review, launch triage and routing advice on System One models (Jev, Laya, Eikos) or a local Ollama model.",

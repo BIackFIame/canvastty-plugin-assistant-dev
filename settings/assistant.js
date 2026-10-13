@@ -6,20 +6,15 @@
   var SERVICE = "assistant";
   var STRINGS = {
     en: {
-      title: "Assistant",
-      lead: "Reviews agents' commands and triages tasks with a small decision model: Jev (TypeSafe, OpenRouter, Vercel), Laya, an Eikos server, or a model on your Ollama. Off by default; while off nothing runs.",
-      enabled: "Assistant on",
+      title: "Decision models",
+      lead: "Optional. A small decision model (Jev: TypeSafe, OpenRouter, Vercel; Laya; an Eikos server; or a model on your Ollama) sharpens command review, task triage and routing. Without one, simple rules are used. Command review itself (Strict, Warn, Off) is set on the Assistant settings page.",
       modes: "Modes",
-      review: "Command review",
       triage: "Task triage (launch and orchestrator)",
       off: "Off",
       shadow: "Learning",
       suggest: "Suggest",
       auto: "Auto",
-      modeHelp: "Learning records answers only. Suggest shows them on the card and enforces nothing. Auto may ask you or decline; it allows only what has qualified on your own answers, and only if CanvasTTY lets this plugin allow.",
-      strictness: "Review strictness",
-      byTask: "By the task (triage)",
-      always: "Always strict",
+      modeHelp: "Learning records answers only. Suggest shows them on the card and enforces nothing. Auto may change what a launch is advised.",
       data: "Data",
       dataMode: "Data check",
       strict: "Strict",
@@ -65,20 +60,15 @@
       notSaved: "Not saved: "
     },
     ru: {
-      title: "\u041F\u043E\u043C\u043E\u0449\u043D\u0438\u043A",
-      lead: "\u041F\u0440\u043E\u0432\u0435\u0440\u044F\u0435\u0442 \u043A\u043E\u043C\u0430\u043D\u0434\u044B \u0430\u0433\u0435\u043D\u0442\u043E\u0432 \u0438 \u0440\u0430\u0437\u0431\u0438\u0440\u0430\u0435\u0442 \u0437\u0430\u0434\u0430\u0447\u0438 \u043C\u0430\u043B\u0435\u043D\u044C\u043A\u043E\u0439 \u043C\u043E\u0434\u0435\u043B\u044C\u044E \u0440\u0435\u0448\u0435\u043D\u0438\u0439: Jev (TypeSafe, OpenRouter, Vercel), Laya, \u0441\u0435\u0440\u0432\u0435\u0440 Eikos \u0438\u043B\u0438 \u043C\u043E\u0434\u0435\u043B\u044C \u0432 \u0432\u0430\u0448\u0435\u0439 Ollama. \u041F\u043E \u0443\u043C\u043E\u043B\u0447\u0430\u043D\u0438\u044E \u0432\u044B\u043A\u043B\u044E\u0447\u0435\u043D; \u0432\u044B\u043A\u043B\u044E\u0447\u0435\u043D\u043D\u044B\u0439 \u043D\u0438\u0447\u0435\u0433\u043E \u043D\u0435 \u0437\u0430\u043F\u0443\u0441\u043A\u0430\u0435\u0442.",
-      enabled: "\u041F\u043E\u043C\u043E\u0449\u043D\u0438\u043A \u0432\u043A\u043B\u044E\u0447\u0451\u043D",
+      title: "\u041C\u043E\u0434\u0435\u043B\u0438 \u0440\u0435\u0448\u0435\u043D\u0438\u0439",
+      lead: "\u041D\u0435\u043E\u0431\u044F\u0437\u0430\u0442\u0435\u043B\u044C\u043D\u043E. \u041C\u0430\u043B\u0435\u043D\u044C\u043A\u0430\u044F \u043C\u043E\u0434\u0435\u043B\u044C \u0440\u0435\u0448\u0435\u043D\u0438\u0439 (Jev: TypeSafe, OpenRouter, Vercel; Laya; \u0441\u0435\u0440\u0432\u0435\u0440 Eikos \u0438\u043B\u0438 \u043C\u043E\u0434\u0435\u043B\u044C \u0432 \u0432\u0430\u0448\u0435\u0439 Ollama) \u0443\u0442\u043E\u0447\u043D\u044F\u0435\u0442 \u043F\u0440\u043E\u0432\u0435\u0440\u043A\u0443 \u043A\u043E\u043C\u0430\u043D\u0434, \u0440\u0430\u0437\u0431\u043E\u0440 \u0437\u0430\u0434\u0430\u0447 \u0438 \u0432\u044B\u0431\u043E\u0440 \u043C\u043E\u0434\u0435\u043B\u0438. \u0411\u0435\u0437 \u043D\u0435\u0451 \u0440\u0430\u0431\u043E\u0442\u0430\u044E\u0442 \u043F\u0440\u043E\u0441\u0442\u044B\u0435 \u043F\u0440\u0430\u0432\u0438\u043B\u0430. \u0421\u0430\u043C\u0443 \u043F\u0440\u043E\u0432\u0435\u0440\u043A\u0443 \u043A\u043E\u043C\u0430\u043D\u0434 (\xAB\u0421\u0442\u0440\u043E\u0433\u043E\xBB, \xAB\u041F\u0440\u0435\u0434\u0443\u043F\u0440\u0435\u0436\u0434\u0430\u0442\u044C\xBB, \xAB\u0412\u044B\u043A\u043B\xBB) \u0437\u0430\u0434\u0430\u044E\u0442 \u043D\u0430 \u0441\u0442\u0440\u0430\u043D\u0438\u0446\u0435 \u043D\u0430\u0441\u0442\u0440\u043E\u0435\u043A \u041F\u043E\u043C\u043E\u0449\u043D\u0438\u043A\u0430.",
       modes: "\u0420\u0435\u0436\u0438\u043C\u044B",
-      review: "\u041F\u0440\u043E\u0432\u0435\u0440\u043A\u0430 \u043A\u043E\u043C\u0430\u043D\u0434",
       triage: "\u0420\u0430\u0437\u0431\u043E\u0440 \u0437\u0430\u0434\u0430\u0447\u0438 (\u0437\u0430\u043F\u0443\u0441\u043A \u0438 \u043E\u0440\u043A\u0435\u0441\u0442\u0440\u0430\u0442\u043E\u0440)",
       off: "\u0412\u044B\u043A\u043B",
       shadow: "\u041E\u0431\u0443\u0447\u0435\u043D\u0438\u0435",
       suggest: "\u041F\u043E\u0434\u0441\u043A\u0430\u0437\u043A\u0438",
       auto: "\u0410\u0432\u0442\u043E",
-      modeHelp: "\u041E\u0431\u0443\u0447\u0435\u043D\u0438\u0435 \u0442\u043E\u043B\u044C\u043A\u043E \u0437\u0430\u043F\u0438\u0441\u044B\u0432\u0430\u0435\u0442 \u043E\u0442\u0432\u0435\u0442\u044B. \u041F\u043E\u0434\u0441\u043A\u0430\u0437\u043A\u0438 \u043F\u043E\u043A\u0430\u0437\u044B\u0432\u0430\u044E\u0442 \u0438\u0445 \u043D\u0430 \u043E\u043A\u043D\u0435 \u0438 \u043D\u0438\u0447\u0435\u0433\u043E \u043D\u0435 \u0440\u0435\u0448\u0430\u044E\u0442. \u0410\u0432\u0442\u043E \u043C\u043E\u0436\u0435\u0442 \u0441\u043F\u0440\u043E\u0441\u0438\u0442\u044C \u0432\u0430\u0441 \u0438\u043B\u0438 \u043E\u0442\u043A\u0430\u0437\u0430\u0442\u044C; \u0440\u0430\u0437\u0440\u0435\u0448\u0430\u0435\u0442 \u0442\u043E\u043B\u044C\u043A\u043E \u0442\u043E, \u0447\u0442\u043E \u043F\u0440\u043E\u0448\u043B\u043E \u043F\u0440\u043E\u0432\u0435\u0440\u043A\u0443 \u043D\u0430 \u0432\u0430\u0448\u0438\u0445 \u043E\u0442\u0432\u0435\u0442\u0430\u0445, \u0438 \u0442\u043E\u043B\u044C\u043A\u043E \u0435\u0441\u043B\u0438 CanvasTTY \u0440\u0430\u0437\u0440\u0435\u0448\u0438\u043B \u044D\u0442\u043E\u043C\u0443 \u043F\u043B\u0430\u0433\u0438\u043D\u0443 \u0440\u0430\u0437\u0440\u0435\u0448\u0430\u0442\u044C.",
-      strictness: "\u0421\u0442\u0440\u043E\u0433\u043E\u0441\u0442\u044C \u043F\u0440\u043E\u0432\u0435\u0440\u043A\u0438",
-      byTask: "\u041F\u043E \u0437\u0430\u0434\u0430\u0447\u0435 (\u0440\u0430\u0437\u0431\u043E\u0440)",
-      always: "\u0412\u0441\u0435\u0433\u0434\u0430 \u0441\u0442\u0440\u043E\u0433\u043E",
+      modeHelp: "\u041E\u0431\u0443\u0447\u0435\u043D\u0438\u0435 \u0442\u043E\u043B\u044C\u043A\u043E \u0437\u0430\u043F\u0438\u0441\u044B\u0432\u0430\u0435\u0442 \u043E\u0442\u0432\u0435\u0442\u044B. \u041F\u043E\u0434\u0441\u043A\u0430\u0437\u043A\u0438 \u043F\u043E\u043A\u0430\u0437\u044B\u0432\u0430\u044E\u0442 \u0438\u0445 \u043D\u0430 \u043E\u043A\u043D\u0435 \u0438 \u043D\u0438\u0447\u0435\u0433\u043E \u043D\u0435 \u0440\u0435\u0448\u0430\u044E\u0442. \u0410\u0432\u0442\u043E \u043C\u043E\u0436\u0435\u0442 \u043C\u0435\u043D\u044F\u0442\u044C \u0441\u043E\u0432\u0435\u0442\u044B \u043F\u0440\u0438 \u0437\u0430\u043F\u0443\u0441\u043A\u0435.",
       data: "\u0414\u0430\u043D\u043D\u044B\u0435",
       dataMode: "\u041F\u0440\u043E\u0432\u0435\u0440\u043A\u0430 \u0434\u0430\u043D\u043D\u044B\u0445",
       strict: "\u0421\u0442\u0440\u043E\u0433\u043E",
@@ -179,12 +169,6 @@
       await load().catch((error) => say(errorText(error)));
     });
     return saving;
-  }
-  function modeSelect(useCase) {
-    const modes = [["off", t.off], ["shadow", t.shadow], ["suggest", t.suggest], ["auto", t.auto]];
-    return select(state.settings.modes[useCase], modes, (value) => void save((s) => {
-      s.modes[useCase] = value;
-    }), useCase);
   }
   function row(label, control) {
     return el("div", { className: "row" }, el("span", { className: "label", textContent: label }), control);
@@ -341,16 +325,13 @@
     root.replaceChildren(
       el("h1", { textContent: t.title }),
       el("p", { className: "muted", textContent: t.lead }),
-      checkbox(s.enabled, t.enabled, (value) => void save((next) => {
-        next.enabled = value;
-      }), "enabled"),
       el("h2", { textContent: t.modes }),
-      row(t.review, modeSelect("command.review")),
-      row(t.triage, modeSelect("task.route")),
+      // Task triage needs the Assistant on; command review's own control keeps it on while review runs.
+      row(t.triage, select(s.modes["task.route"], [["off", t.off], ["shadow", t.shadow], ["suggest", t.suggest], ["auto", t.auto]], (value) => void save((next) => {
+        next.modes["task.route"] = value;
+        next.enabled = value !== "off" || next.modes["command.review"] !== "off";
+      }), "task.route")),
       el("p", { className: "muted", textContent: t.modeHelp }),
-      row(t.strictness, select(s.reviewStrictness, [["triage", t.byTask], ["strict", t.always]], (value) => void save((next) => {
-        next.reviewStrictness = value;
-      }), "strictness")),
       el("h2", { textContent: t.backends }),
       backends,
       addForm(),
@@ -375,6 +356,7 @@
   host.onContext(({ appearance }) => {
     t = appearance.locale === "ru" ? STRINGS.ru : STRINGS.en;
     document.documentElement.lang = appearance.locale;
+    document.documentElement.dataset.palette = appearance.palette === "lilac" || appearance.palette === "night" ? appearance.palette : "sage";
     render();
   });
   host.service.onEvent(({ serviceId, event, data }) => {

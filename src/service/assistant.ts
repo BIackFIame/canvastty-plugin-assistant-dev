@@ -10,6 +10,9 @@ import {
   DATA_CLASSES, normalizeAssistantSettings, validateAssistantSettings,
   type AssistantCheckResult, type AssistantSettings, type DataClass
 } from '../shared/settings.ts';
+import { Harness, type CardSummary } from '../harness/harness.ts';
+import { localeOf, type Locale, type ServiceStrings } from '../harness/i18n.ts';
+import { commandReviewLevel, firstRunAssistantSettings, withCommandReview, COMMAND_REVIEW_LEVELS, type CommandReviewLevel } from '../harness/settings.ts';
 
 /**
  * The Assistant service: one process that answers CanvasTTY's decision hook (command review), its launch pipeline
@@ -22,14 +25,11 @@ import {
 export const DECIDE_BUDGET_MS = 45_000;
 /** The launch triage runs after the launch answered, so it never holds the card. */
 const TRIAGE_DEADLINE_MS = 20_000;
+const TOOL_ADVICE_DEADLINE_MS = 12_000;
 const SETTINGS_KEY = 'settings';
 
 /** A card as CanvasTTY's session events describe it (metadata only). */
-export interface SessionSummary {
-  id: string; provider: string; role: 'agent' | 'orchestrator' | 'subagent'; parentSessionId?: string;
-  title: string; status: string; cwd: string; workingDirectory: string;
-  environment?: { pluginId: string; kind: string; label: string };
-}
+export type SessionSummary = CardSummary;
 
 /** `canvastty.launch.prepare`, with the policy fields CanvasTTY ≥ core2/8 adds. */
 export interface LaunchContext {
@@ -52,10 +52,22 @@ export class Assistant {
   private readonly generations = new Map<string, number>();
   private readonly checks = new Map<string, AssistantCheckResult | { running: true } | { error: string }>();
   private readonly registered = new Set<string>();
+  readonly harness: Harness;
 
-  constructor(options: { host: Host; dataDir: string; settings?: unknown; transport?: typeof fetch; git?: null }) {
+  constructor(options: { host: Host; dataDir: string; settings?: unknown; harness?: unknown; locale?: unknown; transport?: typeof fetch; git?: null; now?: () => number }) {
     this.host = options.host;
-    this.settings = normalizeAssistantSettings(options.settings);
+    // Nothing saved yet: a fresh install starts with command review on Warn (see harness/settings.ts).
+    this.settings = options.settings === null || options.settings === undefined ? firstRunAssistantSettings() : normalizeAssistantSettings(options.settings);
+    const locale: Locale = localeOf(options.locale);
+    this.harness = new Harness({
+      host: options.host, dataDir: options.dataDir, locale, ...(options.now ? { now: options.now } : {}),
+      publishBadge: (sessionId, badge) => this.host.callHost('cards.setBadge', { sessionId, badge }).then(() => undefined, () => undefined),
+      modelDifficulty: async (task, caller, deadlineMs) => {
+        const answer = await this.advice(task, null, caller.workingDirectory || caller.cwd || process.cwd(), caller.id, deadlineMs);
+        return answer.kind === 'advice' ? answer.advice.difficulty : null;
+      }
+    });
+    this.harness.loadSettings(options.harness);
     const secrets: DecisionSecretsLike = {
       statusFor: async owner => {
         const stored = await this.readKey(owner);
@@ -77,7 +89,7 @@ export class Assistant {
     this.review = new ReviewService({
       engine: this.engine, settings: () => this.settings,
       ...(options.git === null ? { git: null } : {}),
-      suggest: (sessionId, verdict, summary) => { void this.badge(sessionId, suggestionBadge(verdict, summary)); }
+      suggest: (sessionId, verdict, summary) => { void this.harness.setBadge(sessionId, 'review', suggestionBadge(verdict, summary, this.harness.strings)); }
     });
   }
 
@@ -101,22 +113,20 @@ export class Assistant {
     return null;
   }
 
-  private async badge(sessionId: string, badge: { text: string; tone: string; tooltip?: string } | null): Promise<void> {
-    await this.host.callHost('cards.setBadge', { sessionId, badge }).catch(() => undefined);
-  }
-
   // -------------------------------------------------------------------------
   // Sessions (sessions:events)
   // -------------------------------------------------------------------------
 
   sessionsKnown(list: unknown): void {
     if (!Array.isArray(list)) return;
+    this.harness.sessionsKnown(list);
     for (const session of list) if (session && typeof session === 'object' && typeof (session as SessionSummary).id === 'string') this.sessions.set((session as SessionSummary).id, session as SessionSummary);
   }
 
   sessionEvent(event: { type?: unknown; session?: unknown }): void {
     const session = event.session as SessionSummary | undefined;
     if (!session || typeof session.id !== 'string') return;
+    this.harness.sessionEvent(event);
     if (event.type === 'closed') { this.sessions.delete(session.id); this.review.forget(session.id); return; }
     this.sessions.set(session.id, session);
   }
@@ -125,9 +135,12 @@ export class Assistant {
   // EP-5: the decision hook
   // -------------------------------------------------------------------------
 
-  decide(params: Record<string, unknown>): Promise<DecideAnswer> {
+  async decide(params: Record<string, unknown>): Promise<DecideAnswer> {
     const budget = typeof params.budgetMs === 'number' && Number.isFinite(params.budgetMs) ? params.budgetMs : 3_000;
-    return this.review.decide(params as unknown as DecideRequest, Math.min(budget, DECIDE_BUDGET_MS));
+    const answer = await this.review.decide(params as unknown as DecideRequest, Math.min(budget, DECIDE_BUDGET_MS));
+    // Loop alerts and the session report see every call, whatever command review answered (or if it is off).
+    try { this.harness.observeDecision(params, answer?.verdict ?? null); } catch { /* advisory only */ }
+    return answer;
   }
 
   // -------------------------------------------------------------------------
@@ -156,13 +169,13 @@ export class Assistant {
     const advice = await this.advice(task, dataClass, cwd, sessionId).catch(() => null);
     if (!advice || advice.kind !== 'advice') { this.review.noteTriage(sessionId, false); return; }
     this.review.noteTriage(sessionId, advice.advice.reviewStrict);
-    await this.badge(sessionId, triageBadge(advice.advice));
+    await this.harness.setBadge(sessionId, 'triage', triageBadge(advice.advice));
   }
 
   /** task.route + the policy. `kind` says why there is no advice (off, learning, no answer). */
-  async advice(task: string, dataClass: DataClass | null, cwd: string, sessionId?: string): Promise<{ kind: 'advice'; advice: Advice; model: string | null } | { kind: 'off' | 'learning' | 'unavailable'; reason: string | null }> {
+  async advice(task: string, dataClass: DataClass | null, cwd: string, sessionId?: string, deadlineMs = TRIAGE_DEADLINE_MS): Promise<{ kind: 'advice'; advice: Advice; model: string | null } | { kind: 'off' | 'learning' | 'unavailable'; reason: string | null }> {
     const controller = new AbortController();
-    const timer = setTimeout(() => controller.abort(), TRIAGE_DEADLINE_MS);
+    const timer = setTimeout(() => controller.abort(), deadlineMs);
     try {
       const { decision, triage } = await askTaskRoute(this.engine, { task, dataClass: dataClass ?? this.settings.defaultDataClass }, {
         signal: controller.signal, assertCurrent: () => undefined, requester: 'person', ...(sessionId ? { sessionId } : {})
@@ -181,11 +194,13 @@ export class Assistant {
   // -------------------------------------------------------------------------
 
   async tool(name: string, caller: SessionSummary | undefined, input: Record<string, unknown>): Promise<{ content: unknown; isError?: boolean }> {
+    if (this.harness.handles(name)) return this.harness.tool(name, caller, input);
     if (name === 'recommend') {
       const task = text(input.task, 2_000);
       if (!task) return { content: 'Give the task text in `task`.', isError: true };
       const cwd = caller?.workingDirectory || caller?.cwd || process.cwd();
-      const answer = await this.advice(task, null, cwd, caller?.id);
+      // CanvasTTY gives a tool 15 s; the advice must come back before that.
+      const answer = await this.advice(task, null, cwd, caller?.id, TOOL_ADVICE_DEADLINE_MS);
       if (answer.kind === 'off') return { content: 'The Assistant\'s task triage is off (Assistant settings in CanvasTTY).' };
       if (answer.kind === 'learning') return { content: 'The Assistant\'s task triage is learning and gives no advice yet.' };
       if (answer.kind !== 'advice') return { content: `No decision model answered (${answer.reason ?? 'unavailable'}); decide as you would without the Assistant.` };
@@ -224,6 +239,20 @@ export class Assistant {
     return { settings: this.settings, status, slots, checks: Object.fromEntries(this.checks), recent: this.review.recent() };
   }
 
+  /** The harness page: its four controls (command review here, the rest in the harness) and nothing else. */
+  harnessState(): { commandReview: CommandReviewLevel; routing: boolean; loopAlerts: boolean; flows: boolean; models: number } {
+    return { commandReview: commandReviewLevel(this.settings), ...this.harness.settings, models: this.settings.backends.filter(entry => entry.enabled).length };
+  }
+
+  async saveHarness(value: unknown): Promise<unknown> {
+    const record = value && typeof value === 'object' && !Array.isArray(value) ? value as Record<string, unknown> : {};
+    const { commandReview, ...rest } = record;
+    if (!COMMAND_REVIEW_LEVELS.includes(commandReview as CommandReviewLevel)) throw new Error('Command review is Strict, Warn or Off.');
+    await this.harness.saveSettings(rest);
+    if (commandReview !== commandReviewLevel(this.settings)) await this.save(withCommandReview(this.settings, commandReview as CommandReviewLevel));
+    return this.harnessState();
+  }
+
   async save(value: unknown): Promise<AssistantSettings> {
     const next = validateAssistantSettings(value);
     await this.host.callHost('storage.set', { key: SETTINGS_KEY, value: next });
@@ -253,14 +282,14 @@ export class Assistant {
   }
 }
 
-function suggestionBadge(verdict: CommandReviewVerdict, summary: string): { text: string; tone: string; tooltip: string } | null {
-  if (verdict.outcome === 'allow') return { text: 'review: fine', tone: 'info', tooltip: `Assistant suggestion (not enforced): ${summary}` };
-  if (verdict.outcome === 'deny') return { text: 'review: risky', tone: 'warn', tooltip: `Assistant suggestion (not enforced): do not run ${summary}` };
+function suggestionBadge(verdict: CommandReviewVerdict, summary: string, strings: ServiceStrings): { text: string; tone: 'info' | 'warn'; tooltip: string } | null {
+  if (verdict.outcome === 'allow') return { text: strings.reviewFine, tone: 'info', tooltip: strings.reviewTip(summary) };
+  if (verdict.outcome === 'deny') return { text: strings.reviewRisky, tone: 'warn', tooltip: strings.reviewTip(summary) };
   if (verdict.reason === 'unavailable') return null;
-  return { text: 'review: ask me', tone: 'warn', tooltip: `Assistant suggestion (not enforced): the person should decide on ${summary} (${verdict.reason})` };
+  return { text: strings.reviewAsk, tone: 'warn', tooltip: strings.reviewTip(`${summary} (${verdict.reason})`) };
 }
 
-function triageBadge(advice: Advice): { text: string; tone: string; tooltip: string } {
+function triageBadge(advice: Advice): { text: string; tone: 'info' | 'warn'; tooltip: string } {
   const label = `${advice.difficulty} · ${advice.category}`.slice(0, 24);
   const hints = [
     advice.isolation !== 'direct' ? `better in a ${advice.isolation}` : '',

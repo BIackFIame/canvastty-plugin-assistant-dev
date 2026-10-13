@@ -1,11 +1,12 @@
-// The Assistant's settings page (bundled to settings/assistant.js). It runs in CanvasTTY's sandboxed plugin frame:
+// The Assistant's decision models page (bundled to settings/assistant.js); command review itself is set on the
+// plugin's settings page (settings/harness.html). It runs in CanvasTTY's sandboxed plugin frame:
 // settings go through the service (which validates and stores them), keys are written straight into the plugin's
 // secrets and never read back — the page only learns whether one exists.
 import type { AssistantBackendPreset, AssistantBackendSettings, AssistantBackendStatus, AssistantCheckResult, AssistantSettings } from '../shared/settings.ts';
 import type { RecentReview } from '../review/reviewService.ts';
 
 interface PluginHost {
-  onContext(listener: (context: { appearance: { locale: 'ru' | 'en' } }) => void): void;
+  onContext(listener: (context: { appearance: { locale: 'ru' | 'en'; palette?: string } }) => void): void;
   secrets: { set(key: string, value: string): Promise<void>; delete(key: string): Promise<void> };
   service: {
     request(serviceId: string, method: string, params?: unknown): Promise<unknown>;
@@ -25,11 +26,10 @@ const SERVICE = 'assistant';
 
 const STRINGS = {
   en: {
-    title: 'Assistant', lead: 'Reviews agents\' commands and triages tasks with a small decision model: Jev (TypeSafe, OpenRouter, Vercel), Laya, an Eikos server, or a model on your Ollama. Off by default; while off nothing runs.',
-    enabled: 'Assistant on', modes: 'Modes', review: 'Command review', triage: 'Task triage (launch and orchestrator)',
+    title: 'Decision models', lead: 'Optional. A small decision model (Jev: TypeSafe, OpenRouter, Vercel; Laya; an Eikos server; or a model on your Ollama) sharpens command review, task triage and routing. Without one, simple rules are used. Command review itself (Strict, Warn, Off) is set on the Assistant settings page.',
+    modes: 'Modes', triage: 'Task triage (launch and orchestrator)',
     off: 'Off', shadow: 'Learning', suggest: 'Suggest', auto: 'Auto',
-    modeHelp: 'Learning records answers only. Suggest shows them on the card and enforces nothing. Auto may ask you or decline; it allows only what has qualified on your own answers, and only if CanvasTTY lets this plugin allow.',
-    strictness: 'Review strictness', byTask: 'By the task (triage)', always: 'Always strict',
+    modeHelp: 'Learning records answers only. Suggest shows them on the card and enforces nothing. Auto may change what a launch is advised.',
     data: 'Data', dataMode: 'Data check', strict: 'Strict', warn: 'Warn only', dataOff: 'Off',
     grant: 'What may leave this computer', grantOff: 'Only code facts (no text)', grantD1: 'Texts up to D1', grantD2: 'Texts up to D2',
     defaultClass: 'Class of card text', engine: 'Where it runs', engineAuto: 'Jev first, then this computer', engineJev: 'Jev only', engineLocal: 'This computer only',
@@ -43,11 +43,10 @@ const STRINGS = {
     saved: 'Saved.', notSaved: 'Not saved: '
   },
   ru: {
-    title: 'Помощник', lead: 'Проверяет команды агентов и разбирает задачи маленькой моделью решений: Jev (TypeSafe, OpenRouter, Vercel), Laya, сервер Eikos или модель в вашей Ollama. По умолчанию выключен; выключенный ничего не запускает.',
-    enabled: 'Помощник включён', modes: 'Режимы', review: 'Проверка команд', triage: 'Разбор задачи (запуск и оркестратор)',
+    title: 'Модели решений', lead: 'Необязательно. Маленькая модель решений (Jev: TypeSafe, OpenRouter, Vercel; Laya; сервер Eikos или модель в вашей Ollama) уточняет проверку команд, разбор задач и выбор модели. Без неё работают простые правила. Саму проверку команд («Строго», «Предупреждать», «Выкл») задают на странице настроек Помощника.',
+    modes: 'Режимы', triage: 'Разбор задачи (запуск и оркестратор)',
     off: 'Выкл', shadow: 'Обучение', suggest: 'Подсказки', auto: 'Авто',
-    modeHelp: 'Обучение только записывает ответы. Подсказки показывают их на окне и ничего не решают. Авто может спросить вас или отказать; разрешает только то, что прошло проверку на ваших ответах, и только если CanvasTTY разрешил этому плагину разрешать.',
-    strictness: 'Строгость проверки', byTask: 'По задаче (разбор)', always: 'Всегда строго',
+    modeHelp: 'Обучение только записывает ответы. Подсказки показывают их на окне и ничего не решают. Авто может менять советы при запуске.',
     data: 'Данные', dataMode: 'Проверка данных', strict: 'Строго', warn: 'Только предупреждать', dataOff: 'Выкл',
     grant: 'Что может уйти с этого компьютера', grantOff: 'Только служебные признаки (без текста)', grantD1: 'Тексты до D1', grantD2: 'Тексты до D2',
     defaultClass: 'Класс текста окна', engine: 'Где работает', engineAuto: 'Сначала Jev, потом этот компьютер', engineJev: 'Только Jev', engineLocal: 'Только этот компьютер',
@@ -125,10 +124,6 @@ function save(change: (settings: AssistantSettings) => void): Promise<void> {
   return saving;
 }
 
-function modeSelect(useCase: 'command.review' | 'task.route'): HTMLSelectElement {
-  const modes: Array<['off' | 'shadow' | 'suggest' | 'auto', string]> = [['off', t.off], ['shadow', t.shadow], ['suggest', t.suggest], ['auto', t.auto]];
-  return select(state!.settings.modes[useCase], modes, value => void save(s => { s.modes[useCase] = value; }), useCase);
-}
 
 function row(label: string, control: Node): HTMLDivElement { return el('div', { className: 'row' }, el('span', { className: 'label', textContent: label }), control); }
 
@@ -265,12 +260,13 @@ function render(): void {
   root.replaceChildren(
     el('h1', { textContent: t.title }),
     el('p', { className: 'muted', textContent: t.lead }),
-    checkbox(s.enabled, t.enabled, value => void save(next => { next.enabled = value; }), 'enabled'),
     el('h2', { textContent: t.modes }),
-    row(t.review, modeSelect('command.review')),
-    row(t.triage, modeSelect('task.route')),
+    // Task triage needs the Assistant on; command review's own control keeps it on while review runs.
+    row(t.triage, select(s.modes['task.route'], [['off', t.off], ['shadow', t.shadow], ['suggest', t.suggest], ['auto', t.auto]], value => void save(next => {
+      next.modes['task.route'] = value;
+      next.enabled = value !== 'off' || next.modes['command.review'] !== 'off';
+    }), 'task.route')),
     el('p', { className: 'muted', textContent: t.modeHelp }),
-    row(t.strictness, select(s.reviewStrictness, [['triage', t.byTask], ['strict', t.always]], value => void save(next => { next.reviewStrictness = value; }), 'strictness')),
     el('h2', { textContent: t.backends }),
     backends,
     addForm(),
@@ -288,6 +284,7 @@ function render(): void {
 host.onContext(({ appearance }) => {
   t = appearance.locale === 'ru' ? STRINGS.ru : STRINGS.en;
   document.documentElement.lang = appearance.locale;
+  document.documentElement.dataset.palette = appearance.palette === 'lilac' || appearance.palette === 'night' ? appearance.palette : 'sage';
   render();
 });
 host.service.onEvent(({ serviceId, event, data }) => {
