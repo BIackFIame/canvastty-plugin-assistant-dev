@@ -1,3 +1,5 @@
+import { visibleText } from './flowFile.ts';
+
 /**
  * Task boards, one per orchestrator card, fed by agent tools: the orchestrator adds tasks, its subagents claim and
  * update them, and an approved flow adds one task per role. The Task board canvas card only reads them. Kept in the
@@ -23,7 +25,7 @@ export interface Board { orchestratorId: string; title: string; tasks: Task[]; n
 
 export const TASK_LIMITS = Object.freeze({ boards: 32, tasks: 100, title: 200, detail: 2_000, note: 500 });
 
-const clean = (value: unknown, max: number): string => typeof value === 'string' ? value.replace(/[\u0000-\u0008\u000b-\u001f\u007f]/gu, ' ').trim().slice(0, max) : '';
+const clean = (value: unknown, max: number): string => typeof value === 'string' ? visibleText(value, true).trim().slice(0, max) : '';
 
 export class TaskBoards {
   private boards = new Map<string, Board>();
@@ -33,11 +35,20 @@ export class TaskBoards {
   constructor(initial: unknown, deps: { save(boards: Board[]): void; changed(board: Board): void }) {
     this.save = deps.save;
     this.onChange = deps.changed;
+    // The file is the plugin's own, but anything on this computer could have written it: only valid boards load.
     if (Array.isArray(initial)) {
-      for (const board of initial.slice(-TASK_LIMITS.boards)) {
-        if (board && typeof board === 'object' && typeof board.orchestratorId === 'string' && Array.isArray(board.tasks)) this.boards.set(board.orchestratorId, board as Board);
+      for (const candidate of initial.slice(-TASK_LIMITS.boards)) {
+        const board = loadBoard(candidate);
+        if (board) this.boards.set(board.orchestratorId, board);
       }
     }
+  }
+
+  /** Boards of orchestrators that are gone (closed while the service was not running) go too. */
+  retainOrchestrators(known: ReadonlySet<string>): string[] {
+    const gone = [...this.boards.keys()].filter(id => !known.has(id));
+    for (const id of gone) this.forget(id);
+    return gone;
   }
 
   list(): Board[] { return structuredClone([...this.boards.values()]); }
@@ -113,6 +124,37 @@ export class TaskBoards {
     this.save([...this.boards.values()]);
     this.onChange(structuredClone(board));
   }
+}
+
+const isText = (value: unknown, max: number): value is string => typeof value === 'string' && value.length <= max;
+const isTime = (value: unknown): value is number => typeof value === 'number' && Number.isFinite(value) && value >= 0;
+
+function loadTask(value: unknown): Task | null {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return null;
+  const task = value as Record<string, unknown>;
+  if (!isText(task.id, 12) || !/^t\d{1,9}$/u.test(task.id) || !isText(task.title, TASK_LIMITS.title) || !task.title || !TASK_STATUSES.includes(task.status as TaskStatus)) return null;
+  if (task.addedBy !== 'orchestrator' && task.addedBy !== 'flow') return null;
+  if (!isTime(task.createdAt) || !isTime(task.updatedAt)) return null;
+  return {
+    id: task.id, title: clean(task.title, TASK_LIMITS.title), detail: clean(task.detail, TASK_LIMITS.detail), status: task.status as TaskStatus,
+    assignee: isText(task.assignee, 200) && task.assignee ? task.assignee : null, note: clean(task.note, TASK_LIMITS.note),
+    addedBy: task.addedBy, createdAt: task.createdAt, updatedAt: task.updatedAt
+  };
+}
+
+function loadBoard(value: unknown): Board | null {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return null;
+  const board = value as Record<string, unknown>;
+  if (!isText(board.orchestratorId, 200) || !board.orchestratorId || !Array.isArray(board.tasks)) return null;
+  const tasks: Task[] = [];
+  for (const candidate of board.tasks.slice(0, TASK_LIMITS.tasks)) {
+    const task = loadTask(candidate);
+    if (task && !tasks.some(other => other.id === task.id)) tasks.push(task);
+  }
+  // The next id is past every id in use, whatever the file says.
+  const used = Math.max(0, ...tasks.map(task => Number(task.id.slice(1))));
+  const saved = Number.isSafeInteger(board.nextId) && (board.nextId as number) <= 1e9 ? board.nextId as number : 0;
+  return { orchestratorId: board.orchestratorId, title: clean(board.title, 120) || board.orchestratorId.slice(0, 8), tasks, nextId: Math.max(used + 1, saved, 1) };
 }
 
 const latest = (board: Board): number => Math.max(0, ...board.tasks.map(task => task.updatedAt));

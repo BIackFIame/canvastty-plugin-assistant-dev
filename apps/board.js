@@ -4,12 +4,18 @@
   // src/ui/common.ts
   var host = window.CanvasTTYPlugin;
   var SERVICE = "assistant";
+  function applyAppearance(appearance) {
+    const locale = appearance.locale === "ru" ? "ru" : "en";
+    const root2 = document.documentElement;
+    root2.lang = locale;
+    root2.dataset.palette = appearance.palette === "lilac" || appearance.palette === "night" ? appearance.palette : "sage";
+    const scale = typeof appearance.uiScale === "number" ? appearance.uiScale : typeof appearance.scale === "number" ? appearance.scale : null;
+    if (scale !== null && Number.isFinite(scale) && scale >= 0.5 && scale <= 3) root2.style?.setProperty("--ui-scale", String(scale));
+    return locale;
+  }
   function onContext(render2) {
     host.onContext(({ appearance }) => {
-      const locale = appearance.locale === "ru" ? "ru" : "en";
-      document.documentElement.lang = locale;
-      document.documentElement.dataset.palette = appearance.palette === "lilac" || appearance.palette === "night" ? appearance.palette : "sage";
-      render2(locale);
+      render2(applyAppearance(appearance));
     });
   }
   function el(tag, props = {}, ...children) {

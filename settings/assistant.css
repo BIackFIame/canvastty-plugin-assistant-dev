@@ -1,18 +1,18 @@
 /* The decision models page. Colours and type come from ../apps/harness.css (CanvasTTY's palette tokens). */
-body { padding: 12px 16px 40px; }
-h1 { font-size: 15px; margin: 0 0 4px; }
-h2 { font-size: 13px; margin: 16px 0 6px; }
-.row { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; margin: 4px 0; }
-.label { min-width: 190px; }
-.check { display: block; margin: 4px 0; }
+body { padding: 0.92rem 1.23rem 3.08rem; }
+h1 { font-size: 1.15rem; margin: 0 0 0.31rem; }
+h2 { font-size: 1rem; margin: 1.23rem 0 0.46rem; }
+.row { display: flex; gap: 0.62rem; align-items: center; flex-wrap: wrap; margin: 0.31rem 0; }
+.label { min-width: 14.62rem; }
+.check { display: block; margin: 0.31rem 0; }
 select, input, button { font: inherit; color: inherit; }
-select, input:not([type]), input[type="password"] { min-height: 30px; padding: 3px 8px; border: 1px solid var(--line); border-radius: var(--radius-sm); background: var(--surface-soft); }
-input:not([type]), input[type="password"] { min-width: 160px; }
-button { min-height: 30px; padding: 4px 12px; border: 0; border-radius: var(--radius-sm); background: var(--surface-soft); cursor: pointer; }
-.backends, .recent { list-style: none; margin: 0 0 8px; padding: 0; display: grid; gap: 6px; }
-.backend { padding: 8px 10px; border-radius: var(--radius-md); background: var(--surface-soft); }
+select, input:not([type]), input[type="password"] { min-height: 2.31rem; padding: 0.23rem 0.62rem; border: 1px solid var(--line); border-radius: var(--radius-sm); background: var(--surface-soft); }
+input:not([type]), input[type="password"] { min-width: 12.31rem; }
+button { min-height: 2.31rem; padding: 0.31rem 0.92rem; border: 0; border-radius: var(--radius-sm); background: var(--surface-soft); cursor: pointer; }
+.backends, .recent { list-style: none; margin: 0 0 0.62rem; padding: 0; display: grid; gap: 0.46rem; }
+.backend { padding: 0.62rem 0.77rem; border-radius: var(--radius-md); background: var(--surface-soft); }
 .backend button, .backend select, .backend input { background: var(--surface); }
-.check-result { margin-top: 4px; font-size: 12px; }
-.add { display: flex; gap: 6px; flex-wrap: wrap; align-items: center; margin: 6px 0; }
-.recent code { font-size: 12px; }
-.status { position: fixed; left: 0; right: 0; bottom: 0; padding: 6px 16px; min-height: 1.4em; background: var(--surface); border-top: 1px solid var(--line); }
+.check-result { margin-top: 0.31rem; font-size: 0.92rem; }
+.add { display: flex; gap: 0.46rem; flex-wrap: wrap; align-items: center; margin: 0.46rem 0; }
+.recent code { font-size: 0.92rem; }
+.status { position: fixed; left: 0; right: 0; bottom: 0; padding: 0.46rem 1.23rem; min-height: 1.4em; background: var(--surface); border-top: 1px solid var(--line); }

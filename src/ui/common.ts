@@ -3,7 +3,7 @@
 export type PageLocale = 'en' | 'ru';
 
 export interface PluginHost {
-  onContext(listener: (context: { appearance: { locale: string; palette?: string } }) => void): void;
+  onContext(listener: (context: { appearance: Appearance }) => void): void;
   service: {
     request(serviceId: string, method: string, params?: unknown): Promise<unknown>;
     onEvent(listener: (event: { serviceId: string; event: string; data: unknown }) => void): void;
@@ -12,17 +12,28 @@ export interface PluginHost {
   onVisibilityChange?(listener: (state: 'visible' | 'hidden') => void): void;
 }
 
+/** What CanvasTTY's context says about the look. `uiScale` (or `scale`) is read when a host version sends it. */
+export interface Appearance { locale: string; palette?: string; uiScale?: unknown; scale?: unknown }
+
 export const host = (window as unknown as { CanvasTTYPlugin: PluginHost }).CanvasTTYPlugin;
 export const SERVICE = 'assistant';
 
-/** Follows CanvasTTY's language and system palette (sage, lilac, night); the page's tokens are in apps/harness.css. */
+/**
+ * Language, system palette (sage, lilac, night) and, when the host sends it, the interface scale as `--ui-scale` on
+ * the root: every size in apps/harness.css is in rem/em from `calc(13px * var(--ui-scale, 1))`.
+ */
+export function applyAppearance(appearance: Appearance): PageLocale {
+  const locale: PageLocale = appearance.locale === 'ru' ? 'ru' : 'en';
+  const root = document.documentElement;
+  root.lang = locale;
+  root.dataset.palette = appearance.palette === 'lilac' || appearance.palette === 'night' ? appearance.palette : 'sage';
+  const scale = typeof appearance.uiScale === 'number' ? appearance.uiScale : typeof appearance.scale === 'number' ? appearance.scale : null;
+  if (scale !== null && Number.isFinite(scale) && scale >= 0.5 && scale <= 3) root.style?.setProperty('--ui-scale', String(scale));
+  return locale;
+}
+
 export function onContext(render: (locale: PageLocale) => void): void {
-  host.onContext(({ appearance }) => {
-    const locale: PageLocale = appearance.locale === 'ru' ? 'ru' : 'en';
-    document.documentElement.lang = locale;
-    document.documentElement.dataset.palette = appearance.palette === 'lilac' || appearance.palette === 'night' ? appearance.palette : 'sage';
-    render(locale);
-  });
+  host.onContext(({ appearance }) => { render(applyAppearance(appearance)); });
 }
 
 export function el<K extends keyof HTMLElementTagNameMap>(tag: K, props: Partial<HTMLElementTagNameMap[K]> & { dataset?: Record<string, string> } = {}, ...children: Array<Node | string | null | false>): HTMLElementTagNameMap[K] {
@@ -60,9 +71,10 @@ export function toggle(name: string, checked: boolean, label: string, onChange: 
 }
 
 /** One settings row: label and help on the left, one control on the right. */
-export function settingRow(label: string, help: string, control: Node): HTMLDivElement {
+export function settingRow(label: string, help: string | Node, control: Node): HTMLDivElement {
+  const helpNode = typeof help === 'string' ? el('div', { className: 'setting-row__help', textContent: help }) : el('div', { className: 'setting-row__help' }, help);
   return el('div', { className: 'setting-row' },
-    el('div', { className: 'setting-row__copy' }, el('div', { className: 'setting-row__label', textContent: label }), el('div', { className: 'setting-row__help', textContent: help })),
+    el('div', { className: 'setting-row__copy' }, el('div', { className: 'setting-row__label', textContent: label }), helpNode),
     el('div', { className: 'setting-row__control' }, control));
 }
 

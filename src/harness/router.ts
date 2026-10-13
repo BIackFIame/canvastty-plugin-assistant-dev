@@ -52,7 +52,8 @@ function usable(entry: ProviderEntry): boolean {
 }
 
 function pickModel(entry: ProviderEntry | undefined, difficulty: Difficulty): string | undefined {
-  const known = entry?.model?.supported === false ? [] : (entry?.model?.known ?? []).filter(name => typeof name === 'string' && name.length > 0 && name.length <= 200);
+  const listed = entry?.model && typeof entry.model === 'object' && Array.isArray(entry.model.known) ? entry.model.known : [];
+  const known = entry?.model?.supported === false ? [] : listed.filter(name => typeof name === 'string' && name.length > 0 && name.length <= 200).slice(0, 64);
   if (!known.length || difficulty === 'normal') return undefined;
   const ranked = [...known].sort((a, b) => modelRank(a) - modelRank(b));
   const chosen = difficulty === 'simple' ? ranked[0]! : ranked.at(-1)!;
@@ -61,7 +62,7 @@ function pickModel(entry: ProviderEntry | undefined, difficulty: Difficulty): st
 }
 
 function pickEffort(entry: ProviderEntry | undefined, difficulty: Difficulty): string | undefined {
-  const efforts = entry?.efforts ?? [];
+  const efforts = Array.isArray(entry?.efforts) ? entry.efforts.filter(effort => typeof effort === 'string') : [];
   if (difficulty === 'simple') return efforts.find(effort => effort === 'low');
   if (difficulty === 'hard') return efforts.find(effort => effort === 'high') ?? efforts.find(effort => effort === 'xhigh');
   return undefined;
@@ -71,7 +72,7 @@ export function suggestRoute(input: {
   difficulty: Difficulty; source: 'model' | 'rules'; callerProvider: string | null; providers: ProviderEntry[];
   prefer?: string | null; launchOptionTools?: string[];
 }): RouteSuggestion | null {
-  const listed = input.providers.filter(entry => entry && typeof entry.id === 'string');
+  const listed = (Array.isArray(input.providers) ? input.providers : []).filter(entry => entry && typeof entry === 'object' && typeof entry.id === 'string');
   const candidates = listed.filter(usable);
   const byId = (id: string | null | undefined): ProviderEntry | undefined => id ? candidates.find(entry => entry.id === id) : undefined;
   let entry = byId(input.prefer) ?? byId(input.callerProvider);
@@ -81,7 +82,7 @@ export function suggestRoute(input: {
   if (!provider) return null;
   const model = pickModel(entry, input.difficulty);
   const effort = pickEffort(entry, input.difficulty);
-  const accountTool = (input.launchOptionTools ?? []).find(name => /__(?:pick_account|pick_route)$/u.test(name));
+  const accountTool = (Array.isArray(input.launchOptionTools) ? input.launchOptionTools : []).find(name => typeof name === 'string' && /__(?:pick_account|pick_route)$/u.test(name));
   const why = input.difficulty === 'simple' ? 'a routine task: a small, quick model is enough'
     : input.difficulty === 'hard' ? 'a difficult task: use the strongest model offered'
       : 'a task of ordinary difficulty: the provider default fits';

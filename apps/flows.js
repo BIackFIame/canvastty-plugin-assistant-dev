@@ -4,12 +4,18 @@
   // src/ui/common.ts
   var host = window.CanvasTTYPlugin;
   var SERVICE = "assistant";
+  function applyAppearance(appearance) {
+    const locale = appearance.locale === "ru" ? "ru" : "en";
+    const root2 = document.documentElement;
+    root2.lang = locale;
+    root2.dataset.palette = appearance.palette === "lilac" || appearance.palette === "night" ? appearance.palette : "sage";
+    const scale = typeof appearance.uiScale === "number" ? appearance.uiScale : typeof appearance.scale === "number" ? appearance.scale : null;
+    if (scale !== null && Number.isFinite(scale) && scale >= 0.5 && scale <= 3) root2.style?.setProperty("--ui-scale", String(scale));
+    return locale;
+  }
   function onContext(render2) {
     host.onContext(({ appearance }) => {
-      const locale = appearance.locale === "ru" ? "ru" : "en";
-      document.documentElement.lang = locale;
-      document.documentElement.dataset.palette = appearance.palette === "lilac" || appearance.palette === "night" ? appearance.palette : "sage";
-      render2(locale);
+      render2(applyAppearance(appearance));
     });
   }
   function el(tag, props = {}, ...children) {
@@ -42,7 +48,7 @@
     en: {
       off: "Flows are off in the Assistant settings.",
       waiting: "Waiting for you",
-      none: "No flow is waiting. When an orchestrator proposes one, it appears here before anything starts.",
+      none: "No flow is waiting. When an orchestrator asks you to approve one, it appears here.",
       flow: "Flow",
       builtIn: "Built in",
       project: "From this project",
@@ -54,7 +60,8 @@
       task: "Task",
       auto: "chosen by the orchestrator",
       providerDefault: "default model",
-      unchanged: "Permissions are unchanged: each agent uses the launch profile of its orchestrator, and CanvasTTY checks every launch.",
+      request: "Start tells the orchestrator it may go ahead and hands it these roles. This is a request it is told to follow, not a lock: CanvasTTY cannot yet stop an orchestrator that starts agents without it. Each agent still goes through CanvasTTY's own launch checks.",
+      changed: "The plan changed: the orchestrator replaced the plan that was shown here. Read it again before you start.",
       start: "Start",
       cancel: "Cancel",
       started: "Started. The orchestrator gets the plan with flow_status; if it is not waiting for it, tell it to run the approved flow.",
@@ -74,7 +81,7 @@
     ru: {
       off: "\u0421\u0446\u0435\u043D\u0430\u0440\u0438\u0438 \u0432\u044B\u043A\u043B\u044E\u0447\u0435\u043D\u044B \u0432 \u043D\u0430\u0441\u0442\u0440\u043E\u0439\u043A\u0430\u0445 \u041F\u043E\u043C\u043E\u0449\u043D\u0438\u043A\u0430.",
       waiting: "\u0416\u0434\u0451\u0442 \u0432\u0430\u0441",
-      none: "\u041D\u0435\u0442 \u0441\u0446\u0435\u043D\u0430\u0440\u0438\u0435\u0432, \u0436\u0434\u0443\u0449\u0438\u0445 \u0440\u0435\u0448\u0435\u043D\u0438\u044F. \u041A\u043E\u0433\u0434\u0430 \u043E\u0440\u043A\u0435\u0441\u0442\u0440\u0430\u0442\u043E\u0440 \u043F\u0440\u0435\u0434\u043B\u043E\u0436\u0438\u0442 \u0441\u0446\u0435\u043D\u0430\u0440\u0438\u0439, \u043E\u043D \u043F\u043E\u044F\u0432\u0438\u0442\u0441\u044F \u0437\u0434\u0435\u0441\u044C \u0434\u043E \u0437\u0430\u043F\u0443\u0441\u043A\u0430.",
+      none: "\u041D\u0435\u0442 \u0441\u0446\u0435\u043D\u0430\u0440\u0438\u0435\u0432, \u0436\u0434\u0443\u0449\u0438\u0445 \u0440\u0435\u0448\u0435\u043D\u0438\u044F. \u041A\u043E\u0433\u0434\u0430 \u043E\u0440\u043A\u0435\u0441\u0442\u0440\u0430\u0442\u043E\u0440 \u043F\u043E\u043F\u0440\u043E\u0441\u0438\u0442 \u043E\u0434\u043E\u0431\u0440\u0438\u0442\u044C \u0441\u0446\u0435\u043D\u0430\u0440\u0438\u0439, \u043E\u043D \u043F\u043E\u044F\u0432\u0438\u0442\u0441\u044F \u0437\u0434\u0435\u0441\u044C.",
       flow: "\u0421\u0446\u0435\u043D\u0430\u0440\u0438\u0439",
       builtIn: "\u0412\u0441\u0442\u0440\u043E\u0435\u043D\u043D\u044B\u0439",
       project: "\u0418\u0437 \u044D\u0442\u043E\u0433\u043E \u043F\u0440\u043E\u0435\u043A\u0442\u0430",
@@ -86,7 +93,8 @@
       task: "\u0417\u0430\u0434\u0430\u0447\u0430",
       auto: "\u0432\u044B\u0431\u0435\u0440\u0435\u0442 \u043E\u0440\u043A\u0435\u0441\u0442\u0440\u0430\u0442\u043E\u0440",
       providerDefault: "\u043C\u043E\u0434\u0435\u043B\u044C \u043F\u043E \u0443\u043C\u043E\u043B\u0447\u0430\u043D\u0438\u044E",
-      unchanged: "\u041F\u0440\u0430\u0432\u0430 \u043D\u0435 \u043C\u0435\u043D\u044F\u044E\u0442\u0441\u044F: \u043A\u0430\u0436\u0434\u044B\u0439 \u0430\u0433\u0435\u043D\u0442 \u0437\u0430\u043F\u0443\u0441\u043A\u0430\u0435\u0442\u0441\u044F \u0441 \u043F\u0440\u043E\u0444\u0438\u043B\u0435\u043C \u0441\u0432\u043E\u0435\u0433\u043E \u043E\u0440\u043A\u0435\u0441\u0442\u0440\u0430\u0442\u043E\u0440\u0430, \u0438 CanvasTTY \u043F\u0440\u043E\u0432\u0435\u0440\u044F\u0435\u0442 \u043A\u0430\u0436\u0434\u044B\u0439 \u0437\u0430\u043F\u0443\u0441\u043A.",
+      request: "\xAB\u0417\u0430\u043F\u0443\u0441\u0442\u0438\u0442\u044C\xBB \u0440\u0430\u0437\u0440\u0435\u0448\u0430\u0435\u0442 \u043E\u0440\u043A\u0435\u0441\u0442\u0440\u0430\u0442\u043E\u0440\u0443 \u043D\u0430\u0447\u0430\u0442\u044C \u0438 \u043F\u0435\u0440\u0435\u0434\u0430\u0451\u0442 \u0435\u043C\u0443 \u044D\u0442\u0438 \u0440\u043E\u043B\u0438. \u042D\u0442\u043E \u043F\u0440\u043E\u0441\u044C\u0431\u0430, \u043A\u043E\u0442\u043E\u0440\u043E\u0439 \u0435\u0433\u043E \u043F\u0440\u043E\u0441\u044F\u0442 \u0441\u043B\u0435\u0434\u043E\u0432\u0430\u0442\u044C, \u0430 \u043D\u0435 \u0437\u0430\u043F\u0440\u0435\u0442: CanvasTTY \u043F\u043E\u043A\u0430 \u043D\u0435 \u043C\u043E\u0436\u0435\u0442 \u043E\u0441\u0442\u0430\u043D\u043E\u0432\u0438\u0442\u044C \u043E\u0440\u043A\u0435\u0441\u0442\u0440\u0430\u0442\u043E\u0440, \u043A\u043E\u0442\u043E\u0440\u044B\u0439 \u0437\u0430\u043F\u0443\u0441\u043A\u0430\u0435\u0442 \u0430\u0433\u0435\u043D\u0442\u043E\u0432 \u0431\u0435\u0437 \u043D\u0435\u0451. \u041A\u0430\u0436\u0434\u044B\u0439 \u0430\u0433\u0435\u043D\u0442 \u0432\u0441\u0451 \u0440\u0430\u0432\u043D\u043E \u043F\u0440\u043E\u0445\u043E\u0434\u0438\u0442 \u043E\u0431\u044B\u0447\u043D\u044B\u0435 \u043F\u0440\u043E\u0432\u0435\u0440\u043A\u0438 \u0437\u0430\u043F\u0443\u0441\u043A\u0430 CanvasTTY.",
+      changed: "\u041F\u043B\u0430\u043D \u0438\u0437\u043C\u0435\u043D\u0438\u043B\u0441\u044F: \u043E\u0440\u043A\u0435\u0441\u0442\u0440\u0430\u0442\u043E\u0440 \u0437\u0430\u043C\u0435\u043D\u0438\u043B \u043F\u043B\u0430\u043D, \u043A\u043E\u0442\u043E\u0440\u044B\u0439 \u0431\u044B\u043B \u0437\u0434\u0435\u0441\u044C. \u041F\u0440\u043E\u0447\u0438\u0442\u0430\u0439\u0442\u0435 \u0435\u0433\u043E \u0437\u0430\u043D\u043E\u0432\u043E \u043F\u0435\u0440\u0435\u0434 \u0437\u0430\u043F\u0443\u0441\u043A\u043E\u043C.",
       start: "\u0417\u0430\u043F\u0443\u0441\u0442\u0438\u0442\u044C",
       cancel: "\u041E\u0442\u043C\u0435\u043D\u0430",
       started: "\u0417\u0430\u043F\u0443\u0449\u0435\u043D\u043E. \u041E\u0440\u043A\u0435\u0441\u0442\u0440\u0430\u0442\u043E\u0440 \u043F\u043E\u043B\u0443\u0447\u0438\u0442 \u043F\u043B\u0430\u043D \u0447\u0435\u0440\u0435\u0437 flow_status; \u0435\u0441\u043B\u0438 \u043E\u043D \u0435\u0433\u043E \u043D\u0435 \u0436\u0434\u0451\u0442, \u043F\u043E\u043F\u0440\u043E\u0441\u0438\u0442\u0435 \u0435\u0433\u043E \u0432\u044B\u043F\u043E\u043B\u043D\u0438\u0442\u044C \u043E\u0434\u043E\u0431\u0440\u0435\u043D\u043D\u044B\u0439 \u0441\u0446\u0435\u043D\u0430\u0440\u0438\u0439.",
@@ -116,6 +124,19 @@
     status.textContent = message;
     status.classList.toggle("is-error", error);
   };
+  var START_DELAY_MS = 1500;
+  var firstShown = /* @__PURE__ */ new Map();
+  var shownFor = /* @__PURE__ */ new Map();
+  var replaced = /* @__PURE__ */ new Set();
+  function notePending(pending) {
+    const now = Date.now();
+    for (const plan of pending) {
+      if (!firstShown.has(plan.id)) firstShown.set(plan.id, now);
+      const previous = shownFor.get(plan.orchestratorId);
+      if (previous && previous !== plan.id) replaced.add(plan.id);
+      shownFor.set(plan.orchestratorId, plan.id);
+    }
+  }
   async function load() {
     view = await host.service.request(SERVICE, "harness.view");
     const ids = view.orchestrators.map((item) => item.id);
@@ -141,13 +162,25 @@
     ));
     const start = el("button", { type: "button", className: "button button--primary", textContent: t.start });
     const cancel = el("button", { type: "button", className: "button", textContent: t.cancel });
+    let busy = false;
+    const wait = START_DELAY_MS - (Date.now() - (firstShown.get(plan.id) ?? 0));
+    if (wait > 0) {
+      start.disabled = true;
+      setTimeout(() => {
+        if (!busy) start.disabled = false;
+      }, wait);
+    }
     const decide = (decision) => {
+      if (busy || decision === "approved" && start.disabled) return;
+      busy = true;
       start.disabled = cancel.disabled = true;
+      shownFor.delete(plan.orchestratorId);
       host.service.request(SERVICE, "flows.decide", { planId: plan.id, decision }).then(() => {
         say(decision === "approved" ? t.started : t.cancelled);
         return load();
       }).catch((error) => {
         say(errorText(error), true);
+        busy = false;
         start.disabled = cancel.disabled = false;
       });
     };
@@ -156,6 +189,7 @@
     return el(
       "section",
       { className: "card" },
+      replaced.has(plan.id) ? el("p", { className: "notice", textContent: t.changed }) : null,
       el(
         "div",
         { className: "row" },
@@ -172,7 +206,7 @@
         el("thead", {}, el("tr", {}, el("th", { textContent: t.role }), el("th", { textContent: t.model }), el("th", { textContent: t.task }))),
         el("tbody", {}, ...rows)
       ),
-      el("p", { className: "muted", textContent: t.unchanged }),
+      el("p", { className: "muted", textContent: t.request }),
       el("div", { className: "row row--end" }, cancel, start)
     );
   }
@@ -222,6 +256,7 @@
       return;
     }
     const pending = view.plans.filter((plan) => plan.status === "pending");
+    notePending(pending);
     const recent = view.plans.filter((plan) => plan.status !== "pending").slice(0, 5);
     root.replaceChildren(
       pending.length ? el("div", { className: "page__lead", textContent: t.waiting }) : el("div", { className: "empty", textContent: t.none }),

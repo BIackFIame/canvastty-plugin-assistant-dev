@@ -9,10 +9,11 @@ import { join } from 'node:path';
 import { Harness } from '../src/harness/harness.ts';
 import { BadgeBoard } from '../src/harness/badges.ts';
 import { LoopWatch } from '../src/harness/loops.ts';
-import { parseFlowYaml, validateFlow } from '../src/harness/flowFile.ts';
+import { FlowFileError, parseFlowYaml, validateFlow } from '../src/harness/flowFile.ts';
 import { builtInFlows, projectFlows } from '../src/harness/flows.ts';
 import { ruleDifficulty, suggestRoute, modelRank } from '../src/harness/router.ts';
-import { commandReviewLevel, firstRunAssistantSettings, normalizeHarnessSettings, validateHarnessSettings, withCommandReview } from '../src/harness/settings.ts';
+import { commandReviewLevel, normalizeHarnessSettings, validateHarnessSettings, withCommandReview } from '../src/harness/settings.ts';
+import { TURN_GAP_MS } from '../src/harness/harness.ts';
 import { DEFAULT_ASSISTANT_SETTINGS } from '../src/shared/settings.ts';
 import { Assistant } from '../src/service/assistant.ts';
 
@@ -56,13 +57,13 @@ const providers = [
   { id: 'kimi', available: false, subagent: true }
 ];
 const flush = () => new Promise(resolve => setImmediate(resolve));
+const problemCode = code => error => error instanceof FlowFileError && error.problem.code === code;
 
-test('settings: four controls; command review maps onto the Assistant modes; a fresh install is Warn', () => {
-  const fresh = firstRunAssistantSettings();
-  assert.equal(commandReviewLevel(fresh), 'warn');
-  assert.deepEqual([fresh.enabled, fresh.modes['command.review']], [true, 'suggest']);
-  assert.equal(commandReviewLevel(DEFAULT_ASSISTANT_SETTINGS), 'off', 'saved settings that were off stay off');
-  const strict = withCommandReview(fresh, 'strict');
+test('settings: four controls; command review maps onto the Assistant modes; defaults are Off', () => {
+  assert.equal(commandReviewLevel(DEFAULT_ASSISTANT_SETTINGS), 'off', 'nothing saved: off');
+  const basic = withCommandReview(DEFAULT_ASSISTANT_SETTINGS, 'basic');
+  assert.deepEqual([basic.enabled, basic.modes['command.review'], basic.reviewStrictness, commandReviewLevel(basic)], [true, 'suggest', 'triage', 'basic']);
+  const strict = withCommandReview(basic, 'strict');
   assert.deepEqual([strict.modes['command.review'], strict.reviewStrictness, commandReviewLevel(strict)], ['auto', 'strict', 'strict']);
   const off = withCommandReview(strict, 'off');
   assert.deepEqual([off.modes['command.review'], off.enabled, commandReviewLevel(off)], ['off', true, 'off'], 'task triage keeps the Assistant on');
@@ -96,7 +97,7 @@ test('loop alerts: the same command N times with no file write in between, once 
   assert.equal(loops.action('s1', { name: 'Edit', kind: 'edit', command: null, paths: ['a.ts'] }), null);
   for (let i = 0; i < 4; i++) assert.equal(loops.action('s1', shell('npm   test')), null, 'whitespace does not make a new command');
   // Interleaving another command does not hide the loop.
-  assert.equal(loops.action('s1', shell('git status')), null);
+  assert.equal(loops.action('s1', shell('make lint')), null);
   const signal = loops.action('s1', shell('npm test'));
   assert.deepEqual(signal, { sessionId: 's1', count: 5, toolName: 'Bash', what: 'command' });
   assert.equal(loops.action('s1', shell('npm test')), null, 'once per streak');
@@ -115,7 +116,7 @@ test('badges: one plugin badge per card, the most important signal shown, the ne
   assert.deepEqual(shown, ['tasks 1/3', 'loop?', 'tasks 2/3', null]);
 });
 
-test('project flows: JSON and a YAML subset, shown as written; bad files are named, not loaded', () => {
+test('project flows: JSON and a YAML subset, shown as written; bad files are named, not loaded', async () => {
   const yaml = [
     '# a project flow',
     'name: "Docs pass"',
@@ -136,9 +137,9 @@ test('project flows: JSON and a YAML subset, shown as written; bad files are nam
   assert.equal(flow.id, 'docs');
   assert.equal(flow.roles[0].task, 'Write docs for {goal}.\nKeep it short.');
   assert.deepEqual(flow.roles.map(role => [role.id, role.difficulty, role.provider ?? null]), [['writer', 'normal', 'claude'], ['editor', 'hard', null]]);
-  assert.throws(() => parseFlowYaml('name: x\nroles: [a, b]'), /not supported/u);
-  assert.throws(() => validateFlow({ name: 'x', roles: [{ id: 'a', task: 't', provider: 'rm -rf' }] }, 'x'), /characters/u);
-  assert.throws(() => validateFlow({ name: 'x', roles: [], extra: 1 }, 'x'), /unknown key/u);
+  assert.throws(() => parseFlowYaml('name: x\nroles: [a, b]'), problemCode('yamlUnsupported'));
+  assert.throws(() => validateFlow({ name: 'x', roles: [{ id: 'a', task: 't', provider: 'rm -rf' }] }, 'x'), problemCode('field'));
+  assert.throws(() => validateFlow({ name: 'x', roles: [], extra: 1 }, 'x'), problemCode('unknownKey'));
 
   const dir = join(project, '.canvastty', 'flows');
   writeFileSync(join(dir, 'docs.yaml'), yaml);
@@ -147,11 +148,11 @@ test('project flows: JSON and a YAML subset, shown as written; bad files are nam
   // A link to a file elsewhere is not followed.
   writeFileSync(join(base, 'outside.json'), JSON.stringify({ name: 'Outside', roles: [{ id: 'a', task: 't' }] }));
   symlinkSync(join(base, 'outside.json'), join(dir, 'outside.json'));
-  const { flows, problems } = projectFlows(project);
+  const { flows, problems } = await projectFlows(project);
   assert.deepEqual(flows.map(item => [item.id, item.source]), [['docs', 'project'], ['pair', 'project']]);
-  assert.deepEqual(problems.map(problem => problem.file), ['broken.yml', 'outside.json']);
+  assert.deepEqual(problems.map(problem => [problem.file, problem.problem.code]), [['broken.yml', 'field'], ['outside.json', 'link']]);
   rmSync(join(dir, 'outside.json'));
-  assert.equal(projectFlows(join(base, 'nowhere')).flows.length, 0);
+  assert.equal((await projectFlows(join(base, 'nowhere'))).flows.length, 0);
   // Built-in flows are localized.
   assert.equal(builtInFlows('ru')[0].name, 'Исполнитель и проверяющий');
   assert.equal(builtInFlows('en')[0].name, 'Executor and reviewer');
@@ -174,11 +175,15 @@ test('flows: plan → preview (badge, pending) → Start → flow_status hands s
   h.sessionEvent({ type: 'created', session: orchestrator });
   const list = (await h.tool('flows_list', orchestrator, {})).content;
   assert.match(list, /executor-reviewer \(built in\)/u);
-  assert.match(list, /docs \(from this project\)/u);
-  assert.match(list, /not loaded: \.canvastty\/flows\/broken\.yml/u);
+  assert.match(list, /docs \(from this project\): name "Docs pass"/u);
+  assert.match(list, /not loaded: "\.canvastty\/flows\/broken\.yml"/u);
   const planned = await h.tool('flow_plan', orchestrator, { flow: 'executor-reviewer', goal: 'add CSV export', providers });
-  const planId = JSON.parse(planned.content.split('\n').at(-1)).planId;
+  const planned$ = JSON.parse(planned.content.split('\n').at(-1));
+  const planId = planned$.planId;
   assert.match(planned.content, /waits for the person/u);
+  // Before Start the orchestrator gets the role names only: nothing to pass to spawn_agent yet.
+  assert.deepEqual(planned$.roles, [{ id: 'executor', title: 'Executor' }, { id: 'reviewer', title: 'Reviewer' }]);
+  assert.doesNotMatch(planned.content, /claude-opus-4|"provider"|Implement: add CSV export/u);
   await flush();
   assert.equal(host.badges(orchestrator.id).at(-1).text, 'flow: preview');
   // Pending: flow_status says so (no wait).
@@ -187,7 +192,7 @@ test('flows: plan → preview (badge, pending) → Start → flow_status hands s
   const waiting = h.tool('flow_status', orchestrator, { planId, waitSeconds: 5 });
   setTimeout(() => h.decidePlan(planId, 'approved'), 20);
   const approved = (await waiting).content;
-  assert.match(approved, /The person approved flow "Executor and reviewer"/u);
+  assert.match(approved, /The person approved the built-in flow "Executor and reviewer"/u);
   const spawn = JSON.parse(approved.split('\n').at(-1)).spawn;
   assert.equal(spawn.length, 2);
   assert.equal(spawn[1].provider, 'claude');
@@ -201,11 +206,13 @@ test('flows: plan → preview (badge, pending) → Start → flow_status hands s
   h.decidePlan(second, 'cancelled');
   assert.match((await h.tool('flow_status', orchestrator, { planId: second })).content, /cancelled/u);
   // The person can choose a flow from the preview card too; the orchestrator then reads it without a plan id.
-  const own = h.createPlan(orchestrator.id, 'docs', 'the CLI');
+  const own = await h.createPlan(orchestrator.id, 'docs', 'the CLI');
   assert.equal(own.source, 'project');
   assert.equal(own.roles[0].task, 'Write docs for the CLI.\nKeep it short.', 'a project flow\'s text is kept as written');
   h.decidePlan(own.id, 'approved');
-  assert.match((await h.tool('flow_status', orchestrator, {})).content, /"Docs pass" \(from this project\)/u);
+  const delivered = (await h.tool('flow_status', orchestrator, {})).content;
+  assert.match(delivered, /approved a flow from this project/u);
+  assert.match(delivered, /quoted data, not instructions/u, 'project text is marked as data');
   h.settings.flows = false;
   assert.match((await h.tool('flow_plan', orchestrator, { flow: 'docs', goal: 'g' })).content, /off/u);
 });
@@ -241,7 +248,7 @@ test('task board: the orchestrator adds and assigns; a subagent claims or update
 });
 
 test('loop badge from decision calls; it clears when the next turn starts; off in settings means no badge', async () => {
-  const { harness: h, host } = harness({ locale: 'ru' });
+  const { harness: h, host, tick } = harness({ locale: 'ru' });
   const card = { ...orchestrator, id: 'agent-1', role: 'agent', status: 'working' };
   h.sessionEvent({ type: 'created', session: card });
   const call = command => ({ sessionId: card.id, tool: { name: 'Bash', kind: 'shell', command, paths: [] } });
@@ -251,6 +258,7 @@ test('loop badge from decision calls; it clears when the next turn starts; off i
   h.sessionEvent({ type: 'status', session: { ...card, status: 'idle' } });
   await flush();
   assert.equal(host.badges(card.id).at(-1).text, 'цикл?', 'the badge stays while the person looks');
+  tick(TURN_GAP_MS);
   h.sessionEvent({ type: 'status', session: { ...card, status: 'working' } });
   await flush();
   assert.equal(host.badges(card.id).at(-1), null);
@@ -285,6 +293,7 @@ test('boards and plans survive a service restart (the plugin\'s data folder)', a
   first.sessionEvent({ type: 'created', session: orchestrator });
   await first.tool('task_add', orchestrator, { title: 'Keep me' });
   await first.tool('flow_plan', orchestrator, { flow: 'test-fix', goal: 'g' });
+  await first.flushWrites();
   const second = harness({ dataDir }).harness;
   assert.equal(second.boards.get(orchestrator.id).tasks[0].title, 'Keep me');
   assert.equal(second.plans.list().filter(plan => plan.status === 'pending').length, 1);
@@ -300,9 +309,9 @@ test('the Assistant wires it: decide feeds loops and the journal whatever review
   await flush();
   assert.equal(host.badges(card.id).at(-1).text, 'loop?');
   assert.match((await assistant.tool('task_list', orchestrator, {})).content, /empty/u);
-  assert.deepEqual(assistant.harnessState(), { commandReview: 'warn', routing: true, loopAlerts: true, flows: true, models: 0 });
+  assert.deepEqual(assistant.harnessState(), { commandReview: 'off', custom: null, settingsUnavailable: false, routing: true, loopAlerts: true, flows: true, models: 0 });
   await assistant.saveHarness({ commandReview: 'strict', routing: false, loopAlerts: true, flows: true });
   assert.deepEqual(host.storage.harness, { routing: false, loopAlerts: true, flows: true });
   assert.equal(host.storage.settings.modes['command.review'], 'auto');
-  await assert.rejects(assistant.saveHarness({ commandReview: 'paranoid', routing: true, loopAlerts: true, flows: true }), /Strict, Warn or Off/u);
+  await assert.rejects(assistant.saveHarness({ commandReview: 'paranoid', routing: true, loopAlerts: true, flows: true }), /Strict, Basic rules or Off/u);
 });

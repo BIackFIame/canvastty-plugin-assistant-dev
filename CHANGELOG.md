@@ -5,12 +5,12 @@
 Runs on CanvasTTY 1.8 with the host APIs it has; nothing in the core is specific to this plugin.
 
 - Installs on CanvasTTY main: no `model:route` permission and no calls to host methods CanvasTTY does not have.
-- A settings page with four controls: command review (Strict, Warn, Off), automatic routing, loop alerts and flows. Decision models moved to their own optional page.
-- A fresh install starts with command review on Warn: hard rules deny, nothing else is enforced, and no model is called until you set one up. Saved settings are kept as they were.
+- A settings page with four controls: command review (Strict, Basic rules, Off; anything else shows as Custom, read-only), automatic routing, loop alerts and flows. Decision models moved to their own optional page.
+- Command review starts Off on a fresh install and on an update; the person turns it on. A storage error at start is not taken for a first run: review stays Off, nothing is saved over the stored settings, and they are read again.
 - Orchestrator tools: `route` (provider, model and effort for `spawn_agent`, from a decision model or word rules), `flows_list`, `flow_plan`, `flow_status`, `task_add`, `task_update`, `task_list` (the last two for subagents too).
-- Flow preview card: a proposed flow's roles, provider/model and tasks before anything starts; Start or Cancel. Built-in flows in English and Russian; flows from `.canvastty/flows` shown as written.
+- Flow preview card: a proposed flow's roles, provider/model and tasks for the person to approve; Start or Cancel. A request to the orchestrator, not a lock. `flow_plan` returns only the plan id and role names; spawn values come from `flow_status` after Start. Start is held briefly after a plan shows and a replaced plan is marked; `flow_plan` is rate-limited per orchestrator. Built-in flows in English and Russian; flows from a real `.canvastty/flows` folder (no links), invisible characters removed, refused files named with fixed reasons.
 - Task board card, fed by the task tools and approved flows; a `tasks n/m` badge on the orchestrator.
-- Loop alerts: a `loop?` badge when a card runs the same command five times in one turn without writing a file; it clears on the next turn.
+- Loop alerts: a `loop?` badge when a card runs the same command five times in one turn with no file edit seen (shell edits count, polling does not); it clears on the next turn.
 - Card menu actions: Plan from flow…, Task board (orchestrators) and Report (every agent).
 - Badges and toasts follow CanvasTTY's language; the pages follow its palette.
 

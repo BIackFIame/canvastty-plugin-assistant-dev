@@ -73,17 +73,20 @@ export class Journals {
   titleOf(sessionId: string): string { return this.journals.get(sessionId)?.title || sessionId.slice(0, 8); }
 }
 
-/** The report text for a card-action toast (plain text, under 2000 characters). */
-export function reportText(journal: Journal, strings: ServiceStrings, extra: { tasks: { done: number; total: number } | null; childTitles: string[]; now: number }): string {
+/**
+ * The report text for a card-action toast (plain text, under 2000 characters), in the person's language and local
+ * time. "Commands reviewed" only while command review is on; otherwise the plugin only saw them.
+ */
+export function reportText(journal: Journal, strings: ServiceStrings, extra: { tasks: { done: number; total: number } | null; childTitles: string[]; now: number; reviewOn: boolean }): string {
   const r = strings.report;
   const working = journal.workingMs + (journal.workingSince !== null ? Math.max(0, extra.now - journal.workingSince) : 0);
-  const time = (at: number): string => new Date(at).toISOString().slice(11, 16) + ' UTC';
+  const reviewed = extra.reviewOn || journal.denied > 0 || journal.asked > 0 ? ` (${r.reviewed(journal.denied, journal.asked)})` : '';
   const lines = [
     `${r.title(journal.title || journal.id.slice(0, 8))} (${journal.provider || '?'}, ${r.role[journal.role] ?? journal.role})`,
-    journal.startedAt !== null ? `${r.started}: ${time(journal.startedAt)}` : '',
+    journal.startedAt !== null ? `${r.started}: ${r.time(journal.startedAt)}` : '',
     `${r.ran}: ${r.minutes(working / 60_000)} · ${r.turns}: ${journal.turns}`,
-    `${r.status}: ${journal.status}${journal.exitCode !== null ? ` · ${r.exit}: ${journal.exitCode}` : ''}`,
-    `${r.commands}: ${journal.commands} (${r.reviewed(journal.denied, journal.asked)})`,
+    `${r.state}: ${r.status[journal.status] ?? journal.status}${journal.exitCode !== null ? ` · ${r.exit}: ${journal.exitCode}` : ''}`,
+    `${extra.reviewOn ? r.commandsReviewed : r.commandsSeen}: ${journal.commands}${reviewed}`,
     `${r.loops}: ${journal.loops || r.none}`,
     extra.childTitles.length ? `${r.children}: ${extra.childTitles.slice(0, 12).join(', ')}${extra.childTitles.length > 12 ? '…' : ''}` : '',
     extra.tasks && extra.tasks.total ? `${r.tasks}: ${extra.tasks.done}/${extra.tasks.total}` : '',

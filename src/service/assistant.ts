@@ -11,8 +11,8 @@ import {
   type AssistantCheckResult, type AssistantSettings, type DataClass
 } from '../shared/settings.ts';
 import { Harness, type CardSummary } from '../harness/harness.ts';
-import { localeOf, type Locale, type ServiceStrings } from '../harness/i18n.ts';
-import { commandReviewLevel, firstRunAssistantSettings, withCommandReview, COMMAND_REVIEW_LEVELS, type CommandReviewLevel } from '../harness/settings.ts';
+import { HarnessError, localeOf, type Locale, type ServiceStrings } from '../harness/i18n.ts';
+import { commandReviewLevel, withCommandReview, COMMAND_REVIEW_LEVELS, type CommandReviewLevel, type CommandReviewState } from '../harness/settings.ts';
 
 /**
  * The Assistant service: one process that answers CanvasTTY's decision hook (command review), its launch pipeline
@@ -52,18 +52,31 @@ export class Assistant {
   private readonly generations = new Map<string, number>();
   private readonly checks = new Map<string, AssistantCheckResult | { running: true } | { error: string }>();
   private readonly registered = new Set<string>();
+  private readonly locale: Locale;
+  /**
+   * False while the saved settings could not be read (a storage error, not "nothing saved"): command review is Off
+   * meanwhile, and nothing is saved over what is stored until a read succeeds (`storageRecovered`).
+   */
+  settingsReadable: boolean;
+  /** The same for the harness switches (routing, loop alerts, flows): their defaults apply, nothing is saved over. */
+  private harnessReadable: boolean;
   readonly harness: Harness;
 
-  constructor(options: { host: Host; dataDir: string; settings?: unknown; harness?: unknown; locale?: unknown; transport?: typeof fetch; git?: null; now?: () => number }) {
+  constructor(options: { host: Host; dataDir: string; settings?: unknown; settingsUnavailable?: boolean; harness?: unknown; harnessUnavailable?: boolean; locale?: unknown; transport?: typeof fetch; git?: null; now?: () => number }) {
     this.host = options.host;
-    // Nothing saved yet: a fresh install starts with command review on Warn (see harness/settings.ts).
-    this.settings = options.settings === null || options.settings === undefined ? firstRunAssistantSettings() : normalizeAssistantSettings(options.settings);
+    // Nothing saved (a fresh install, or an update from a version that saved nothing) or nothing readable: the
+    // defaults, with command review Off. The person turns it on; the plugin never decides trust for them.
+    this.settingsReadable = options.settingsUnavailable !== true;
+    this.harnessReadable = options.harnessUnavailable !== true;
+    this.settings = normalizeAssistantSettings(this.settingsReadable ? options.settings : null);
     const locale: Locale = localeOf(options.locale);
+    this.locale = locale;
     this.harness = new Harness({
       host: options.host, dataDir: options.dataDir, locale, ...(options.now ? { now: options.now } : {}),
+      reviewOn: () => commandReviewLevel(this.settings) !== 'off',
       publishBadge: (sessionId, badge) => this.host.callHost('cards.setBadge', { sessionId, badge }).then(() => undefined, () => undefined),
       modelDifficulty: async (task, caller, deadlineMs) => {
-        const answer = await this.advice(task, null, caller.workingDirectory || caller.cwd || process.cwd(), caller.id, deadlineMs);
+        const answer = await this.advice(task, null, caller.workingDirectory || caller.cwd || process.cwd(), caller.id, deadlineMs, requesterOf(caller.role));
         return answer.kind === 'advice' ? answer.advice.difficulty : null;
       }
     });
@@ -169,16 +182,17 @@ export class Assistant {
     const advice = await this.advice(task, dataClass, cwd, sessionId).catch(() => null);
     if (!advice || advice.kind !== 'advice') { this.review.noteTriage(sessionId, false); return; }
     this.review.noteTriage(sessionId, advice.advice.reviewStrict);
-    await this.harness.setBadge(sessionId, 'triage', triageBadge(advice.advice));
+    await this.harness.setBadge(sessionId, 'triage', triageBadge(advice.advice, this.harness.strings));
   }
 
   /** task.route + the policy. `kind` says why there is no advice (off, learning, no answer). */
-  async advice(task: string, dataClass: DataClass | null, cwd: string, sessionId?: string, deadlineMs = TRIAGE_DEADLINE_MS): Promise<{ kind: 'advice'; advice: Advice; model: string | null } | { kind: 'off' | 'learning' | 'unavailable'; reason: string | null }> {
+  /** `requester`: who wrote the task text: the person (the launch form) or an agent (`recommend`, `route`). */
+  async advice(task: string, dataClass: DataClass | null, cwd: string, sessionId?: string, deadlineMs = TRIAGE_DEADLINE_MS, requester: 'person' | 'orchestrator' | 'agent' = 'person'): Promise<{ kind: 'advice'; advice: Advice; model: string | null } | { kind: 'off' | 'learning' | 'unavailable'; reason: string | null }> {
     const controller = new AbortController();
     const timer = setTimeout(() => controller.abort(), deadlineMs);
     try {
       const { decision, triage } = await askTaskRoute(this.engine, { task, dataClass: dataClass ?? this.settings.defaultDataClass }, {
-        signal: controller.signal, assertCurrent: () => undefined, requester: 'person', ...(sessionId ? { sessionId } : {})
+        signal: controller.signal, assertCurrent: () => undefined, requester, ...(sessionId ? { sessionId } : {})
       });
       if (decision.branch === 'off') return { kind: 'off', reason: null };
       // Learning shows nothing, whether a model answered (recorded) or not.
@@ -200,7 +214,7 @@ export class Assistant {
       if (!task) return { content: 'Give the task text in `task`.', isError: true };
       const cwd = caller?.workingDirectory || caller?.cwd || process.cwd();
       // CanvasTTY gives a tool 15 s; the advice must come back before that.
-      const answer = await this.advice(task, null, cwd, caller?.id, TOOL_ADVICE_DEADLINE_MS);
+      const answer = await this.advice(task, null, cwd, caller?.id, TOOL_ADVICE_DEADLINE_MS, requesterOf(caller?.role));
       if (answer.kind === 'off') return { content: 'The Assistant\'s task triage is off (Assistant settings in CanvasTTY).' };
       if (answer.kind === 'learning') return { content: 'The Assistant\'s task triage is learning and gives no advice yet.' };
       if (answer.kind !== 'advice') return { content: `No decision model answered (${answer.reason ?? 'unavailable'}); decide as you would without the Assistant.` };
@@ -239,26 +253,56 @@ export class Assistant {
     return { settings: this.settings, status, slots, checks: Object.fromEntries(this.checks), recent: this.review.recent() };
   }
 
-  /** The harness page: its four controls (command review here, the rest in the harness) and nothing else. */
-  harnessState(): { commandReview: CommandReviewLevel; routing: boolean; loopAlerts: boolean; flows: boolean; models: number } {
-    return { commandReview: commandReviewLevel(this.settings), ...this.harness.settings, models: this.settings.backends.filter(entry => entry.enabled).length };
+  /**
+   * The harness page: its four controls (command review here, the rest in the harness) and nothing else. A command
+   * review the levels do not describe exactly is `custom`, with what it is, shown read-only until a level is chosen.
+   */
+  harnessState(): { commandReview: CommandReviewState; custom: { mode: string; strictness: string } | null; settingsUnavailable: boolean; routing: boolean; loopAlerts: boolean; flows: boolean; models: number } {
+    const level = commandReviewLevel(this.settings);
+    return {
+      commandReview: level,
+      custom: level === 'custom' ? { mode: this.settings.modes['command.review'], strictness: this.settings.reviewStrictness } : null,
+      settingsUnavailable: !this.settingsReadable || !this.harnessReadable,
+      ...this.harness.settings, models: this.settings.backends.filter(entry => entry.enabled).length
+    };
   }
 
+  private fail(code: ConstructorParameters<typeof HarnessError>[0]): never { throw new HarnessError(code, this.locale); }
+
   async saveHarness(value: unknown): Promise<unknown> {
+    if (!this.settingsReadable || !this.harnessReadable) this.fail('settingsUnavailable');
     const record = value && typeof value === 'object' && !Array.isArray(value) ? value as Record<string, unknown> : {};
     const { commandReview, ...rest } = record;
-    if (!COMMAND_REVIEW_LEVELS.includes(commandReview as CommandReviewLevel)) throw new Error('Command review is Strict, Warn or Off.');
+    const current = commandReviewLevel(this.settings);
+    // "custom" is only "leave it as it is", and only while it is custom.
+    const keep = commandReview === 'custom' && current === 'custom';
+    if (!keep && !COMMAND_REVIEW_LEVELS.includes(commandReview as CommandReviewLevel)) this.fail('reviewLevel');
     await this.harness.saveSettings(rest);
-    if (commandReview !== commandReviewLevel(this.settings)) await this.save(withCommandReview(this.settings, commandReview as CommandReviewLevel));
+    if (!keep && commandReview !== current) await this.save(withCommandReview(this.settings, commandReview as CommandReviewLevel));
+    else this.host.emit('settings', null);
     return this.harnessState();
   }
 
+  /** Both pages save here; both listen for `settings` and reload. */
   async save(value: unknown): Promise<AssistantSettings> {
+    if (!this.settingsReadable) this.fail('settingsUnavailable');
     const next = validateAssistantSettings(value);
     await this.host.callHost('storage.set', { key: SETTINGS_KEY, value: next });
     this.settings = next;
     this.engine.settingsChanged();
+    this.host.emit('settings', null);
     return next;
+  }
+
+  /** A later read of the stored settings succeeded (after a storage error at start): they apply now. */
+  storageRecovered(stored: { settings?: unknown; harness?: unknown }): void {
+    if ('settings' in stored) {
+      this.settings = normalizeAssistantSettings(stored.settings);
+      this.settingsReadable = true;
+      this.engine.settingsChanged();
+    }
+    if ('harness' in stored) { this.harness.loadSettings(stored.harness); this.harnessReadable = true; }
+    this.host.emit('settings', null);
   }
 
   /** «Проверить»: the synthetic battery (no user data). It can take longer than a page request, so the answer is an event. */
@@ -289,14 +333,18 @@ function suggestionBadge(verdict: CommandReviewVerdict, summary: string, strings
   return { text: strings.reviewAsk, tone: 'warn', tooltip: strings.reviewTip(`${summary} (${verdict.reason})`) };
 }
 
-function triageBadge(advice: Advice): { text: string; tone: 'info' | 'warn'; tooltip: string } {
-  const label = `${advice.difficulty} · ${advice.category}`.slice(0, 24);
+function triageBadge(advice: Advice, strings: ServiceStrings): { text: string; tone: 'info' | 'warn'; tooltip: string } {
+  const t = strings.triage;
+  const label = `${t.difficulty[advice.difficulty] ?? advice.difficulty} · ${t.category[advice.category] ?? advice.category}`.slice(0, 24);
   const hints = [
-    advice.isolation !== 'direct' ? `better in a ${advice.isolation}` : '',
-    advice.reviewStrict ? 'strict command review' : '',
-    advice.strongModel ? 'use a strong model' : '',
-    advice.suggestOrchestrator ? 'splits into subagents' : '',
-    advice.underspecified ? 'the task misses information' : ''
+    advice.isolation !== 'direct' ? t.isolation(advice.isolation) : '',
+    advice.reviewStrict ? t.strict : '',
+    advice.strongModel ? t.strong : '',
+    advice.suggestOrchestrator ? t.split : '',
+    advice.underspecified ? t.missing : ''
   ].filter(Boolean);
-  return { text: label, tone: advice.reviewStrict || advice.isolation !== 'direct' ? 'warn' : 'info', tooltip: `Assistant triage: ${hints.join('; ') || 'nothing to add'}`.slice(0, 200) };
+  return { text: label, tone: advice.reviewStrict || advice.isolation !== 'direct' ? 'warn' : 'info', tooltip: t.tip(hints.join('; ')).slice(0, 200) };
 }
+
+/** Who wrote a tool's task text: an orchestrator or another agent, never the person. */
+function requesterOf(role: unknown): 'orchestrator' | 'agent' { return role === 'orchestrator' ? 'orchestrator' : 'agent'; }

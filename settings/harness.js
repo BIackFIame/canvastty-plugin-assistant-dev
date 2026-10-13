@@ -4,12 +4,18 @@
   // src/ui/common.ts
   var host = window.CanvasTTYPlugin;
   var SERVICE = "assistant";
+  function applyAppearance(appearance) {
+    const locale = appearance.locale === "ru" ? "ru" : "en";
+    const root2 = document.documentElement;
+    root2.lang = locale;
+    root2.dataset.palette = appearance.palette === "lilac" || appearance.palette === "night" ? appearance.palette : "sage";
+    const scale = typeof appearance.uiScale === "number" ? appearance.uiScale : typeof appearance.scale === "number" ? appearance.scale : null;
+    if (scale !== null && Number.isFinite(scale) && scale >= 0.5 && scale <= 3) root2.style?.setProperty("--ui-scale", String(scale));
+    return locale;
+  }
   function onContext(render2) {
     host.onContext(({ appearance }) => {
-      const locale = appearance.locale === "ru" ? "ru" : "en";
-      document.documentElement.lang = locale;
-      document.documentElement.dataset.palette = appearance.palette === "lilac" || appearance.palette === "night" ? appearance.palette : "sage";
-      render2(locale);
+      render2(applyAppearance(appearance));
     });
   }
   function el(tag, props = {}, ...children) {
@@ -43,10 +49,11 @@
     return wrap;
   }
   function settingRow(label, help, control) {
+    const helpNode = typeof help === "string" ? el("div", { className: "setting-row__help", textContent: help }) : el("div", { className: "setting-row__help" }, help);
     return el(
       "div",
       { className: "setting-row" },
-      el("div", { className: "setting-row__copy" }, el("div", { className: "setting-row__label", textContent: label }), el("div", { className: "setting-row__help", textContent: help })),
+      el("div", { className: "setting-row__copy" }, el("div", { className: "setting-row__label", textContent: label }), helpNode),
       el("div", { className: "setting-row__control" }, control)
     );
   }
@@ -54,36 +61,56 @@
   // src/ui/harnessSettings.ts
   var STRINGS = {
     en: {
-      lead: "Works by itself: nothing here needs changing for it to run.",
+      lead: "Everything here is your choice. Command review starts Off; turn it on if you want it.",
       review: "Command review",
-      reviewHelp: "Checks agents' shell commands and file writes before they run. Strict sends anything but read-only commands to you; Warn only blocks clearly dangerous ones and shows suggestions on the card.",
+      reviewHelp: "Checks agents' shell commands and file writes before they run.",
       strict: "Strict",
-      warn: "Warn",
+      basic: "Basic rules",
       off: "Off",
+      custom: "Custom",
+      levels: {
+        strict: "Strict: anything but read-only commands waits for your answer.",
+        basic: "Basic rules: blocks what the hard rules forbid (sudo, piping downloads into a shell, deleting or writing outside the project); the rest runs, with a hint on the card.",
+        off: "Off: the Assistant does not review commands."
+      },
+      customHelp: (mode, strictness) => `Custom: set by an older version or the decision models page (mode ${mode}, strictness ${strictness}). It stays as it is until you choose a level.`,
+      modes: { off: "Off", shadow: "Learning", suggest: "Suggest", auto: "Auto" },
+      strictness: { triage: "by the task", strict: "always strict" },
+      unavailable: "The saved settings could not be read yet: command review is Off and nothing can be saved. The Assistant tries again by itself.",
       routing: "Automatic routing",
       routingHelp: "Orchestrators get a provider and model suggestion for each subagent.",
       loops: "Loop alerts",
-      loopsHelp: 'A "loop?" badge on a card that repeats the same command without changing files.',
+      loopsHelp: 'A "loop?" badge when a card repeats the same command in one turn with no file edits seen.',
       flows: "Flows",
-      flowsHelp: "Orchestrators may propose flows; you preview roles and tasks before anything starts.",
+      flowsHelp: "An orchestrator may ask you to approve a flow (roles and tasks). This is a request it is told to follow, not a lock: CanvasTTY cannot yet stop an orchestrator that starts agents without it.",
       models: (n) => n ? `Decision models: ${n} on` : "Decision models: none (simple rules are used)",
       openModels: "Decision models\u2026",
       saved: "Saved.",
       notSaved: "Not saved: "
     },
     ru: {
-      lead: "\u0420\u0430\u0431\u043E\u0442\u0430\u0435\u0442 \u0441\u0430\u043C: \u043D\u0438\u0447\u0435\u0433\u043E \u043C\u0435\u043D\u044F\u0442\u044C \u043D\u0435 \u043D\u0443\u0436\u043D\u043E.",
+      lead: "\u0417\u0434\u0435\u0441\u044C \u0432\u0441\u0451 \u0440\u0435\u0448\u0430\u0435\u0442\u0435 \u0432\u044B. \u041F\u0440\u043E\u0432\u0435\u0440\u043A\u0430 \u043A\u043E\u043C\u0430\u043D\u0434 \u0441\u043D\u0430\u0447\u0430\u043B\u0430 \u0432\u044B\u043A\u043B\u044E\u0447\u0435\u043D\u0430; \u0432\u043A\u043B\u044E\u0447\u0438\u0442\u0435 \u0435\u0451, \u0435\u0441\u043B\u0438 \u043E\u043D\u0430 \u043D\u0443\u0436\u043D\u0430.",
       review: "\u041F\u0440\u043E\u0432\u0435\u0440\u043A\u0430 \u043A\u043E\u043C\u0430\u043D\u0434",
-      reviewHelp: "\u041F\u0440\u043E\u0432\u0435\u0440\u044F\u0435\u0442 \u043A\u043E\u043C\u0430\u043D\u0434\u044B \u0438 \u0437\u0430\u043F\u0438\u0441\u0438 \u0444\u0430\u0439\u043B\u043E\u0432 \u0430\u0433\u0435\u043D\u0442\u043E\u0432 \u0434\u043E \u0437\u0430\u043F\u0443\u0441\u043A\u0430. \xAB\u0421\u0442\u0440\u043E\u0433\u043E\xBB \u043F\u0435\u0440\u0435\u0434\u0430\u0451\u0442 \u0432\u0430\u043C \u0432\u0441\u0451, \u043A\u0440\u043E\u043C\u0435 \u043A\u043E\u043C\u0430\u043D\u0434 \u0447\u0442\u0435\u043D\u0438\u044F; \xAB\u041F\u0440\u0435\u0434\u0443\u043F\u0440\u0435\u0436\u0434\u0430\u0442\u044C\xBB \u0431\u043B\u043E\u043A\u0438\u0440\u0443\u0435\u0442 \u0442\u043E\u043B\u044C\u043A\u043E \u044F\u0432\u043D\u043E \u043E\u043F\u0430\u0441\u043D\u043E\u0435 \u0438 \u043F\u043E\u043A\u0430\u0437\u044B\u0432\u0430\u0435\u0442 \u043F\u043E\u0434\u0441\u043A\u0430\u0437\u043A\u0438 \u043D\u0430 \u043E\u043A\u043D\u0435.",
+      reviewHelp: "\u041F\u0440\u043E\u0432\u0435\u0440\u044F\u0435\u0442 \u043A\u043E\u043C\u0430\u043D\u0434\u044B \u0438 \u0437\u0430\u043F\u0438\u0441\u0438 \u0444\u0430\u0439\u043B\u043E\u0432 \u0430\u0433\u0435\u043D\u0442\u043E\u0432 \u0434\u043E \u0437\u0430\u043F\u0443\u0441\u043A\u0430.",
       strict: "\u0421\u0442\u0440\u043E\u0433\u043E",
-      warn: "\u041F\u0440\u0435\u0434\u0443\u043F\u0440\u0435\u0436\u0434\u0430\u0442\u044C",
+      basic: "\u0411\u0430\u0437\u043E\u0432\u044B\u0435 \u043F\u0440\u0430\u0432\u0438\u043B\u0430",
       off: "\u0412\u044B\u043A\u043B",
+      custom: "\u041E\u0441\u043E\u0431\u0430\u044F",
+      levels: {
+        strict: "\u0421\u0442\u0440\u043E\u0433\u043E: \u0432\u0441\u0451, \u043A\u0440\u043E\u043C\u0435 \u043A\u043E\u043C\u0430\u043D\u0434 \u0447\u0442\u0435\u043D\u0438\u044F, \u0436\u0434\u0451\u0442 \u0432\u0430\u0448\u0435\u0433\u043E \u043E\u0442\u0432\u0435\u0442\u0430.",
+        basic: "\u0411\u0430\u0437\u043E\u0432\u044B\u0435 \u043F\u0440\u0430\u0432\u0438\u043B\u0430: \u0431\u043B\u043E\u043A\u0438\u0440\u0443\u0435\u0442 \u0442\u043E, \u0447\u0442\u043E \u0437\u0430\u043F\u0440\u0435\u0449\u0430\u044E\u0442 \u0436\u0451\u0441\u0442\u043A\u0438\u0435 \u043F\u0440\u0430\u0432\u0438\u043B\u0430 (sudo, \u0437\u0430\u0433\u0440\u0443\u0437\u043A\u0430 \u043F\u0440\u044F\u043C\u043E \u0432 \u043E\u0431\u043E\u043B\u043E\u0447\u043A\u0443, \u0443\u0434\u0430\u043B\u0435\u043D\u0438\u0435 \u0438\u043B\u0438 \u0437\u0430\u043F\u0438\u0441\u044C \u0432\u043D\u0435 \u043F\u0440\u043E\u0435\u043A\u0442\u0430); \u043E\u0441\u0442\u0430\u043B\u044C\u043D\u043E\u0435 \u0432\u044B\u043F\u043E\u043B\u043D\u044F\u0435\u0442\u0441\u044F \u0441 \u043F\u043E\u0434\u0441\u043A\u0430\u0437\u043A\u043E\u0439 \u043D\u0430 \u043E\u043A\u043D\u0435.",
+        off: "\u0412\u044B\u043A\u043B: \u041F\u043E\u043C\u043E\u0449\u043D\u0438\u043A \u043D\u0435 \u043F\u0440\u043E\u0432\u0435\u0440\u044F\u0435\u0442 \u043A\u043E\u043C\u0430\u043D\u0434\u044B."
+      },
+      customHelp: (mode, strictness) => `\u041E\u0441\u043E\u0431\u0430\u044F: \u0437\u0430\u0434\u0430\u043D\u0430 \u0441\u0442\u0430\u0440\u043E\u0439 \u0432\u0435\u0440\u0441\u0438\u0435\u0439 \u0438\u043B\u0438 \u043D\u0430 \u0441\u0442\u0440\u0430\u043D\u0438\u0446\u0435 \u043C\u043E\u0434\u0435\u043B\u0435\u0439 \u0440\u0435\u0448\u0435\u043D\u0438\u0439 (\u0440\u0435\u0436\u0438\u043C \xAB${mode}\xBB, \u0441\u0442\u0440\u043E\u0433\u043E\u0441\u0442\u044C \xAB${strictness}\xBB). \u041E\u0441\u0442\u0430\u0451\u0442\u0441\u044F \u043A\u0430\u043A \u0435\u0441\u0442\u044C, \u043F\u043E\u043A\u0430 \u0432\u044B \u043D\u0435 \u0432\u044B\u0431\u0435\u0440\u0435\u0442\u0435 \u0443\u0440\u043E\u0432\u0435\u043D\u044C.`,
+      modes: { off: "\u0412\u044B\u043A\u043B", shadow: "\u041E\u0431\u0443\u0447\u0435\u043D\u0438\u0435", suggest: "\u041F\u043E\u0434\u0441\u043A\u0430\u0437\u043A\u0438", auto: "\u0410\u0432\u0442\u043E" },
+      strictness: { triage: "\u043F\u043E \u0437\u0430\u0434\u0430\u0447\u0435", strict: "\u0432\u0441\u0435\u0433\u0434\u0430 \u0441\u0442\u0440\u043E\u0433\u043E" },
+      unavailable: "\u0421\u043E\u0445\u0440\u0430\u043D\u0451\u043D\u043D\u044B\u0435 \u043D\u0430\u0441\u0442\u0440\u043E\u0439\u043A\u0438 \u043F\u043E\u043A\u0430 \u043D\u0435 \u043F\u0440\u043E\u0447\u0438\u0442\u0430\u043D\u044B: \u043F\u0440\u043E\u0432\u0435\u0440\u043A\u0430 \u043A\u043E\u043C\u0430\u043D\u0434 \u0432\u044B\u043A\u043B\u044E\u0447\u0435\u043D\u0430, \u0441\u043E\u0445\u0440\u0430\u043D\u0438\u0442\u044C \u043D\u0438\u0447\u0435\u0433\u043E \u043D\u0435\u043B\u044C\u0437\u044F. \u041F\u043E\u043C\u043E\u0449\u043D\u0438\u043A \u043F\u043E\u043F\u0440\u043E\u0431\u0443\u0435\u0442 \u0435\u0449\u0451 \u0440\u0430\u0437 \u0441\u0430\u043C.",
       routing: "\u0410\u0432\u0442\u043E\u043C\u0430\u0442\u0438\u0447\u0435\u0441\u043A\u0438\u0439 \u0432\u044B\u0431\u043E\u0440 \u043C\u043E\u0434\u0435\u043B\u0438",
       routingHelp: "\u041E\u0440\u043A\u0435\u0441\u0442\u0440\u0430\u0442\u043E\u0440 \u043F\u043E\u043B\u0443\u0447\u0430\u0435\u0442 \u043F\u0440\u0435\u0434\u043B\u043E\u0436\u0435\u043D\u0438\u0435 \u043F\u0440\u043E\u0432\u0430\u0439\u0434\u0435\u0440\u0430 \u0438 \u043C\u043E\u0434\u0435\u043B\u0438 \u0434\u043B\u044F \u043A\u0430\u0436\u0434\u043E\u0433\u043E \u0441\u0443\u0431\u0430\u0433\u0435\u043D\u0442\u0430.",
       loops: "\u0421\u0438\u0433\u043D\u0430\u043B \u0437\u0430\u0446\u0438\u043A\u043B\u0438\u0432\u0430\u043D\u0438\u044F",
-      loopsHelp: "\u0417\u043D\u0430\u0447\u043E\u043A \xAB\u0446\u0438\u043A\u043B?\xBB \u043D\u0430 \u043E\u043A\u043D\u0435, \u043A\u043E\u0442\u043E\u0440\u043E\u0435 \u043F\u043E\u0432\u0442\u043E\u0440\u044F\u0435\u0442 \u043E\u0434\u043D\u0443 \u043A\u043E\u043C\u0430\u043D\u0434\u0443, \u043D\u0435 \u043C\u0435\u043D\u044F\u044F \u0444\u0430\u0439\u043B\u043E\u0432.",
+      loopsHelp: "\u0417\u043D\u0430\u0447\u043E\u043A \xAB\u0446\u0438\u043A\u043B?\xBB, \u043A\u043E\u0433\u0434\u0430 \u043E\u043A\u043D\u043E \u0437\u0430 \u043E\u0434\u0438\u043D \u0445\u043E\u0434 \u043F\u043E\u0432\u0442\u043E\u0440\u044F\u0435\u0442 \u043E\u0434\u043D\u0443 \u043A\u043E\u043C\u0430\u043D\u0434\u0443, \u0430 \u043F\u0440\u0430\u0432\u043E\u043A \u0444\u0430\u0439\u043B\u043E\u0432 \u043D\u0435 \u0432\u0438\u0434\u043D\u043E.",
       flows: "\u0421\u0446\u0435\u043D\u0430\u0440\u0438\u0438",
-      flowsHelp: "\u041E\u0440\u043A\u0435\u0441\u0442\u0440\u0430\u0442\u043E\u0440 \u043C\u043E\u0436\u0435\u0442 \u043F\u0440\u0435\u0434\u043B\u043E\u0436\u0438\u0442\u044C \u0441\u0446\u0435\u043D\u0430\u0440\u0438\u0439; \u0432\u044B \u0432\u0438\u0434\u0438\u0442\u0435 \u0440\u043E\u043B\u0438 \u0438 \u0437\u0430\u0434\u0430\u0447\u0438 \u0434\u043E \u0437\u0430\u043F\u0443\u0441\u043A\u0430.",
+      flowsHelp: "\u041E\u0440\u043A\u0435\u0441\u0442\u0440\u0430\u0442\u043E\u0440 \u043C\u043E\u0436\u0435\u0442 \u043F\u043E\u043F\u0440\u043E\u0441\u0438\u0442\u044C \u0432\u0430\u0441 \u043E\u0434\u043E\u0431\u0440\u0438\u0442\u044C \u0441\u0446\u0435\u043D\u0430\u0440\u0438\u0439 (\u0440\u043E\u043B\u0438 \u0438 \u0437\u0430\u0434\u0430\u0447\u0438). \u042D\u0442\u043E \u043F\u0440\u043E\u0441\u044C\u0431\u0430, \u043A\u043E\u0442\u043E\u0440\u043E\u0439 \u0435\u0433\u043E \u043F\u0440\u043E\u0441\u044F\u0442 \u0441\u043B\u0435\u0434\u043E\u0432\u0430\u0442\u044C, \u0430 \u043D\u0435 \u0437\u0430\u043F\u0440\u0435\u0442: CanvasTTY \u043F\u043E\u043A\u0430 \u043D\u0435 \u043C\u043E\u0436\u0435\u0442 \u043E\u0441\u0442\u0430\u043D\u043E\u0432\u0438\u0442\u044C \u043E\u0440\u043A\u0435\u0441\u0442\u0440\u0430\u0442\u043E\u0440, \u043A\u043E\u0442\u043E\u0440\u044B\u0439 \u0437\u0430\u043F\u0443\u0441\u043A\u0430\u0435\u0442 \u0430\u0433\u0435\u043D\u0442\u043E\u0432 \u0431\u0435\u0437 \u043D\u0435\u0451.",
       models: (n) => n ? `\u041C\u043E\u0434\u0435\u043B\u0438 \u0440\u0435\u0448\u0435\u043D\u0438\u0439: \u0432\u043A\u043B\u044E\u0447\u0435\u043D\u043E ${n}` : "\u041C\u043E\u0434\u0435\u043B\u0438 \u0440\u0435\u0448\u0435\u043D\u0438\u0439: \u043D\u0435\u0442 (\u0440\u0430\u0431\u043E\u0442\u0430\u044E\u0442 \u043F\u0440\u043E\u0441\u0442\u044B\u0435 \u043F\u0440\u0430\u0432\u0438\u043B\u0430)",
       openModels: "\u041C\u043E\u0434\u0435\u043B\u0438 \u0440\u0435\u0448\u0435\u043D\u0438\u0439\u2026",
       saved: "\u0421\u043E\u0445\u0440\u0430\u043D\u0435\u043D\u043E.",
@@ -106,15 +133,20 @@
   function save(change) {
     saving = saving.then(async () => {
       if (!state) return;
-      const { models: _models, ...current } = state;
+      const { routing, loopAlerts, flows, commandReview } = state;
       try {
-        state = await host.service.request(SERVICE, "harness.saveSettings", { settings: { ...current, ...change } });
+        state = await host.service.request(SERVICE, "harness.saveSettings", { settings: { commandReview, routing, loopAlerts, flows, ...change } });
         say(t.saved);
       } catch (error) {
         say(`${t.notSaved}${errorText(error)}`, true);
       }
       render();
     });
+  }
+  function reviewHelp(s) {
+    const lines = [t.reviewHelp, t.levels.strict, t.levels.basic, t.levels.off];
+    if (s.commandReview === "custom" && s.custom) lines.push(t.customHelp(t.modes[s.custom.mode] ?? s.custom.mode, t.strictness[s.custom.strictness] ?? s.custom.strictness));
+    return el("div", {}, ...lines.map((line) => el("div", { textContent: line })));
   }
   function render() {
     if (!state) return;
@@ -123,12 +155,18 @@
     openModels.addEventListener("click", () => {
       host.canvas?.open("models").catch((error) => say(errorText(error), true));
     });
+    const levels = [["strict", t.strict], ["basic", t.basic], ["off", t.off]];
+    if (s.commandReview === "custom") levels.push(["custom", t.custom]);
+    const review = segmented(t.review, s.commandReview, levels, (value) => {
+      if (value !== "custom") save({ commandReview: value });
+    });
     root.replaceChildren(
       el("p", { className: "page__lead", textContent: t.lead }),
+      ...s.settingsUnavailable ? [el("p", { className: "notice", textContent: t.unavailable })] : [],
       el(
         "div",
         { className: "setting-group" },
-        settingRow(t.review, t.reviewHelp, segmented(t.review, s.commandReview, [["strict", t.strict], ["warn", t.warn], ["off", t.off]], (value) => save({ commandReview: value }))),
+        settingRow(t.review, reviewHelp(s), review),
         settingRow(t.routing, t.routingHelp, toggle("routing", s.routing, t.routing, (value) => save({ routing: value }))),
         settingRow(t.loops, t.loopsHelp, toggle("loopAlerts", s.loopAlerts, t.loops, (value) => save({ loopAlerts: value }))),
         settingRow(t.flows, t.flowsHelp, toggle("flows", s.flows, t.flows, (value) => save({ flows: value })))
@@ -141,7 +179,7 @@
     render();
   });
   host.service.onEvent(({ serviceId, event }) => {
-    if (serviceId === SERVICE && event === "settings") void load();
+    if (serviceId === SERVICE && event === "settings") void load().catch((error) => say(errorText(error), true));
   });
   load().catch((error) => say(errorText(error), true));
 })();

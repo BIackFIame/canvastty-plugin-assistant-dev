@@ -3,8 +3,8 @@
   "id": "canvastty-assistant",
   "name": "CanvasTTY Assistant",
   "version": "0.2.0",
-  "description": "The Assistant: reviews agents' shell commands and file writes before they run, and helps orchestrators: a route tool that suggests provider and model for a subagent, flows whose roles and tasks you preview before they start, a task board, loop alerts on cards and a session report. Decision models (Jev, Laya, Eikos, Ollama) are optional. Settings → Plugins → CanvasTTY Assistant → Settings.",
-  "description.ru": "Помощник: проверяет команды и записи файлов агентов до запуска и помогает оркестраторам: инструмент route предлагает провайдера и модель для субагента, сценарии показывают роли и задачи до запуска, доска задач, сигнал «цикл?» на окне и отчёт о сессии. Модели решений (Jev, Laya, Eikos, Ollama) не обязательны. Настройки → Плагины → CanvasTTY Assistant → Настройки.",
+  "description": "The Assistant: reviews agents' shell commands and file writes before they run, and helps orchestrators: a route tool that suggests provider and model for a subagent, flows (roles and tasks an orchestrator asks you to approve), a task board, loop alerts on cards and a session report. Decision models (Jev, Laya, Eikos, Ollama) are optional. Settings → Plugins → CanvasTTY Assistant → Settings.",
+  "description.ru": "Помощник: проверяет команды и записи файлов агентов до запуска и помогает оркестраторам: инструмент route предлагает провайдера и модель для субагента, сценарии (роли и задачи, которые оркестратор просит одобрить), доска задач, сигнал «цикл?» на окне и отчёт о сессии. Модели решений (Jev, Laya, Eikos, Ollama) не обязательны. Настройки → Плагины → CanvasTTY Assistant → Настройки.",
   "author": "CanvasTTY contributors",
   "permissions": [
     "storage",
@@ -18,18 +18,18 @@
   "coreFiles": [
     {
       "path": "README.md",
-      "bytes": 8148,
-      "sha256": "b04dd6abd160c79e08b00d1def3ce4f7d444fbfdc9aca6100fa5211c122f4cf7"
+      "bytes": 10585,
+      "sha256": "c254ee378fdcabae5e0fe500326c327df55e608b38cb9fa0f0031d114bcb5c07"
     },
     {
       "path": "README.ru.md",
-      "bytes": 13708,
-      "sha256": "28fa206b670df25d72066384240e4a2b5e7d9eabe325cc2a8011a4ca7268820e"
+      "bytes": 18083,
+      "sha256": "cf57e74f514e01bfc7eb7d24b222ba3317f7abc232dd179d55c2093d1d534946"
     },
     {
       "path": "services/assistant.mjs",
-      "bytes": 461538,
-      "sha256": "1402f4abaa23c234742194c75cc901f734076fb7bc7855e06ac1e7df398bc056"
+      "bytes": 498718,
+      "sha256": "80d6dc3884d9d6acdbda9007ac7e7f175c994f8bf8cc1a16ed877b72b0ebf329"
     },
     {
       "path": "settings/assistant.html",
@@ -38,13 +38,13 @@
     },
     {
       "path": "settings/assistant.js",
-      "bytes": 22587,
-      "sha256": "5bb3e60543549b98a5cc88a18c9adcd45da281184fa73832a9ec9ee7a2ee586d"
+      "bytes": 23671,
+      "sha256": "752c3df729a239f548737e454415cb6a514f4b4cb2418d4c5b49c9ab378a98d6"
     },
     {
       "path": "settings/assistant.css",
-      "bytes": 1443,
-      "sha256": "8ad832c9e576034527a4f9f6e2dacdc3438feed00633348fd489e1007195a32e"
+      "bytes": 1545,
+      "sha256": "8d83fc34e2d50a46994fe65e048160bbdb77f7db87d83a042ff25a57225ca1e8"
     },
     {
       "path": "settings/harness.html",
@@ -53,13 +53,13 @@
     },
     {
       "path": "settings/harness.js",
-      "bytes": 9399,
-      "sha256": "af3771eae359117b59d54640b4b9bbc2b6e8db00830c1c94e6699968354f3490"
+      "bytes": 15018,
+      "sha256": "b2d0e81c677b65e6398e78e1824866957c1f2aceb344ce2478c5cf20ccd42d05"
     },
     {
       "path": "apps/harness.css",
-      "bytes": 5792,
-      "sha256": "8a50321df63ab099d5f43239c9c9b6362797d0d8829802180f25047f94dcdc52"
+      "bytes": 6306,
+      "sha256": "fe9c82fb14c31be7b5fff32959697b719fe225881faf19ba4753a423f75b9259"
     },
     {
       "path": "apps/flows.html",
@@ -68,8 +68,8 @@
     },
     {
       "path": "apps/flows.js",
-      "bytes": 14328,
-      "sha256": "e9dd0bdef975a85fbff3a49445e622807aeac1e21bcb0dbac5aff21f748f864a"
+      "bytes": 17260,
+      "sha256": "e7ae6916ce46c936fed41d966fdd37cf6b10a08df5aadceed197026540ab4fe7"
     },
     {
       "path": "apps/board.html",
@@ -78,8 +78,8 @@
     },
     {
       "path": "apps/board.js",
-      "bytes": 6370,
-      "sha256": "7a0c244b8b75867320e24ca89c5058a8de2ca162c2c6a30a0ca9bfee467641c7"
+      "bytes": 6734,
+      "sha256": "904e1d03c665d6a433b1e8cfb22014a23aab0a7ce30beb88a2d0450c67804282"
     }
   ],
   "services": [
@@ -219,7 +219,7 @@
         },
         {
           "name": "flow_plan",
-          "description": "Proposes a flow for a goal: roles with provider/model and tasks. The person previews it in the Flow preview card and presses Start or Cancel; nothing starts before that. Then call flow_status.",
+          "description": "Asks the person to approve a flow for a goal. Returns only the plan id and the role names: the person sees roles, provider/model and tasks in the Flow preview card and presses Start or Cancel. Do not start subagents for it before flow_status says approved; it then gives the spawn values.",
           "inputSchema": {
             "type": "object",
             "properties": {
@@ -415,7 +415,7 @@
       "id": "flows",
       "kind": "canvas-app",
       "title": "Flow preview",
-      "description": "Roles and tasks of a proposed flow, before anything starts.",
+      "description": "Roles and tasks of a proposed flow, for you to approve or cancel.",
       "entry": "apps/flows.html",
       "defaultSize": {
         "width": 720,

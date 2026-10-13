@@ -4,9 +4,10 @@
 // secrets and never read back — the page only learns whether one exists.
 import type { AssistantBackendPreset, AssistantBackendSettings, AssistantBackendStatus, AssistantCheckResult, AssistantSettings } from '../shared/settings.ts';
 import type { RecentReview } from '../review/reviewService.ts';
+import { applyAppearance, whenIdle, type Appearance } from './common.ts';
 
 interface PluginHost {
-  onContext(listener: (context: { appearance: { locale: 'ru' | 'en'; palette?: string } }) => void): void;
+  onContext(listener: (context: { appearance: Appearance }) => void): void;
   secrets: { set(key: string, value: string): Promise<void>; delete(key: string): Promise<void> };
   service: {
     request(serviceId: string, method: string, params?: unknown): Promise<unknown>;
@@ -26,7 +27,7 @@ const SERVICE = 'assistant';
 
 const STRINGS = {
   en: {
-    title: 'Decision models', lead: 'Optional. A small decision model (Jev: TypeSafe, OpenRouter, Vercel; Laya; an Eikos server; or a model on your Ollama) sharpens command review, task triage and routing. Without one, simple rules are used. Command review itself (Strict, Warn, Off) is set on the Assistant settings page.',
+    title: 'Decision models', lead: 'Optional. A small decision model (Jev: TypeSafe, OpenRouter, Vercel; Laya; an Eikos server; or a model on your Ollama) sharpens command review, task triage and routing. Without one, simple rules are used. Command review itself (Strict, Basic rules, Off) is set on the Assistant settings page.',
     modes: 'Modes', triage: 'Task triage (launch and orchestrator)',
     off: 'Off', shadow: 'Learning', suggest: 'Suggest', auto: 'Auto',
     modeHelp: 'Learning records answers only. Suggest shows them on the card and enforces nothing. Auto may change what a launch is advised.',
@@ -43,7 +44,7 @@ const STRINGS = {
     saved: 'Saved.', notSaved: 'Not saved: '
   },
   ru: {
-    title: 'Модели решений', lead: 'Необязательно. Маленькая модель решений (Jev: TypeSafe, OpenRouter, Vercel; Laya; сервер Eikos или модель в вашей Ollama) уточняет проверку команд, разбор задач и выбор модели. Без неё работают простые правила. Саму проверку команд («Строго», «Предупреждать», «Выкл») задают на странице настроек Помощника.',
+    title: 'Модели решений', lead: 'Необязательно. Маленькая модель решений (Jev: TypeSafe, OpenRouter, Vercel; Laya; сервер Eikos или модель в вашей Ollama) уточняет проверку команд, разбор задач и выбор модели. Без неё работают простые правила. Саму проверку команд («Строго», «Базовые правила», «Выкл») задают на странице настроек Помощника.',
     modes: 'Режимы', triage: 'Разбор задачи (запуск и оркестратор)',
     off: 'Выкл', shadow: 'Обучение', suggest: 'Подсказки', auto: 'Авто',
     modeHelp: 'Обучение только записывает ответы. Подсказки показывают их на окне и ничего не решают. Авто может менять советы при запуске.',
@@ -282,12 +283,12 @@ function render(): void {
 }
 
 host.onContext(({ appearance }) => {
-  t = appearance.locale === 'ru' ? STRINGS.ru : STRINGS.en;
-  document.documentElement.lang = appearance.locale;
-  document.documentElement.dataset.palette = appearance.palette === 'lilac' || appearance.palette === 'night' ? appearance.palette : 'sage';
+  t = applyAppearance(appearance) === 'ru' ? STRINGS.ru : STRINGS.en;
   render();
 });
 host.service.onEvent(({ serviceId, event, data }) => {
+  // The other settings page saved (or the saved settings were read late): show what is in force now.
+  if (serviceId === SERVICE && event === 'settings') { whenIdle(() => { void load().catch(error => say(errorText(error))); }); return; }
   if (serviceId !== SERVICE || event !== 'check') return;
   const result = data as AssistantCheckResult | { error: string };
   say('error' in result ? result.error : result.added ? t.checkOk(result) : t.checkFail(result));

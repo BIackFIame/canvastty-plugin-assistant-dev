@@ -6,8 +6,9 @@
 
 The Assistant («Помощник») for [CanvasTTY](https://github.com/howdeploy/CanvasTTY): a small decision model that
 reviews agents' commands before they run, triages the task you give a card, and helps orchestrators (routing, flows,
-a task board, loop alerts, session reports). Once you trust its native code it works by itself: command review starts
-on Warn (hard rules only; nothing else enforced) and no model is called unless you set one up.
+a task board, loop alerts, session reports). You decide what it enforces: command review starts **Off**, on a fresh
+install and on an update alike, and no model is called unless you set one up. If the saved settings cannot be read at
+start, review stays Off, nothing is saved over them, and the Assistant reads them again by itself.
 
 ## Settings
 
@@ -15,9 +16,9 @@ Settings → Plugins → CanvasTTY Assistant → **Settings** has four controls:
 
 | Control | Values | Default |
 |:--|:--|:--|
-| Command review | Strict (anything but read-only commands goes to you) · Warn (hard rules deny; suggestions show on the card) · Off | Warn |
+| Command review | Strict (anything but read-only commands waits for you) · Basic rules (blocks what the hard rules forbid: elevation, piping downloads into a shell, deleting or writing outside the project; the rest runs with a hint on the card) · Off. Settings that are none of these exactly (for example an older version's Learning mode) show as **Custom**, read-only, until you pick a level. | Off |
 | Automatic routing | on/off: the `route` tool suggests provider, model and effort | on |
-| Loop alerts | on/off: a `loop?` badge when an agent repeats a command without changing files | on |
+| Loop alerts | on/off: a `loop?` badge when a card repeats the same command in one turn with no file edits seen | on |
 | Flows | on/off: the flow tools and the Flow preview card | on |
 
 Decision models are optional and have their own page (**Decision models…** at the bottom).
@@ -32,20 +33,37 @@ Settings → Plugins → CanvasTTY Assistant.
   picks from what is installed and signed in; pass the answer's `spawn` values to CanvasTTY's `spawn_agent`. The
   difficulty comes from a decision model when one is set up, else from word rules. Accounts stay with the accounts
   plugin: when `launchOptionTools` lists its `pick_account`, the answer names it.
-- **Flows**: `flows_list`, `flow_plan { flow, goal }`, `flow_status { planId? }`. A plan waits for you in the
-  **Flow preview** card (roles, provider/model, tasks; built-in flows in your language, flows from the project's
-  `.canvastty/flows/*.json|yaml` marked "From this project" and shown as written). Only after **Start** does
-  `flow_status` give the orchestrator what to pass to `spawn_agent`; the roles are added to its task board. The card
-  menu action **Plan from flow…** points the preview at that orchestrator, so you can choose a flow yourself.
+- **Flows**: `flows_list`, `flow_plan { flow, goal }`, `flow_status { planId? }`. `flow_plan` returns only the plan id
+  and the role names; the plan waits for you in the **Flow preview** card (roles, provider/model, tasks; built-in flows
+  in your language, flows from the project's `.canvastty/flows/*.json|yaml` marked "From this project" and shown as
+  written, without invisible characters). Only after **Start** does `flow_status` give the orchestrator what to pass to
+  `spawn_agent`; the roles are added to its task board. Start is held for a moment after a plan shows, a plan that
+  replaced the one on screen says so, and an orchestrator can propose at most three plans a minute. The card menu
+  action **Plan from flow…** points the preview at that orchestrator, so you can choose a flow yourself.
+  **This is a request to the orchestrator, not a lock**: the plugin starts nothing and cannot stop an orchestrator that
+  calls `spawn_agent` without a plan. Enforcing it needs a host API (see Needs).
+  Project flows are read only from a real `.canvastty/flows` folder inside the project (a linked folder or file is
+  refused, files are opened without following links); a refused file is named with a fixed reason, never its content.
+  The orchestrator gets project flow text marked as quoted data, not instructions.
 - **Task board**: `task_add` (orchestrator), `task_update` and `task_list` (orchestrator and its subagents; a subagent
   changes only its own tasks or claims a free one). The **Task board** card shows them by status; the orchestrator
   card shows `tasks 2/5`, and its menu action **Task board** points the card at it.
-- **Loop alerts**: every shell command reaches the plugin before it runs. The same command five times in one turn with
-  no file write in between puts `loop?` on the card; it clears when the next turn starts. Advisory only.
+- **Loop alerts**: every shell command reaches the plugin before it runs. The same command (spacing, numbers and a
+  trailing `| tail -50`-style filter aside) five times in one turn with no file edit seen in between puts `loop?` on the
+  card; it clears when the next turn starts (not on a brief status flicker). Edits made through the shell (`sed -i`,
+  redirections and heredocs into files, `tee`, `cp`/`mv`, formatters…) count as edits; polling (`sleep`, `watch`,
+  `git status`, `gh pr checks`…) is not counted. Outcomes are not visible to plugins, and providers without the decision
+  hook are not seen. Advisory only.
 - **Report** (card menu, every agent): start time, working time, turns, status and exit code, subagents, commands seen
   and what review declined or sent to you, loop alerts and tasks. Token use and cost are not available to plugins.
 
 A card has one badge per plugin; the most important signal is shown (loop, flow waiting, review, tasks, triage).
+
+**What is stored**: in the plugin's data folder, `harness/plans.json` and `harness/boards.json` hold flow plans (goal,
+role titles and tasks) and task boards (titles, details, notes) in plain text: your own and your agents' words, as
+written. Plans go after a day, when their orchestrator card closes, or when CanvasTTY no longer lists that card;
+boards go with their orchestrator. An approval is never read back from disk: after a restart a plan must be approved
+again. Loop alerts keep hashes only; reports keep counts, no command text.
 
 ## What it does
 
@@ -98,6 +116,10 @@ reads them, at call time, bound to the address they were saved for, and CanvasTT
 CanvasTTY with plugin services and the Assistant extension points (`secrets.get` for services, `decide.timeoutMs`,
 the `profile` and `canAsk` decide fields). Trust the plugin's native code in Settings → Agents → Extension native code, and turn on
 **May allow agent actions** if the Assistant may allow commands on its own.
+
+Not available to plugins yet, so not done: enforcing an approved flow (CanvasTTY would need to tell `launch.prepare`
+the parent card and role of a spawn, and let a launch policy refuse spawns outside an approved plan); opening a plugin
+card from a card action; tool outcomes, token use and cost; localized card-action titles.
 
 ## Build
 

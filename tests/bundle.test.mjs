@@ -84,6 +84,32 @@ const decide = (command, extra = {}) => ({
   tool: { name: 'Bash', kind: 'shell', command, paths: [] }, input: { command }, truncated: false, budgetMs: 45_000, ...extra
 });
 
+test('a storage read error at start is not a first run: review Off, nothing saved over the stored settings, read again later', async t => {
+  let failures = 2;
+  const storage = { settings: { enabled: true, modes: { 'task.route': 'off', 'command.review': 'auto' }, reviewStrictness: 'strict' } };
+  const service = startService(t, {
+    dataDir: join(base, 'data-unreadable'),
+    host: {
+      'storage.get': ({ key }) => { if (failures-- > 0) throw new Error('storage is locked'); return storage[key] ?? null; },
+      'storage.set': ({ key, value }) => { storage[key] = value; },
+      'sessions.subscribe': () => ({ sessions: [] }),
+      'secrets.get': () => null, 'redaction.register': () => null, 'cards.setBadge': () => null
+    }
+  });
+  const first = await service.request('harness.settings');
+  assert.deepEqual([first.commandReview, first.settingsUnavailable], ['off', true]);
+  assert.equal(await service.request('canvastty.decide', decide('sudo ls')), null, 'no opinion while unread');
+  await assert.rejects(service.request('harness.saveSettings', { settings: { commandReview: 'basic', routing: true, loopAlerts: true, flows: true } }), /пока не прочитаны/u);
+  assert.equal(service.hostCalls.some(call => call.method === 'storage.set'), false);
+  // The retry reads the stored Strict setting.
+  const deadline = Date.now() + 8_000;
+  while ((await service.request('harness.settings')).commandReview !== 'strict') {
+    assert.ok(Date.now() < deadline, 'the stored settings were read again');
+    await new Promise(resolve => setTimeout(resolve, 100));
+  }
+  assert.equal((await service.request('canvastty.decide', decide('sudo ls'))).verdict, 'deny');
+});
+
 test('end to end over JSON-RPC: off answers nothing; on in Auto the rule allows git status, sudo is denied, an unclear command asks; «Проверить» reports', async t => {
   const ollama = await startFakeOllama({ prefer: ['true', 'none_of_these', '0'] });
   t.after(() => ollama.close());
@@ -99,11 +125,16 @@ test('end to end over JSON-RPC: off answers nothing; on in Auto the rule allows 
       'cards.setBadge': () => null
     }
   });
-  // A fresh install: command review on Warn. Hard rules deny, nothing else is enforced, and no model is asked.
+  // A fresh install: command review Off until the person turns it on; no model is asked, nothing is saved.
+  assert.equal(await service.request('canvastty.decide', decide('sudo ls')), null);
+  assert.equal(ollama.requests.length, 0);
+  assert.deepEqual(await service.request('harness.settings'), { commandReview: 'off', custom: null, settingsUnavailable: false, routing: true, loopAlerts: true, flows: true, models: 0 });
+  assert.equal(storage.settings, undefined);
+  // Basic rules: hard rules block, nothing else is enforced.
+  await service.request('harness.saveSettings', { settings: { commandReview: 'basic', routing: true, loopAlerts: true, flows: true } });
   assert.equal((await service.request('canvastty.decide', decide('sudo ls'))).verdict, 'deny');
   assert.equal(await service.request('canvastty.decide', decide('npm install left-pad')), null);
-  assert.equal(ollama.requests.length, 0);
-  assert.deepEqual(await service.request('harness.settings'), { commandReview: 'warn', routing: true, loopAlerts: true, flows: true, models: 0 });
+  assert.ok(service.events.some(event => event.event === 'settings'), 'the pages are told');
   await service.request('harness.saveSettings', { settings: { commandReview: 'off', routing: true, loopAlerts: true, flows: true } });
   assert.equal(await service.request('canvastty.decide', decide('sudo ls')), null);
   const { settings } = await service.request('state');

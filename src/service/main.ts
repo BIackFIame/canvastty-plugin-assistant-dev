@@ -1,6 +1,7 @@
 // Service entry (bundled to services/assistant.mjs): wires the Assistant to CanvasTTY's JSON-RPC protocol.
 import { serve, type Host } from '../rpc.ts';
 import { Assistant, type LaunchContext, type SessionSummary } from './assistant.ts';
+import { readStored, retryStored } from './startup.ts';
 
 // Requests that arrive while the service is still reading its settings wait for it (CanvasTTY's own timeout
 // bounds the wait; a late decision is an "ask" there, never an allow).
@@ -11,12 +12,19 @@ let assistant: Assistant | null = null;
 const str = (value: unknown): string => typeof value === 'string' ? value : '';
 
 serve({
+  // Pending board and plan saves are written before the process ends (CanvasTTY waits about 2 s after shutdown).
+  exit: code => {
+    const done = (): never => process.exit(code);
+    setTimeout(done, 500).unref();
+    void (assistant?.harness.flushWrites() ?? Promise.resolve()).finally(done);
+  },
   onInitialize: async (params, host: Host) => {
     const dataDir = typeof params.dataDir === 'string' ? params.dataDir : process.cwd();
-    const saved = await host.callHost('storage.get', { key: 'settings' }).catch(() => null);
-    const harness = await host.callHost('storage.get', { key: 'harness' }).catch(() => null);
-    assistant = new Assistant({ host, dataDir, settings: saved, harness, locale: params.locale });
+    // A failed read is not "nothing saved": see startup.ts.
+    const { values, failed } = await readStored(host);
+    assistant = new Assistant({ host, dataDir, settings: values.settings, settingsUnavailable: failed.includes('settings'), harness: values.harness, harnessUnavailable: failed.includes('harness'), locale: params.locale });
     resolveReady(assistant);
+    if (failed.length) retryStored(host, failed, stored => assistant?.storageRecovered(stored));
     try {
       const answer = await host.callHost('sessions.subscribe', {}) as { sessions?: SessionSummary[] } | null;
       assistant.sessionsKnown(answer?.sessions);

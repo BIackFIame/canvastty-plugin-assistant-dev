@@ -1,6 +1,9 @@
-// The Flow preview card (bundled to apps/flows.js). It shows a proposed flow's roles, provider/model and tasks
-// before anything starts; Start hands the plan to the orchestrator (which starts the subagents itself with
-// CanvasTTY's spawn_agent), Cancel drops it. A flow from the project's .canvastty/flows is shown as written.
+// The Flow preview card (bundled to apps/flows.js). It shows the roles, provider/model and tasks a flow proposes, for
+// the person to approve; Start hands the plan to the orchestrator (which starts the subagents itself with CanvasTTY's
+// spawn_agent), Cancel drops it. It is a request to the orchestrator, not a lock: nothing here can stop a spawn_agent
+// call made without it. A flow from the project's .canvastty/flows is shown as written (invisible characters removed).
+// Start is held for a moment after a plan first shows, and a plan that replaced the one on screen says so: a new
+// plan never takes the place of the one the person was reading under their click.
 import { el, errorText, host, onContext, SERVICE, whenIdle, type PageLocale } from './common.ts';
 
 interface PlannedRole { id: string; title: string; task: string; provider: string | null; model?: string; effort?: string; reason: string }
@@ -14,10 +17,11 @@ interface View { settings: { flows: boolean }; focus: { flows: string | null }; 
 const STRINGS = {
   en: {
     off: 'Flows are off in the Assistant settings.',
-    waiting: 'Waiting for you', none: 'No flow is waiting. When an orchestrator proposes one, it appears here before anything starts.',
+    waiting: 'Waiting for you', none: 'No flow is waiting. When an orchestrator asks you to approve one, it appears here.',
     flow: 'Flow', builtIn: 'Built in', project: 'From this project', what: 'What it does', goal: 'Goal', for: 'Orchestrator',
     role: 'Role', model: 'Provider / model', task: 'Task', auto: 'chosen by the orchestrator', providerDefault: 'default model',
-    unchanged: 'Permissions are unchanged: each agent uses the launch profile of its orchestrator, and CanvasTTY checks every launch.',
+    request: 'Start tells the orchestrator it may go ahead and hands it these roles. This is a request it is told to follow, not a lock: CanvasTTY cannot yet stop an orchestrator that starts agents without it. Each agent still goes through CanvasTTY\'s own launch checks.',
+    changed: 'The plan changed: the orchestrator replaced the plan that was shown here. Read it again before you start.',
     start: 'Start', cancel: 'Cancel', started: 'Started. The orchestrator gets the plan with flow_status; if it is not waiting for it, tell it to run the approved flow.', cancelled: 'Cancelled.',
     yourself: 'Choose a flow yourself', chooseOrch: 'Orchestrator', chooseFlow: 'Flow', goalPlaceholder: 'What should the flow achieve?', preview: 'Preview',
     noOrch: 'Open an orchestrator card first.', problems: 'Not loaded from .canvastty/flows:', recent: 'Recent',
@@ -25,10 +29,11 @@ const STRINGS = {
   },
   ru: {
     off: 'Сценарии выключены в настройках Помощника.',
-    waiting: 'Ждёт вас', none: 'Нет сценариев, ждущих решения. Когда оркестратор предложит сценарий, он появится здесь до запуска.',
+    waiting: 'Ждёт вас', none: 'Нет сценариев, ждущих решения. Когда оркестратор попросит одобрить сценарий, он появится здесь.',
     flow: 'Сценарий', builtIn: 'Встроенный', project: 'Из этого проекта', what: 'Что делает', goal: 'Цель', for: 'Оркестратор',
     role: 'Роль', model: 'Провайдер / модель', task: 'Задача', auto: 'выберет оркестратор', providerDefault: 'модель по умолчанию',
-    unchanged: 'Права не меняются: каждый агент запускается с профилем своего оркестратора, и CanvasTTY проверяет каждый запуск.',
+    request: '«Запустить» разрешает оркестратору начать и передаёт ему эти роли. Это просьба, которой его просят следовать, а не запрет: CanvasTTY пока не может остановить оркестратор, который запускает агентов без неё. Каждый агент всё равно проходит обычные проверки запуска CanvasTTY.',
+    changed: 'План изменился: оркестратор заменил план, который был здесь. Прочитайте его заново перед запуском.',
     start: 'Запустить', cancel: 'Отмена', started: 'Запущено. Оркестратор получит план через flow_status; если он его не ждёт, попросите его выполнить одобренный сценарий.', cancelled: 'Отменено.',
     yourself: 'Выбрать сценарий самому', chooseOrch: 'Оркестратор', chooseFlow: 'Сценарий', goalPlaceholder: 'Чего должен добиться сценарий?', preview: 'Показать',
     noOrch: 'Сначала откройте окно оркестратора.', problems: 'Не загружено из .canvastty/flows:', recent: 'Недавние',
@@ -45,6 +50,23 @@ let goalDraft = '';
 const root = document.querySelector('#app')!;
 const status = document.querySelector('#status')!;
 const say = (message: string, error = false): void => { status.textContent = message; status.classList.toggle('is-error', error); };
+
+/** Start stays disabled this long after a plan first shows. */
+const START_DELAY_MS = 1_500;
+const firstShown = new Map<string, number>();
+/** The pending plan last shown per orchestrator, to tell when another one took its place. */
+const shownFor = new Map<string, string>();
+const replaced = new Set<string>();
+
+function notePending(pending: Plan[]): void {
+  const now = Date.now();
+  for (const plan of pending) {
+    if (!firstShown.has(plan.id)) firstShown.set(plan.id, now);
+    const previous = shownFor.get(plan.orchestratorId);
+    if (previous && previous !== plan.id) replaced.add(plan.id);
+    shownFor.set(plan.orchestratorId, plan.id);
+  }
+}
 
 async function load(): Promise<void> {
   view = await host.service.request(SERVICE, 'harness.view') as View;
@@ -71,15 +93,26 @@ function planCard(plan: Plan): HTMLElement {
     el('td', { textContent: role.task })));
   const start = el('button', { type: 'button', className: 'button button--primary', textContent: t.start });
   const cancel = el('button', { type: 'button', className: 'button', textContent: t.cancel });
+  let busy = false;
+  const wait = START_DELAY_MS - (Date.now() - (firstShown.get(plan.id) ?? 0));
+  if (wait > 0) {
+    start.disabled = true;
+    setTimeout(() => { if (!busy) start.disabled = false; }, wait);
+  }
   const decide = (decision: 'approved' | 'cancelled'): void => {
+    if (busy || (decision === 'approved' && start.disabled)) return;
+    busy = true;
     start.disabled = cancel.disabled = true;
+    // The person acted on this orchestrator's plan: the next one is not a replacement of something on screen.
+    shownFor.delete(plan.orchestratorId);
     host.service.request(SERVICE, 'flows.decide', { planId: plan.id, decision })
       .then(() => { say(decision === 'approved' ? t.started : t.cancelled); return load(); })
-      .catch(error => { say(errorText(error), true); start.disabled = cancel.disabled = false; });
+      .catch(error => { say(errorText(error), true); busy = false; start.disabled = cancel.disabled = false; });
   };
   start.addEventListener('click', () => decide('approved'));
   cancel.addEventListener('click', () => decide('cancelled'));
   return el('section', { className: 'card' },
+    replaced.has(plan.id) ? el('p', { className: 'notice', textContent: t.changed }) : null,
     el('div', { className: 'row' }, el('h2', { className: 'card__title', textContent: `${t.flow}: ${plan.name}` }), sourceTag(plan.source),
       el('span', { className: 'muted', textContent: t.askedBy[plan.requestedBy] })),
     plan.description ? el('div', {}, el('span', { className: 'muted', textContent: `${t.what}: ` }), plan.description) : null,
@@ -88,7 +121,7 @@ function planCard(plan: Plan): HTMLElement {
     el('table', { className: 'table' },
       el('thead', {}, el('tr', {}, el('th', { textContent: t.role }), el('th', { textContent: t.model }), el('th', { textContent: t.task }))),
       el('tbody', {}, ...rows)),
-    el('p', { className: 'muted', textContent: t.unchanged }),
+    el('p', { className: 'muted', textContent: t.request }),
     el('div', { className: 'row row--end' }, cancel, start));
 }
 
@@ -124,6 +157,7 @@ function render(): void {
   if (!view) return;
   if (!view.settings.flows) { root.replaceChildren(el('div', { className: 'empty', textContent: t.off })); return; }
   const pending = view.plans.filter(plan => plan.status === 'pending');
+  notePending(pending);
   const recent = view.plans.filter(plan => plan.status !== 'pending').slice(0, 5);
   root.replaceChildren(
     pending.length ? el('div', { className: 'page__lead', textContent: t.waiting }) : el('div', { className: 'empty', textContent: t.none }),
