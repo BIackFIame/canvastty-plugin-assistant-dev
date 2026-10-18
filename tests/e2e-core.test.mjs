@@ -4,10 +4,11 @@
 // runs) reach it through PluginSessions, PluginAgentTools, PluginCards and DecisionHooks, wired as the app wires them.
 // No model, no network, no real agent.
 import assert from 'node:assert/strict';
-import { cp, mkdir, mkdtemp, readFile, rm } from 'node:fs/promises';
+import { cp, mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import test from 'node:test';
+import { manifestForCore } from './helpers/core-manifest.mjs';
 
 const core = process.env.CANVASTTY_REPO;
 const root = new URL('../', import.meta.url).pathname;
@@ -66,10 +67,13 @@ test('the built plugin installs into CanvasTTY\'s PluginManager and its tools, h
   const manifest = JSON.parse(await readFile(join(root, 'canvastty.plugin.json'), 'utf8'));
   const fixture = join(work, 'repository');
   await mkdir(fixture);
-  for (const file of ['canvastty.plugin.json', 'LICENSE', ...manifest.coreFiles.map(entry => entry.path)]) {
+  for (const file of ['LICENSE', ...manifest.coreFiles.map(entry => entry.path)]) {
     await mkdir(join(fixture, dirname(file)), { recursive: true });
     await cp(join(root, file), join(fixture, file));
   }
+  // A core without localized manifest strings (main 1.8.1) gets the manifest without them (helpers/core-manifest.mjs).
+  const { validatePluginManifest } = await import(join(core, 'src/main/services/PluginManager.ts'));
+  await writeFile(join(fixture, 'canvastty.plugin.json'), JSON.stringify(manifestForCore(validatePluginManifest, manifest).manifest, null, 2));
   const project = join(work, 'project');
   await mkdir(join(project, '.canvastty', 'flows'), { recursive: true });
 

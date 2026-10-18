@@ -9,6 +9,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { createInterface } from 'node:readline';
 import test from 'node:test';
+import { manifestForCore } from './helpers/core-manifest.mjs';
 import { startFakeOllama } from './helpers/fake-ollama.mjs';
 
 const root = new URL('../', import.meta.url).pathname;
@@ -32,12 +33,13 @@ test('the manifest\'s coreFiles match the package bytes, and the service and pag
 
 test('the manifest passes CanvasTTY\'s own validator (when CANVASTTY_REPO points at a checkout)', { skip: !process.env.CANVASTTY_REPO }, async () => {
   const { validatePluginManifest } = await import(join(process.env.CANVASTTY_REPO, 'src/main/services/PluginManager.ts'));
-  const checked = validatePluginManifest(manifest);
+  const { manifest: accepted, localized } = manifestForCore(validatePluginManifest, manifest);
+  const checked = validatePluginManifest(accepted);
   assert.deepEqual(checked.services[0].decide, { events: ['pre-tool'], timeoutMs: 45_000 });
   assert.equal(checked.services[0].launch.policy, undefined);
   assert.deepEqual(checked.services[0].tools.map(tool => tool.name), ['recommend', 'review_status', 'route', 'flows_list', 'flow_plan', 'flow_status', 'task_add', 'task_update', 'task_list']);
   assert.deepEqual(checked.services[0].cardActions.map(action => action.id), ['flow-preview', 'task-board', 'report']);
-  assert.deepEqual(checked.services[0].cardActions.map(action => action['title.ru']), ['План по сценарию…', 'Доска задач', 'Отчёт'], 'the core keeps the Russian card action titles (needs localized card action titles)');
+  if (localized) assert.deepEqual(checked.services[0].cardActions.map(action => action['title.ru']), ['План по сценарию…', 'Доска задач', 'Отчёт'], 'the core keeps the Russian card action titles (needs localized card action titles)');
   assert.equal(checked.settingsContribution, 'settings');
 });
 
