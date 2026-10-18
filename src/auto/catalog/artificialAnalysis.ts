@@ -2,8 +2,11 @@ import { isEffort, type ReasoningEffort } from './identity.ts';
 import type { CatalogBenchmark } from './catalog.ts';
 
 /**
- * Artificial Analysis: the public model page carries the whole comparison dataset (every variant with its effort) as
- * React Server Component JSON. The page is read as text: no key, no script runs. Only measured values are kept:
+ * Artificial Analysis: the public model page carries its comparison rows (each variant with its effort) as React
+ * Server Component JSON. Since about 2026-10 it carries full rows only for the models of its default chart (27 on
+ * 2026-10-18, against 221 in the bundled snapshot); the others load in the browser, and the page's slim list of
+ * releases has no effort or sub-scores, so it is not read. The catalog therefore keeps earlier rows a partial page
+ * lacks (catalog.ts, mergePartialRefresh). The page is read as text: no key, no script runs. Only measured values are kept:
  * an estimated Intelligence Index is dropped, and a variant whose reasoning setup is not an exact effort keeps that
  * label in `thinking`, which routing never scores.
  */

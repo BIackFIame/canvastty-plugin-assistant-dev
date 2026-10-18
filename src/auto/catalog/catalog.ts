@@ -342,6 +342,24 @@ export interface CatalogStoreOptions {
   onChange?: () => void;
 }
 
+/** A refresh with fewer than this share of a source's known rows is partial: the earlier rows it lacks are kept. */
+export const PARTIAL_REFRESH_SHARE = 0.5;
+
+const variantOf = (row: CatalogBenchmark): string => JSON.stringify([row.modelId, row.reasoningEffort, row.thinking, row.source.indexVersion ?? row.source.releaseDate]);
+
+/**
+ * A source's fresh rows, plus — when they are suspiciously few (under PARTIAL_REFRESH_SHARE of the known ones) — the
+ * earlier rows they do not cover (same row id, or the same model, effort, setup and index version or release),
+ * unchanged, so they keep their own download time. A normal-sized refresh replaces the source's rows.
+ */
+export function mergePartialRefresh(fresh: readonly CatalogBenchmark[], earlier: readonly CatalogBenchmark[]): { rows: CatalogBenchmark[]; kept: number } {
+  if (!earlier.length || fresh.length >= earlier.length * PARTIAL_REFRESH_SHARE) return { rows: [...fresh], kept: 0 };
+  const ids = new Set(fresh.map(row => row.id));
+  const variants = new Set(fresh.map(variantOf));
+  const keep = earlier.filter(row => !ids.has(row.id) && !variants.has(variantOf(row)));
+  return { rows: [...fresh, ...keep], kept: keep.length };
+}
+
 export class CatalogStore {
   private readonly directory: string | null;
   private readonly transport: typeof fetch;
@@ -560,7 +578,16 @@ export class CatalogStore {
     if (m.status === 'rejected') sourceErrors['models.dev'] = 'models.dev unavailable; the earlier list keeps its age.';
     if (lb.status === 'rejected') sourceErrors.livebench = 'LiveBench unavailable; earlier scores keep their age.';
     if (aa.status === 'rejected') sourceErrors['artificial-analysis'] = 'Artificial Analysis unavailable; earlier scores keep their age.';
-    const benchmarks = [...(aa.status === 'fulfilled' ? aa.value : kept('artificial-analysis')), ...(lb.status === 'fulfilled' ? lb.value : kept('livebench'))];
+    // A refresh that returns far fewer rows than are known (Artificial Analysis's model page, since about 2026-10,
+    // carries full rows only for the ~27 models of its default chart; the rest load in the browser) adds its rows and
+    // keeps the earlier ones it lacks, with their original age: a known score is never dropped for a partial page.
+    // (LiveBench publishes whole tables per release; a new release replaces the old one.)
+    const mergedAA = (fresh: CatalogBenchmark[]): CatalogBenchmark[] => {
+      const { rows, kept: keptRows } = mergePartialRefresh(fresh, kept('artificial-analysis'));
+      if (keptRows) sourceErrors['artificial-analysis'] = `Artificial Analysis returned ${fresh.length} rows (${fresh.length + keptRows} known); the other ${keptRows} earlier scores are kept with their age.`;
+      return rows;
+    };
+    const benchmarks = [...(aa.status === 'fulfilled' ? mergedAA(aa.value) : kept('artificial-analysis')), ...(lb.status === 'fulfilled' ? lb.value : kept('livebench'))];
     if (!benchmarks.length) fail('No benchmark scores');
     const snapshot: RatingsSnapshot = freeze({
       version: 2, fetchedAt,

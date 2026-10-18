@@ -9,7 +9,7 @@ import { join } from 'node:path';
 import bundled from '../src/auto/catalog/bundled.json' with { type: 'json' };
 import { normalizeArtificialAnalysis } from '../src/auto/catalog/artificialAnalysis.ts';
 import {
-  CatalogStore, MAX_AGE_MS, MODELS_URL, LIVEBENCH_INDEX_URL, RATINGS_CACHE_FILE, OPENROUTER_CACHE_FILE,
+  CatalogStore, MAX_AGE_MS, MODELS_URL, LIVEBENCH_INDEX_URL, RATINGS_CACHE_FILE, OPENROUTER_CACHE_FILE, PARTIAL_REFRESH_SHARE, mergePartialRefresh,
   normalizeBenchmarks, normalizeModels, parseBenchmarkVariant, selectLiveBenchRelease, validateRatings
 } from '../src/auto/catalog/catalog.ts';
 import { normalizeOpenRouterModels, offeredByDefault, perMillion, OPENROUTER_MODELS_URL } from '../src/auto/catalog/openrouter.ts';
@@ -111,13 +111,14 @@ test('refresh: only the fixed public addresses, GET with no key, no body, no red
   }
   const status = catalog.status();
   assert.equal(status.bundled, false);
-  assert.deepEqual(status.sources.map(s => [s.id, s.fetchedAt, s.error]), [['models.dev', epoch, null], ['artificial-analysis', epoch, null], ['livebench', epoch, null], ['openrouter', epoch, null]]);
+  // The fixture page has 7 rows against the bundled 221: a partial refresh, which keeps the bundled ones (below).
+  assert.deepEqual(status.sources.map(s => [s.id, s.fetchedAt, s.id === 'artificial-analysis' ? /^Artificial Analysis returned 7 rows/u.test(s.error) : s.error]), [['models.dev', epoch, null], ['artificial-analysis', epoch, true], ['livebench', epoch, null], ['openrouter', epoch, null]]);
   const { mode } = await import('node:fs').then(fs => fs.statSync(join(directory, RATINGS_CACHE_FILE)));
   assert.equal(mode & 0o777, 0o600);
   const routing = catalog.routing();
   assert.equal(routing.pricesStale, false);
   assert.equal(routing.openRouterPricesStale, false);
-  assert.ok(routing.benchmarks.every(row => !row.historical));
+  assert.ok(routing.benchmarks.every(row => row.historical === (row.source.fetchedAt !== epoch)), 'fresh rows are current; the kept bundled ones are old');
   // A restart reads the cache (not the bundled snapshot).
   const again = new CatalogStore({ directory, now: () => epoch + DAY, bundled });
   t.after(() => again.dispose());
@@ -159,6 +160,49 @@ test('a source fails alone: its earlier rows keep their original age; old scores
   await assert.rejects(catalog.refresh({ force: true }), /unavailable/u);
   assert.equal(catalog.ratings().fetchedAt, now);
   assert.match(catalog.status().lastError, /unavailable/u);
+});
+
+test('a partial refresh never drops known scores: Artificial Analysis\'s page now carries full rows only for its default chart', async t => {
+  // The page as served on 2026-10-18: full rows (with effort and release) for the chart's models under
+  // `initialModels`, and a slim list of every release (name, date, index; no effort, no sub-scores) that is not a score.
+  const slim = Array.from({ length: 193 }, (_, i) => ({ slug: `release-${i}`, name: `Release ${i}`, releaseDate: '2026-09-01', intelligenceIndex: 30 + i % 20, modelCount: 2, creator: { slug: 'c', name: 'C', logo: '/x.png' } }));
+  const page = `<html><p>Artificial Analysis Intelligence Index v4.3.2</p><script>self.__next_f.push(${JSON.stringify([1, `5:${JSON.stringify({ children: [{ initialModels: aaRows() }, { releases: slim }] })}\n`])})</script></html>`;
+  assert.equal(normalizeArtificialAnalysis(page, epoch).length, aaRows().length, 'the slim release list adds no rows (it has no effort)');
+  const bundledAA = bundled.benchmarks.filter(row => row.source.kind === 'artificial-analysis');
+  assert.equal(bundledAA.length, 221);
+  const transport = catalogTransport({ overrides: { [ARTIFICIAL_ANALYSIS_URL]: () => new Response(page) } });
+  const { catalog } = await store(t, { transport, bundled });
+  await catalog.load();
+  await catalog.refresh({ force: true });
+  const rows = catalog.ratings().benchmarks.filter(row => row.source.kind === 'artificial-analysis');
+  // GLM-5.3 at max is in both: the fresh row replaces the bundled one; the other 220 stay.
+  const covered = bundledAA.filter(row => row.modelId === 'glm-5-3' && row.reasoningEffort === 'max' && row.thinking === null);
+  assert.equal(covered.length, 1);
+  assert.equal(rows.length, aaRows().length + bundledAA.length - 1, 'the fresh rows and every bundled one they do not cover');
+  assert.equal(rows.filter(row => row.source.fetchedAt === epoch).length, aaRows().length);
+  assert.ok(bundledAA.filter(row => row !== covered[0]).every(row => rows.some(kept => kept.id === row.id && kept.source.fetchedAt === row.source.fetchedAt)), 'kept unchanged, with their own age');
+  const status = catalog.status().sources.find(source => source.id === 'artificial-analysis');
+  assert.equal(status.rows, rows.length);
+  assert.match(status.error, /^Artificial Analysis returned 7 rows \(227 known\); the other 220 earlier scores are kept with their age\.$/u);
+  // The next partial refresh keeps them again; LiveBench (whole tables per release) is replaced as usual.
+  await catalog.refresh({ force: true });
+  assert.equal(catalog.ratings().benchmarks.filter(row => row.source.kind === 'artificial-analysis').length, 227);
+  assert.equal(catalog.ratings().sourceErrors.livebench, undefined);
+});
+
+test('partial refresh rule: under half of the known rows keeps the uncovered earlier ones; a normal-sized refresh replaces', () => {
+  assert.equal(PARTIAL_REFRESH_SHARE, 0.5);
+  const earlier = normalizeArtificialAnalysis(aaHtml(), epoch - DAY);
+  const fresh = normalizeArtificialAnalysis(aaHtml(aaRows().slice(0, 2)), epoch);
+  const partial = mergePartialRefresh(fresh, earlier);
+  assert.equal(partial.kept, earlier.length - 2, 'the same rows (by id) are not kept twice');
+  assert.deepEqual(partial.rows.slice(0, 2), fresh);
+  const enough = normalizeArtificialAnalysis(aaHtml(aaRows().slice(0, 4)), epoch);
+  assert.deepEqual(mergePartialRefresh(enough, earlier), { rows: enough, kept: 0 }, '4 of 7: a normal refresh (models may leave the list)');
+  assert.deepEqual(mergePartialRefresh(fresh, []), { rows: fresh, kept: 0 });
+  // The same variant under a new row id: the fresh one wins, the earlier one goes.
+  const renamed = fresh.map(row => ({ ...row, id: `${row.id}-new` }));
+  assert.equal(mergePartialRefresh(renamed, earlier).kept, earlier.length - 2);
 });
 
 test('only fixed addresses: a listing that points elsewhere is not followed; an oversized answer is refused', async t => {
