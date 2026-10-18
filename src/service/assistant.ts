@@ -116,6 +116,8 @@ export class Assistant {
       readKey: owner => this.readKey(owner),
       dataClassMode: () => this.settings.dataClassMode,
       decide: (text, grant, signal) => this.turnDifficulty(text, grant.dataClass, grant.sessionId, grant.role, signal),
+      // Each new user turn is the task command review checks this card's actions against (memory only).
+      turn: (text, grant) => this.review.noteTurn(grant.sessionId, text, { role: grant.role, parentSessionId: grant.parentSessionId }),
       publishBadge: (sessionId, badge) => { void this.harness.setBadge(sessionId, 'model', badge); },
       ...(options.transport ? { transport: options.transport } : {}),
       ...(options.catalogTransport ? { catalogTransport: options.catalogTransport } : {}),
@@ -205,7 +207,7 @@ export class Assistant {
     if (model !== 'off' && model !== 'auto') { const refusal = AUTO_STRINGS[this.locale].unknownValue; return { refuse: { reason: refusal } }; }
     const mode = this.engine.mode('task.route');
     const triage = !!task && (mode === 'suggest' || mode === 'auto' || mode === 'shadow');
-    this.review.noteLaunch(context.sessionId, { task, dataClass, triage: triage && mode !== 'shadow' });
+    this.review.noteLaunch(context.sessionId, { task, dataClass, triage: triage && mode !== 'shadow', role: context.role, parentSessionId: context.parentSessionId ?? null });
     if (triage) void this.triage(context.sessionId, task!, dataClass, context.cwd);
     if (model !== 'auto') return null;
     return this.auto.prepare({

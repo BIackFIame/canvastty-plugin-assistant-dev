@@ -7486,6 +7486,24 @@ function exactAllow(facts) {
 // src/review/reviewService.ts
 var ASKING_PROFILES = /* @__PURE__ */ new Set(["normal", "plan"]);
 var MAX_SESSIONS = 512;
+var MAX_TURNS = 5;
+var MAX_REQUEST_CHARS = 16384;
+var MIN_QUOTED_CHARS = 24;
+var MAX_ANCESTORS = 4;
+var squash = (value) => value.replace(/\s+/gu, " ").trim().toLowerCase();
+var distinct = (texts) => {
+  const seen = /* @__PURE__ */ new Set();
+  const out = [];
+  for (const text6 of texts) {
+    if (!text6) continue;
+    const key = squash(text6);
+    if (key && !seen.has(key)) {
+      seen.add(key);
+      out.push(text6);
+    }
+  }
+  return out;
+};
 var MAX_RECENT = 40;
 var MARGIN_MS = 1500;
 var DENY_MESSAGES = {
@@ -7679,18 +7697,79 @@ var ReviewService = class {
   state(sessionId) {
     let state = this.sessions.get(sessionId);
     if (!state) {
-      state = { suspect: false, personRequest: null, dataClass: null, strict: false };
+      state = { suspect: false, launchTask: null, turns: [], subagent: false, parent: null, dataClass: null, strict: false };
       this.sessions.set(sessionId, state);
       while (this.sessions.size > MAX_SESSIONS) this.forget(this.sessions.keys().next().value);
     }
     return state;
   }
-  /** What the person set in the launcher for this card: its task (typed by the person) and its data class. */
+  /**
+   * What the launcher set for this card: its task and data class, and whether it is a subagent (whose task its
+   * orchestrator wrote) of which card.
+   */
   noteLaunch(sessionId, launch) {
     const state = this.state(sessionId);
-    state.personRequest = launch.task ? { text: launch.task.slice(0, 16384), byPerson: true } : null;
+    state.launchTask = launch.task ? launch.task.slice(0, MAX_REQUEST_CHARS) : null;
     state.dataClass = launch.dataClass;
     state.strict = launch.triage ? "pending" : false;
+    if (launch.role !== void 0) {
+      state.subagent = launch.role === "subagent";
+      state.parent = state.subagent ? launch.parentSessionId ?? null : null;
+    }
+  }
+  /**
+   * A new user turn of a card on Auto (Jev), as its router read it (the latest user text, envelopes stripped). Kept
+   * in memory only, for this card's reviews, until the card closes: it is the task the card works on, so the
+   * review can tell the writes it asks for from the ones it does not. It goes out only inside `person_request`,
+   * under the card's data class, like the launcher's task.
+   */
+  noteTurn(sessionId, text6, card) {
+    const value = text6.trim().slice(0, MAX_REQUEST_CHARS);
+    if (!value) return;
+    const state = this.state(sessionId);
+    state.subagent = card.role === "subagent";
+    state.parent = state.subagent ? card.parentSessionId : null;
+    if (state.turns.length && squash(state.turns.at(-1)) === squash(value)) return;
+    state.turns.push(value);
+    if (state.turns.length > MAX_TURNS) state.turns.splice(1, 1);
+  }
+  /** A card's own texts, most recent first: its latest turn, its earlier turns, then the launcher's task. */
+  ownTexts(state) {
+    return distinct([...[...state.turns].reverse(), state.launchTask]);
+  }
+  /** The texts the person typed for this card or, for a subagent, for the nearest card above it that is not one. */
+  personTexts(state) {
+    let current = state;
+    for (let depth = 0; current && depth <= MAX_ANCESTORS; depth++) {
+      if (!current.subagent) return this.ownTexts(current);
+      current = current.parent ? this.sessions.get(current.parent) : void 0;
+    }
+    return [];
+  }
+  /**
+   * The request this card's actions are reviewed against (`person_request`), and whether the person typed it.
+   *
+   * - A card started by the person: its own task and turns, typed by the person.
+   * - A subagent: its own task when the person typed it word for word (an orchestrator passing on the person's
+   *   prompt); else the person's request to the card above it, which an orchestrator cannot change. Only when no
+   *   text of the person's is known: its own task, as the orchestrator's (never "typed by the person").
+   */
+  requestFor(sessionId) {
+    const state = this.sessions.get(sessionId);
+    if (!state) return null;
+    const own = this.ownTexts(state);
+    if (!state.subagent) return own.length ? { text: own.join("\n\n"), byPerson: true } : null;
+    const above = state.parent ? this.sessions.get(state.parent) : void 0;
+    const person2 = above ? this.personTexts(above) : [];
+    const said2 = person2.map(squash);
+    if (own.length && person2.length && own.every((text6) => {
+      const quoted = squash(text6);
+      return quoted.length >= MIN_QUOTED_CHARS && said2.some((typed) => typed.includes(quoted));
+    })) {
+      return { text: own.join("\n\n"), byPerson: true };
+    }
+    if (person2.length) return { text: person2.join("\n\n"), byPerson: true };
+    return own.length ? { text: own.join("\n\n"), byPerson: false } : null;
   }
   /** The launch triage finished: its strictness (a failed triage is not strict; the global setting still applies). */
   noteTriage(sessionId, strict) {
@@ -7747,6 +7826,7 @@ var ReviewService = class {
     const act = (answer) => answer?.verdict ?? null;
     try {
       const state = this.state(request.sessionId);
+      const personRequest = this.requestFor(request.sessionId);
       const action = actionFromDetail(detailFromHook(request.tool.name, request.input, request.truncated));
       if (!action.commandCwd && request.agentCwd) action.commandCwd = request.agentCwd;
       const git = this.options.git === null ? null : this.options.git ?? defaultGit;
@@ -7755,7 +7835,7 @@ var ReviewService = class {
         action,
         root: request.cwd,
         sessionId: request.sessionId,
-        requestTypedByPerson: state.personRequest?.byPerson === true,
+        requestTypedByPerson: personRequest?.byPerson === true,
         tracker: this.tracker,
         git,
         home,
@@ -7772,7 +7852,7 @@ var ReviewService = class {
         this.remember(request.sessionId, summary, mode, { outcome: "deny", act: "deny", tier: "rule", reason: "rule-deny", model: null, auditId: null });
         return { verdict: "deny", reason };
       }
-      const run = () => this.ladder(request, state, facts, rules, action.content, signal);
+      const run = () => this.ladder(request, state, personRequest?.text ?? null, facts, rules, action.content, signal);
       if (mode === "shadow" || mode === "suggest") {
         void run().then((verdict2) => {
           this.rememberVerdict(request.sessionId, summary, mode, verdict2, null);
@@ -7801,14 +7881,14 @@ var ReviewService = class {
       return mode === "auto" ? ask("unavailable") : null;
     }
   }
-  async ladder(request, state, facts, rules, content, signal) {
+  async ladder(request, state, personRequest, facts, rules, content, signal) {
     const settings = this.options.settings();
     const git = this.options.git === null ? null : this.options.git ?? defaultGit;
     const cacheScope = createHash3("sha256").update(JSON.stringify([request.sessionId, request.cwd, facts.actionClass, factPhrases(facts), facts.shape])).digest("hex");
     const verdict = await askCommandReview(this.options.engine, {
       facts,
       tier1: rules,
-      personRequest: state.personRequest?.text ?? null,
+      personRequest,
       content,
       dataClass: state.dataClass ?? settings.defaultDataClass,
       session: { suspect: state.suspect, strict: this.strict(state), personOnly: this.circuit.personOnly(request.sessionId) },
@@ -11479,6 +11559,8 @@ var AutoRouter = class {
   active = /* @__PURE__ */ new Map();
   activeTotal = 0;
   shownModel = /* @__PURE__ */ new Map();
+  /** Each card's first conversation (keyed hash): the one its new user turns are reported from. */
+  mainConversation = /* @__PURE__ */ new Map();
   recentRecords = [];
   hosts = /* @__PURE__ */ new Set();
   stats = { requests: 0, turns: 0, continuations: 0, small: 0, jevAsked: 0, jevAnswered: 0, rules: 0, leaseReuses: 0, failovers: 0 };
@@ -11601,6 +11683,7 @@ var AutoRouter = class {
     for (const controller of this.active.get(sessionId) ?? []) controller.abort();
     for (const [key, lease] of this.leases) if (lease.sessionId === sessionId) this.leases.delete(key);
     if (this.shownModel.delete(sessionId)) this.deps.badge?.(sessionId, null);
+    this.mainConversation.delete(sessionId);
     this.spend.forget(sessionId);
   }
   /** Cards CanvasTTY no longer lists lose their keys (after a restart of the service). */
@@ -11800,7 +11883,15 @@ var AutoRouter = class {
           record4.reason = "same_turn";
           this.stats.leaseReuses++;
         } else {
-          const decided = await this.decideTurn(latestUserText(body), grant, Array.isArray(body.tools) ? body.tools.length : 0);
+          const text6 = latestUserText(body);
+          const main = this.mainConversation.get(grant.sessionId) ?? keys.conversation;
+          this.mainConversation.set(grant.sessionId, main);
+          while (this.mainConversation.size > ROUTER_LIMITS.conversations) this.mainConversation.delete(this.mainConversation.keys().next().value);
+          try {
+            if (text6 && main === keys.conversation) this.deps.turn?.(text6, grant);
+          } catch {
+          }
+          const decided = await this.decideTurn(text6, grant, Array.isArray(body.tools) ? body.tools.length : 0);
           if (controller.signal.aborted) throw new HttpError(499, "aborted", "The call was cancelled.");
           if (decided.source === "rules") this.stats.rules++;
           view = decided.view;
@@ -12100,6 +12191,7 @@ var AutoService = class {
       dataClassMode: options.dataClassMode,
       key: (upstream) => this.keyFor(upstream),
       ...options.decide ? { decide: options.decide } : {},
+      ...options.turn ? { turn: options.turn } : {},
       badge: (sessionId, model) => options.publishBadge(sessionId, model ? { text: badgeText(model.model), tone: "neutral", tooltip: strings2.badgeTip(model.tier, model.source) } : null),
       log: (level, message) => options.host.log(level, message),
       ...options.transport ? { transport: options.transport } : {},
@@ -12347,6 +12439,8 @@ var Assistant = class {
       readKey: (owner) => this.readKey(owner),
       dataClassMode: () => this.settings.dataClassMode,
       decide: (text6, grant, signal) => this.turnDifficulty(text6, grant.dataClass, grant.sessionId, grant.role, signal),
+      // Each new user turn is the task command review checks this card's actions against (memory only).
+      turn: (text6, grant) => this.review.noteTurn(grant.sessionId, text6, { role: grant.role, parentSessionId: grant.parentSessionId }),
       publishBadge: (sessionId, badge) => {
         void this.harness.setBadge(sessionId, "model", badge);
       },
@@ -12446,7 +12540,7 @@ var Assistant = class {
     }
     const mode = this.engine.mode("task.route");
     const triage = !!task && (mode === "suggest" || mode === "auto" || mode === "shadow");
-    this.review.noteLaunch(context.sessionId, { task, dataClass, triage: triage && mode !== "shadow" });
+    this.review.noteLaunch(context.sessionId, { task, dataClass, triage: triage && mode !== "shadow", role: context.role, parentSessionId: context.parentSessionId ?? null });
     if (triage) void this.triage(context.sessionId, task, dataClass, context.cwd);
     if (model !== "auto") return null;
     return this.auto.prepare({

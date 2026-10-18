@@ -36,6 +36,8 @@ export interface AutoServiceOptions {
   dataClassMode(): DataClassMode;
   /** Jev's view of a turn, or null (Jev off, not set up, not allowed for this class, or no answer). */
   decide?(text: string, grant: LaunchGrant, signal: AbortSignal): Promise<TurnDecision | null>;
+  /** A new user turn of a card (its latest user text), for the card's command review. */
+  turn?(text: string, grant: LaunchGrant): void;
   publishBadge(sessionId: string, badge: Badge | null): void;
   transport?: typeof fetch;
   /** For the public catalog downloads (tests pass a fake; nothing else may reach the network). */
@@ -102,6 +104,7 @@ export class AutoService {
       dataClassMode: options.dataClassMode,
       key: upstream => this.keyFor(upstream),
       ...(options.decide ? { decide: options.decide } : {}),
+      ...(options.turn ? { turn: options.turn } : {}),
       badge: (sessionId, model) => options.publishBadge(sessionId, model ? { text: badgeText(model.model), tone: 'neutral', tooltip: strings.badgeTip(model.tier, model.source) } : null),
       log: (level, message) => options.host.log(level, message),
       ...(options.transport ? { transport: options.transport } : {}),

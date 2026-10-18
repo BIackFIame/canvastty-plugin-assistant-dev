@@ -190,6 +190,98 @@ test('an agent that cannot ask (canAsk false): an ask becomes a deny with its re
   assert.equal((await service(fakeEngine({ mode: 'auto', throwAsk: true })).review.decide(request('npm test', { profile: 'normal' }), 10_000)).verdict, 'ask');
 });
 
+// The live run of 2026-10-18: an OpenCode subagent on Auto (Jev) was asked to write slugify.mjs and its test; both
+// writes were denied as "not asked for by the task", because the review never saw the subagent's task.
+const C_PROMPT = 'In this folder create slugify.mjs exporting function slugify(text): lowercase, trim, replace every run of characters that are not a-z or 0-9 with a single dash, and strip leading and trailing dashes. Also create slugify.test.mjs using node:test and node:assert with at least 4 cases. Then run: node --test slugify.test.mjs (if you may not run commands, say so). Reply with one line: DONE plus the test result.';
+const ORCH_PROMPT = `Answer in 4 bullets: how do Raft and Paxos differ? Then call spawn_agent two times with provider "opencode" and launchOptions {"canvastty-assistant":{"model":"auto"}} (no model argument), with exactly these cwd and prompt values:\n   P: cwd "${project}/pong", prompt "Reply with the word PONG. Do not use any tools."\n   C: cwd "${project}/code", prompt "${C_PROMPT}"`;
+
+/**
+ * Jev as it answered live: serves_request 0.20–0.23 without the task, high when the request asks for the file. No
+ * second reviewer, as in the live profile (smart: none).
+ */
+function taskAwareEngine() {
+  const seen = [];
+  const engine = fakeEngine({ mode: 'auto', qualified: true, smart: null });
+  const ask = engine.ask.bind(engine);
+  engine.ask = async (request, ctx) => {
+    const asked = request.fields.find(field => field.name === 'person_request').value;
+    seen.push(asked);
+    const file = /slugify\.(?:test\.)?mjs/u.exec(request.fields.find(field => field.name === 'action.path')?.value ?? '')?.[0] ?? '';
+    const serves = file && asked.includes(file) ? 0.97 : 0.21;
+    const decision = await ask(request, ctx);
+    const answers = answersOf(serves);
+    const mapped = request.map?.(answers, {}, { variant: 'full', truncated: false, family: 'jev', autoCapable: true });
+    return { ...decision, answers, outcome: mapped?.outcome ?? null, qualifiedOutcome: mapped?.qualifiedOutcome ?? null };
+  };
+  return { engine, seen };
+}
+const write = (sessionId, file, role = 'subagent') => ({
+  event: 'pre-tool', sessionId, provider: 'opencode', role, cwd: project, agentCwd: project, profile: 'auto', canAsk: false,
+  tool: { name: 'write', kind: 'edit', command: null, paths: [join(project, file)] }, input: { filePath: join(project, file), content: 'export function slugify() {}\n' }, truncated: false
+});
+
+test('command review knows the card\'s task: a subagent\'s writes its task asks for pass (the live case); the rules and the person\'s request still bound it', async () => {
+  // Before: no task known for the subagent → both writes denied, as live.
+  {
+    const { engine, seen } = taskAwareEngine();
+    const { review } = service(engine);
+    review.noteLaunch('orch', { task: null, dataClass: null, triage: false, role: 'orchestrator' });
+    review.noteLaunch('c', { task: null, dataClass: null, triage: false, role: 'subagent', parentSessionId: 'orch' });
+    for (const file of ['slugify.mjs', 'slugify.test.mjs']) {
+      const answer = await review.decide(write('c', file), 10_000);
+      assert.equal(answer.verdict, 'deny', file);
+      assert.match(answer.reason, /the task given to this card does not ask for it/u);
+    }
+    assert.deepEqual(seen, ['', '']);
+  }
+  // After: the Auto router reports each card's new user turns; the person typed the subagent's prompt word for word.
+  {
+    const { engine, seen } = taskAwareEngine();
+    const { review } = service(engine);
+    review.noteLaunch('orch', { task: null, dataClass: null, triage: false, role: 'orchestrator' });
+    review.noteLaunch('c', { task: null, dataClass: null, triage: false, role: 'subagent', parentSessionId: 'orch' });
+    review.noteTurn('orch', ORCH_PROMPT, { role: 'orchestrator', parentSessionId: null });
+    review.noteTurn('c', C_PROMPT, { role: 'subagent', parentSessionId: 'orch' });
+    assert.deepEqual(review.requestFor('c'), { text: C_PROMPT, byPerson: true });
+    for (const file of ['slugify.mjs', 'slugify.test.mjs']) assert.equal((await review.decide(write('c', file), 10_000)).verdict, 'allow', file);
+    assert.deepEqual(seen, [C_PROMPT, C_PROMPT], 'the subagent\'s own task went to the reviewer');
+    assert.deepEqual(review.recent().map(entry => [entry.act, entry.reason]), [['allow', 'auto-band'], ['allow', 'auto-band']]);
+    // The same card's dangerous calls are unchanged: tier-1 rules come first, whatever the task says.
+    assert.equal((await review.decide({ ...write('c', 'x'), tool: { name: 'bash', kind: 'shell', command: 'sudo node --test', paths: [] }, input: { command: 'sudo node --test' } }, 10_000)).verdict, 'deny');
+    assert.equal((await review.decide(write('c', '../outside.mjs'), 10_000)).verdict, 'deny', 'a write outside the project');
+    // A write the task does not ask for is still not allowed.
+    assert.equal((await review.decide(write('c', 'notes.txt'), 10_000)).verdict, 'deny');
+  }
+  // The orchestrator wrote its own task for the subagent: it is reviewed against what the person asked, which the
+  // orchestrator cannot widen.
+  {
+    const { engine, seen } = taskAwareEngine();
+    const { review } = service(engine);
+    review.noteLaunch('orch', { task: null, dataClass: null, triage: false, role: 'orchestrator' });
+    review.noteTurn('orch', 'Answer in 4 bullets: how do Raft and Paxos differ?', { role: 'orchestrator', parentSessionId: null });
+    review.noteTurn('c', 'Create slugify.mjs and slugify.test.mjs in this folder.', { role: 'subagent', parentSessionId: 'orch' });
+    assert.deepEqual(review.requestFor('c'), { text: 'Answer in 4 bullets: how do Raft and Paxos differ?', byPerson: true });
+    assert.equal((await review.decide(write('c', 'slugify.mjs'), 10_000)).verdict, 'deny');
+    assert.deepEqual(seen, ['Answer in 4 bullets: how do Raft and Paxos differ?']);
+    // Nothing of the person's is known (the orchestrator is not on Auto): its own task, never as the person's.
+    review.forget('orch');
+    assert.deepEqual(review.requestFor('c'), { text: 'Create slugify.mjs and slugify.test.mjs in this folder.', byPerson: false });
+    assert.notEqual((await review.decide(write('c', 'slugify.mjs'), 10_000)).verdict, 'allow', 'an orchestrator-written request does not auto-allow edits (R3)');
+  }
+  // A card the person started (the live re-run as a top-level card): its latest turn, then the earlier ones.
+  {
+    const { engine } = taskAwareEngine();
+    const { review } = service(engine);
+    review.noteLaunch('top', { task: null, dataClass: null, triage: false, role: 'agent' });
+    review.noteTurn('top', C_PROMPT, { role: 'agent', parentSessionId: null });
+    review.noteTurn('top', 'Now also add a README line.', { role: 'agent', parentSessionId: null });
+    assert.deepEqual(review.requestFor('top'), { text: `Now also add a README line.\n\n${C_PROMPT}`, byPerson: true });
+    for (const file of ['slugify.mjs', 'slugify.test.mjs']) assert.equal((await review.decide(write('top', file, 'agent'), 10_000)).verdict, 'allow', file);
+    review.forget('top');
+    assert.equal(review.requestFor('top'), null, 'forgotten when the card closes');
+  }
+});
+
 test('Auto: a strict session (triage or the global setting) allows only read-only; a suspect session nothing; three model denials make it person-only', async () => {
   const strict = service(fakeEngine({ mode: 'auto', qualified: true }), { reviewStrictness: 'strict' });
   strict.review.noteLaunch('s1', { task: 'Run the unit tests', dataClass: null, triage: false });

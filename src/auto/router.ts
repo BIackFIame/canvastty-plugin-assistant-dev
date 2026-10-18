@@ -38,6 +38,8 @@ export interface RouterDeps {
   key(upstream: AutoUpstream): Promise<string | null>;
   /** Jev's view of a turn (the latest user text only), or null to use the rules; `signal` aborts at the budget. */
   decide?(text: string, grant: LaunchGrant, signal: AbortSignal): Promise<TurnDecision | null>;
+  /** A new user turn of the card's first conversation (its latest user text), seen before the decision. */
+  turn?(text: string, grant: LaunchGrant): void;
   /** The card's model badge changed (only on a change). */
   badge?(sessionId: string, model: { model: string; tier: Level; source: DecisionSource } | null): void;
   log?(level: 'info' | 'warn', message: string): void;
@@ -211,6 +213,8 @@ export class AutoRouter {
   private readonly active = new Map<string, Set<AbortController>>();
   private activeTotal = 0;
   private readonly shownModel = new Map<string, string>();
+  /** Each card's first conversation (keyed hash): the one its new user turns are reported from. */
+  private readonly mainConversation = new Map<string, string>();
   private readonly recentRecords: DecisionRecord[] = [];
   private readonly hosts = new Set<string>();
   readonly stats: Omit<RouterStats, 'hosts'> = { requests: 0, turns: 0, continuations: 0, small: 0, jevAsked: 0, jevAnswered: 0, rules: 0, leaseReuses: 0, failovers: 0 };
@@ -307,6 +311,7 @@ export class AutoRouter {
     for (const controller of this.active.get(sessionId) ?? []) controller.abort();
     for (const [key, lease] of this.leases) if (lease.sessionId === sessionId) this.leases.delete(key);
     if (this.shownModel.delete(sessionId)) this.deps.badge?.(sessionId, null);
+    this.mainConversation.delete(sessionId);
     this.spend.forget(sessionId);
   }
 
@@ -450,7 +455,14 @@ export class AutoRouter {
         if (lease && fresh && (kind === 'continuation' || lease.turn === keys.turn)) {
           view = lease.view; preferred = lease.model; record.source = 'lease'; record.reason = 'same_turn'; this.stats.leaseReuses++;
         } else {
-          const decided = await this.decideTurn(latestUserText(body), grant, Array.isArray(body.tools) ? body.tools.length : 0);
+          const text = latestUserText(body);
+          // Only the card's first conversation is the one the card was given: a later one (a CLI's own helper agent,
+          // whose "user" text the agent wrote) never counts as the card's task.
+          const main = this.mainConversation.get(grant.sessionId) ?? keys.conversation;
+          this.mainConversation.set(grant.sessionId, main);
+          while (this.mainConversation.size > ROUTER_LIMITS.conversations) this.mainConversation.delete(this.mainConversation.keys().next().value!);
+          try { if (text && main === keys.conversation) this.deps.turn?.(text, grant); } catch { /* advisory only */ }
+          const decided = await this.decideTurn(text, grant, Array.isArray(body.tools) ? body.tools.length : 0);
           if (controller.signal.aborted) throw new HttpError(499, 'aborted', 'The call was cancelled.');
           if (decided.source === 'rules') this.stats.rules++;
           view = decided.view;

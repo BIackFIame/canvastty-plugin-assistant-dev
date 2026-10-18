@@ -73,14 +73,34 @@ export interface ReviewServiceOptions {
 
 interface SessionState {
   suspect: boolean;
-  /** The person's task for the card, typed in the launcher's Assistant field. */
-  personRequest: { text: string; byPerson: boolean } | null;
+  /** The card's task from the launcher's Assistant field (typed by the person, or chosen by an orchestrator). */
+  launchTask: string | null;
+  /** The card's user turns as the Auto router saw them: the first one, then the latest few (oldest first). */
+  turns: string[];
+  /** A subagent's own texts are its orchestrator's, not the person's. */
+  subagent: boolean;
+  parent: string | null;
   dataClass: DataClass | null;
   /** From the launch triage (§3.1a step 7); `pending` while it runs, which counts as strict. */
   strict: boolean | 'pending';
 }
 
 const MAX_SESSIONS = 512;
+/** Per card: the first user turn and the latest few; each text at most this long (the engine bounds it again). */
+const MAX_TURNS = 5;
+const MAX_REQUEST_CHARS = 16_384;
+/** A subagent's task counts as the person's only when the person typed it word for word (at least this long). */
+const MIN_QUOTED_CHARS = 24;
+const MAX_ANCESTORS = 4;
+
+const squash = (value: string): string => value.replace(/\s+/gu, ' ').trim().toLowerCase();
+/** Distinct texts, in order. */
+const distinct = (texts: Array<string | null>): string[] => {
+  const seen = new Set<string>();
+  const out: string[] = [];
+  for (const text of texts) { if (!text) continue; const key = squash(text); if (key && !seen.has(key)) { seen.add(key); out.push(text); } }
+  return out;
+};
 const MAX_RECENT = 40;
 /** Room kept for the hook's own round trip: the answer must reach CanvasTTY before its deadline. */
 const MARGIN_MS = 1_500;
@@ -251,7 +271,7 @@ export class ReviewService {
   private state(sessionId: string): SessionState {
     let state = this.sessions.get(sessionId);
     if (!state) {
-      state = { suspect: false, personRequest: null, dataClass: null, strict: false };
+      state = { suspect: false, launchTask: null, turns: [], subagent: false, parent: null, dataClass: null, strict: false };
       this.sessions.set(sessionId, state);
       // The oldest session goes from every per-session map, not only this one.
       while (this.sessions.size > MAX_SESSIONS) this.forget(this.sessions.keys().next().value!);
@@ -259,12 +279,69 @@ export class ReviewService {
     return state;
   }
 
-  /** What the person set in the launcher for this card: its task (typed by the person) and its data class. */
-  noteLaunch(sessionId: string, launch: { task: string | null; dataClass: DataClass | null; triage: boolean }): void {
+  /**
+   * What the launcher set for this card: its task and data class, and whether it is a subagent (whose task its
+   * orchestrator wrote) of which card.
+   */
+  noteLaunch(sessionId: string, launch: { task: string | null; dataClass: DataClass | null; triage: boolean; role?: string; parentSessionId?: string | null }): void {
     const state = this.state(sessionId);
-    state.personRequest = launch.task ? { text: launch.task.slice(0, 16_384), byPerson: true } : null;
+    state.launchTask = launch.task ? launch.task.slice(0, MAX_REQUEST_CHARS) : null;
     state.dataClass = launch.dataClass;
     state.strict = launch.triage ? 'pending' : false;
+    if (launch.role !== undefined) { state.subagent = launch.role === 'subagent'; state.parent = state.subagent ? launch.parentSessionId ?? null : null; }
+  }
+
+  /**
+   * A new user turn of a card on Auto (Jev), as its router read it (the latest user text, envelopes stripped). Kept
+   * in memory only, for this card's reviews, until the card closes: it is the task the card works on, so the
+   * review can tell the writes it asks for from the ones it does not. It goes out only inside `person_request`,
+   * under the card's data class, like the launcher's task.
+   */
+  noteTurn(sessionId: string, text: string, card: { role: string; parentSessionId: string | null }): void {
+    const value = text.trim().slice(0, MAX_REQUEST_CHARS);
+    if (!value) return;
+    const state = this.state(sessionId);
+    state.subagent = card.role === 'subagent';
+    state.parent = state.subagent ? card.parentSessionId : null;
+    if (state.turns.length && squash(state.turns.at(-1)!) === squash(value)) return;
+    state.turns.push(value);
+    if (state.turns.length > MAX_TURNS) state.turns.splice(1, 1);
+  }
+
+  /** A card's own texts, most recent first: its latest turn, its earlier turns, then the launcher's task. */
+  private ownTexts(state: SessionState): string[] { return distinct([...[...state.turns].reverse(), state.launchTask]); }
+
+  /** The texts the person typed for this card or, for a subagent, for the nearest card above it that is not one. */
+  private personTexts(state: SessionState): string[] {
+    let current: SessionState | undefined = state;
+    for (let depth = 0; current && depth <= MAX_ANCESTORS; depth++) {
+      if (!current.subagent) return this.ownTexts(current);
+      current = current.parent ? this.sessions.get(current.parent) : undefined;
+    }
+    return [];
+  }
+
+  /**
+   * The request this card's actions are reviewed against (`person_request`), and whether the person typed it.
+   *
+   * - A card started by the person: its own task and turns, typed by the person.
+   * - A subagent: its own task when the person typed it word for word (an orchestrator passing on the person's
+   *   prompt); else the person's request to the card above it, which an orchestrator cannot change. Only when no
+   *   text of the person's is known: its own task, as the orchestrator's (never "typed by the person").
+   */
+  requestFor(sessionId: string): { text: string; byPerson: boolean } | null {
+    const state = this.sessions.get(sessionId);
+    if (!state) return null;
+    const own = this.ownTexts(state);
+    if (!state.subagent) return own.length ? { text: own.join('\n\n'), byPerson: true } : null;
+    const above = state.parent ? this.sessions.get(state.parent) : undefined;
+    const person = above ? this.personTexts(above) : [];
+    const said = person.map(squash);
+    if (own.length && person.length && own.every(text => { const quoted = squash(text); return quoted.length >= MIN_QUOTED_CHARS && said.some(typed => typed.includes(quoted)); })) {
+      return { text: own.join('\n\n'), byPerson: true };
+    }
+    if (person.length) return { text: person.join('\n\n'), byPerson: true };
+    return own.length ? { text: own.join('\n\n'), byPerson: false } : null;
   }
 
   /** The launch triage finished: its strictness (a failed triage is not strict; the global setting still applies). */
@@ -314,12 +391,13 @@ export class ReviewService {
     const act = (answer: DecideAnswer): RecentReview['act'] => answer?.verdict ?? null;
     try {
       const state = this.state(request.sessionId);
+      const personRequest = this.requestFor(request.sessionId);
       const action = actionFromDetail(detailFromHook(request.tool.name, request.input, request.truncated));
       if (!action.commandCwd && request.agentCwd) action.commandCwd = request.agentCwd;
       const git = this.options.git === null ? null : this.options.git ?? defaultGit;
       const home = this.options.home ?? homedir();
       const facts = await computeCommandFacts({
-        action, root: request.cwd, sessionId: request.sessionId, requestTypedByPerson: state.personRequest?.byPerson === true,
+        action, root: request.cwd, sessionId: request.sessionId, requestTypedByPerson: personRequest?.byPerson === true,
         tracker: this.tracker, git, home, agentRoots: [join(home, '.claude')],
         signal: AbortSignal.any([signal, AbortSignal.timeout(REVIEW_LIMITS.factsMs)])
       });
@@ -336,7 +414,7 @@ export class ReviewService {
         this.remember(request.sessionId, summary, mode, { outcome: 'deny', act: 'deny', tier: 'rule', reason: 'rule-deny', model: null, auditId: null });
         return { verdict: 'deny', reason };
       }
-      const run = (): Promise<CommandReviewVerdict> => this.ladder(request, state, facts, rules, action.content, signal);
+      const run = (): Promise<CommandReviewVerdict> => this.ladder(request, state, personRequest?.text ?? null, facts, rules, action.content, signal);
       if (mode === 'shadow' || mode === 'suggest') {
         // Nothing is enforced (R10); the agent is not held. The review runs on its own, for the log and the badge.
         void run().then(verdict => {
@@ -369,12 +447,12 @@ export class ReviewService {
     }
   }
 
-  private async ladder(request: DecideRequest, state: SessionState, facts: CommandFacts, rules: ReturnType<typeof tier1>, content: string | null, signal: AbortSignal): Promise<CommandReviewVerdict> {
+  private async ladder(request: DecideRequest, state: SessionState, personRequest: string | null, facts: CommandFacts, rules: ReturnType<typeof tier1>, content: string | null, signal: AbortSignal): Promise<CommandReviewVerdict> {
     const settings = this.options.settings();
     const git = this.options.git === null ? null : this.options.git ?? defaultGit;
     const cacheScope = createHash('sha256').update(JSON.stringify([request.sessionId, request.cwd, facts.actionClass, factPhrases(facts), facts.shape])).digest('hex');
     const verdict = await askCommandReview(this.options.engine, {
-      facts, tier1: rules, personRequest: state.personRequest?.text ?? null, content, dataClass: state.dataClass ?? settings.defaultDataClass,
+      facts, tier1: rules, personRequest, content, dataClass: state.dataClass ?? settings.defaultDataClass,
       session: { suspect: state.suspect, strict: this.strict(state), personOnly: this.circuit.personOnly(request.sessionId) },
       cacheScope,
       referencedFiles: include => collectReferencedFiles({ root: request.cwd, facts, git, signal, include })

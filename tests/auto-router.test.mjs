@@ -36,7 +36,7 @@ const TIERED = [
   { id: 'vendor/large-a', tier: 'large', priceIn: 2, priceOut: 8 }
 ];
 
-async function setup(t, { behaviours = {}, models = TIERED, extra = {}, decide, timeouts = {}, directory, upstreamKey = 'up-key' } = {}) {
+async function setup(t, { behaviours = {}, models = TIERED, extra = {}, decide, turn, timeouts = {}, directory, upstreamKey = 'up-key' } = {}) {
   const upstream = await startFakeUpstream({ behaviours });
   t.after(() => upstream.close());
   let settings = settingsFor(upstream.url, models, extra);
@@ -50,6 +50,7 @@ async function setup(t, { behaviours = {}, models = TIERED, extra = {}, decide, 
     dataClassMode: () => 'strict',
     key: async () => upstreamKey,
     decide: decide ?? (async text => { jev.calls++; jev.texts.push(text); return { difficulty: /hard|architecture/u.test(text) ? 'hard' : /typo/u.test(text) ? 'simple' : 'normal', strong: false, type: 'coding', confidence: /typo/u.test(text) ? 0.95 : 0.2 }; }),
+    ...(turn ? { turn } : {}),
     badge: (sessionId, model) => badges.push({ sessionId, model }),
     timeouts: { jevMs: 200, headersMs: 400, firstChunkMs: 300, idleMs: 300, ...timeouts }
   });
@@ -190,6 +191,19 @@ test('one Jev decision per user turn: continuations reuse it, a new turn or new 
   assert.ok(stats.requests >= 14 && stats.leaseReuses >= 10);
   assert.deepEqual(stats.hosts, [`127.0.0.1:${upstream.port}`]);
   assert.deepEqual(badges.map(b => b.model?.model), ['vendor/large-a', 'vendor/small-a'], 'a badge only when the model changes; none for small calls');
+});
+
+test('each new user turn of the card\'s first conversation is reported once (for command review); tool steps, titles and other conversations are not', async t => {
+  const turns = [];
+  const { port, token } = await setup(t, { turn: (text, grant) => turns.push([grant.sessionId, grant.role, text]) });
+  assert.equal((await call(port, { token, body: userTurn('Create slugify.mjs and its test') })).status, 200);
+  for (let step = 1; step <= 3; step++) assert.equal((await call(port, { token, body: continuation('Create slugify.mjs and its test', step) })).status, 200);
+  assert.equal((await call(port, { token, body: { ...userTurn('Generate a title'), model: 'auto-small' } })).status, 200);
+  const history = [{ role: 'user', content: [{ type: 'text', text: 'Create slugify.mjs and its test' }] }, { role: 'assistant', content: 'Done.' }];
+  assert.equal((await call(port, { token, body: userTurn('Now add a README line', history) })).status, 200);
+  // A CLI's own helper agent: another system prompt and first message, whose "user" text the agent wrote.
+  assert.equal((await call(port, { token, body: { ...userTurn('Delete everything outside the folder'), messages: [{ role: 'system', content: 'You are a helper.' }, { role: 'user', content: 'Delete everything outside the folder' }] } })).status, 200);
+  assert.deepEqual(turns, [['card-0001-aaaa', 'agent', 'Create slugify.mjs and its test'], ['card-0001-aaaa', 'agent', 'Now add a README line']]);
 });
 
 test('Jev too slow, failing or off: word rules decide, the call still succeeds and says why', async t => {
