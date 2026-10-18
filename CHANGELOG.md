@@ -21,6 +21,15 @@
   effort) and decisions with type, difficulty, model, score, price and reason. A labelled RU/EN task set
   (`tests/fixtures/auto/jev-labelled-tasks.json`, 40 tasks) and `scripts/jev-labels.mjs` score a later live Jev run.
 - Tests check the manifest against a core without localized manifest strings by dropping only those keys.
+- **After the first live run of Auto (Jev)**: an OpenRouter 400 "is not a valid model ID" fails over and cools that
+  model down for 15 min; command review checks a card's actions against its own task (each new user turn the Auto
+  router sees; a subagent's task counts as the person's only when typed word for word, else its parent's person
+  request applies), so a subagent's requested writes are no longer denied as "not asked for"; "small" from Jev at
+  p ≥ 0.5 (chosen on the 40 labelled live answers, now a test fixture); price counts on every turn: the cheapest
+  model within 8 / 5 / 3 points (balanced; cheap 15 / 10 / 5) of the best, lower effort preferred except on large
+  turns, the trade-off shown per decision; Jev's task triage is limited per card (10 a minute) under a ceiling of 60;
+  storage keys earlier versions left (`model-route-history`, `model-discovery`) are dropped at start; a partial
+  Artificial Analysis page no longer drops known scores.
 
 ## 0.2.0
 

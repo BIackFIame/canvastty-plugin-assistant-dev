@@ -71,6 +71,9 @@ again. Loop alerts keep hashes only; reports keep counts, no command text.
   protection answers first; then the Assistant: a read-only allow list (`git status`, `ls`, `rg`…), a small model's
   nine yes/no questions about the command, and on a disputed case a larger second model that also reads the scripts
   or diff the command runs; otherwise you. A script the agent wrote in this session is never allowed without you.
+  The review checks the action against the card's task: the one typed in the launcher, and on Model: Auto (Jev) each
+  new user turn the router sees (memory only, under the card's data class). A subagent's task counts as yours only
+  when you typed it word for word; otherwise it is checked against your request to the card above it.
 - **Modes** per use case: Off, Learning (answers are only recorded), Suggest (shown as a card badge, nothing
   enforced), Auto (may ask you or decline; allows only outcomes that qualified on your own ✓/✗ labels, and only when
   you let the plugin allow in CanvasTTY). Every error, timeout or missing key ends with you deciding, never in an allow.
@@ -115,21 +118,25 @@ model account (an account and Auto on one launch are refused: both configure Ope
   127.0.0.1); other CLIs come later.
 - **Decision, from data**: for each new user turn, Jev (task triage, while it is Suggest or Auto on the Decision models
   page) reads the latest user text within 2.5 s and returns the **task type** (coding, review, research, writing,
-  chat) and the **difficulty** (small, medium, large); "small" needs ≥ 0.9 probability on the two easiest levels,
-  otherwise it is medium. Without Jev, word rules give both (never "sure"). Among the models you allow that are
-  healthy now (not cooling down, trusted with the card's data class, large enough for the request, within the caps),
-  the one with the best **catalog score for that task type** answers; on a tie the cheaper one. Only a turn Jev is
-  sure is small may give up score for price: **Cheap** up to 10 points, **Balanced** 3, **Best** none. A model with
+  chat) and the **difficulty** (small, medium, large); "small" needs ≥ 0.5 probability on the two easiest levels
+  (chosen on 40 labelled tasks of a live run: no medium or large task became small), otherwise it is medium. Without
+  Jev, word rules give both (never "sure"). Among the models you allow that are healthy now (not cooling down,
+  trusted with the card's data class, large enough for the request, within the caps), the **cheapest model whose
+  catalog score for that task type is within a few points of the best** answers: **Balanced** 8 / 5 / 3 points on
+  small / medium / large turns, **Cheap** 15 / 10 / 5, **Best** none; within those points a lower effort is preferred
+  too, except on large turns. Jev answers at most 10 turns a minute per card (60 for all cards), word rules beyond. A model with
   no score never beats one with a score; when nothing has a score, your manual tiers decide, else the known model of
   middle price. Tool steps keep the turn's model; titles and summaries use the cheapest model and ask nobody — about
   one decision per turn, not per model call. Each decision is logged with type, difficulty, model, effort, score and
-  its source, price and a reason code — no text.
+  its source, price, a reason code and the trade-off (the best-scored model, its score and price, the points allowed)
+  — no text.
 - **Catalog**: models.dev (models, prices, limits), Artificial Analysis and LiveBench (measured scores per exact model
   and effort) and OpenRouter's model list, read from fixed HTTPS addresses (no task text, no key), cached on disk and
   refreshed in the background (weekly; OpenRouter's list daily) while an upstream is on, or with **Refresh now**. A
   score belongs to one exact model and effort and never moves to another variant; a model without its own row stays
   unknown. Old scores still count (marked old); prices older than 7 days are not compared. Measured rows ship with the
-  plugin for a computer that never went online.
+  plugin for a computer that never went online. Artificial Analysis's page now carries full rows only for the models
+  of its default chart, so a refresh with fewer than half the known rows keeps the earlier ones it lacks.
 - **Upstreams** (Decision models page): **OpenRouter** (its own key or the Jev · OpenRouter key) offers its whole list of
   suitable models (tools, text, a fixed price; no `:free` variants) with OpenRouter's context and prices; a model with
   measured efforts is offered at each of them, and Auto sends that effort (`reasoning.effort`) unless the CLI set one.
@@ -138,7 +145,8 @@ model account (an account and Auto on one launch are refused: both configure Ope
   manual tier and effort. Your trust per upstream: D0–D2; D3 only for a server on this computer. Keys are write-only,
   bound to the upstream's address. The request is passed on with only `model` changed (plus the effort above); a
   404/408/409/425/429/5xx, a connect error or a timeout **before the first byte** moves to the next model and cools the
-  failed one down (429 honours `Retry-After`); a bad request (400) is returned; a stream that fails midway ends with an
+  failed one down (429 honours `Retry-After`); so does a 400 that names an unknown model id (OpenRouter's "is not a
+  valid model ID", cooled down 15 min); any other bad request (400) is returned; a stream that fails midway ends with an
   error and is never replayed.
 - **Caps**: per card and per day in USD, held before each call so parallel calls cannot pass them; counted from the
   cost the upstream reports (OpenRouter does) or your prices. A spent cap answers 402.
