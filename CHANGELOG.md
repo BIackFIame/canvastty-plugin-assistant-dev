@@ -2,6 +2,16 @@
 
 ## Next
 
+- **Route v2** (agent-level routing, no core change): `route` and its alias `pick_route` choose where a subagent runs —
+  your subscriptions on their own CLIs, coding plans through OpenCode, the Accounts plugin's model accounts, Model:
+  Auto, or a CLI's own default last — by the Auto catalog's score for the task type within the preference's quality
+  window, then price or subscription window share (free with headroom above your reserve, priced as it burns,
+  unavailable at 0, unknown after 30 min), at most 2 routed children per subscription, trust under Strict/Warn/Off,
+  tunnels to one model with per-route demotion, and a new-model policy (wait for a score; provisional scores mapped
+  through anchor models; optional exploration). Every answer names each model-setting plugin for CanvasTTY 1.8.2's
+  inheritance rules and passes core's own spawn_agent checks in tests. `route_outcome` records how a routed child
+  ended. **Where agents run** on the Decision models page (en/ru) declares subscriptions and plans and shows recent
+  route decisions; it forwards CanvasTTY's limit windows (new permission `limits:read`).
 - **Model: Auto (Jev)** for OpenCode: a launch option (delegable) that points OpenCode at a router inside the
   Assistant's service on 127.0.0.1 (a key per launch, hashes only, Origin/Host checks). One decision per user turn
   (Jev's task triage within 2.5 s, else word rules), tool steps keep it, titles use the cheapest model; tiers and a

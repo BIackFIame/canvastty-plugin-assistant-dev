@@ -29,10 +29,19 @@ Nothing is added to HOME, the dock, the launcher or CanvasTTY's own settings. Or
 (`canvastty-assistant__<name>`), the cards get three menu actions, and the plugin has two canvas cards you open from
 Settings → Plugins → CanvasTTY Assistant.
 
-- **`route`** `{ task, providers? }`: provider, model and effort for a subagent. Pass `list_providers().providers` so it
-  picks from what is installed and signed in; pass the answer's `spawn` values to CanvasTTY's `spawn_agent`. The
-  difficulty comes from a decision model when one is set up, else from word rules. Accounts stay with the accounts
-  plugin: when `launchOptionTools` lists its `pick_account`, the answer names it.
+- **`route`** (also **`pick_route`**, the name `list_providers().note` points to) `{ task, providers?, accountRoutes?,
+  prefer?, orchestrate? }`: where a subagent runs — CLI, sign-in (your subscription on that CLI, a coding plan, a model
+  account, Model: Auto), model and effort — plus up to two alternatives, each with `spawn` values for CanvasTTY's
+  `spawn_agent`, a why-line and an estimate (USD, or the share of a subscription window). Pass
+  `list_providers().providers` and the Accounts plugin's `list_routes` rows. Models are compared by the Auto catalog's
+  measured score for the task type (Jev reads the task when it is set up, else word rules), then by price or window
+  share; a subscription with headroom above your reserve is free and preferred within the quality window. The spawn
+  values name every plugin that sets a model (`canvastty-assistant`, `canvastty-accounts`), so nothing is inherited by
+  accident. Declare subscriptions and plans under **Where agents run** on the Decision models page; nothing declared,
+  a CLI's own default is the last fallback (never OpenCode's own default).
+- **`route_outcome`** `{ decisionId | sessionId, status, exitLines?, ok? }`: how a routed subagent ended. A usage-limit
+  exit rests that route until its window resets; failures demote a route that does clearly worse than the other routes
+  to the same model.
 - **Flows**: `flows_list`, `flow_plan { flow, goal }`, `flow_status { planId? }`. `flow_plan` returns only the plan id
   and the role names; the plan waits for you in the **Flow preview** card (roles, provider/model, tasks; built-in flows
   in your language, flows from the project's `.canvastty/flows/*.json|yaml` marked "From this project" and shown as
@@ -151,8 +160,8 @@ model account (an account and Auto on one launch are refused: both configure Ope
   error and is never replayed.
 - **Caps**: per card and per day in USD, held before each call so parallel calls cannot pass them; counted from the
   cost the upstream reports (OpenRouter does) or your prices. A spent cap answers 402.
-- **Subagents**: `route` hands an orchestrator on Auto `launchOptions: {"canvastty-assistant": {"model": "auto"}}` for
-  OpenCode subagents; a subagent's data class is never below its parent's.
+- **Subagents**: Auto is one of `route`'s routes for OpenCode subagents (`launchOptions: {"canvastty-assistant": {"model":
+  "auto"}}`, no model); a subagent's data class is never below its parent's.
 - **Privacy**: prompts go only to the upstream that answers; Jev gets only the latest user text, through the same data
   checks as everything else. The routing log keeps hashes, models, tiers, statuses, tokens and cost — no text. The
   card's badge shows the current model when it changes (any other Assistant signal wins the badge).
