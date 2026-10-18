@@ -18,6 +18,7 @@ import { AutoService, type AutoPrepareAnswer } from '../auto/service.ts';
 import { AUTO_STRINGS } from '../auto/i18n.ts';
 import { clampClass } from '../auto/launch.ts';
 import type { RouterDeps } from '../auto/router.ts';
+import { decisionFromTriage, type TurnDecision } from '../auto/select.ts';
 
 /**
  * The Assistant service: one process that answers CanvasTTY's decision hook (command review), its launch pipeline
@@ -72,7 +73,7 @@ export class Assistant {
   /** Each card's effective data class, so a subagent's can be clamped to its parent's. */
   private readonly classes = new Map<string, DataClass>();
 
-  constructor(options: { host: Host; dataDir: string; settings?: unknown; settingsUnavailable?: boolean; harness?: unknown; harnessUnavailable?: boolean; autoRouting?: unknown; autoRoutingUnavailable?: boolean; locale?: unknown; transport?: typeof fetch; git?: null; now?: () => number; autoTimeouts?: RouterDeps['timeouts'] }) {
+  constructor(options: { host: Host; dataDir: string; settings?: unknown; settingsUnavailable?: boolean; harness?: unknown; harnessUnavailable?: boolean; autoRouting?: unknown; autoRoutingUnavailable?: boolean; locale?: unknown; transport?: typeof fetch; catalogTransport?: typeof fetch; git?: null; now?: () => number; autoTimeouts?: RouterDeps['timeouts'] }) {
     this.host = options.host;
     // Nothing saved (a fresh install, or an update from a version that saved nothing) or nothing readable: the
     // defaults, with command review Off. The person turns it on; the plugin never decides trust for them.
@@ -117,6 +118,7 @@ export class Assistant {
       decide: (text, grant, signal) => this.turnDifficulty(text, grant.dataClass, grant.sessionId, grant.role, signal),
       publishBadge: (sessionId, badge) => { void this.harness.setBadge(sessionId, 'model', badge); },
       ...(options.transport ? { transport: options.transport } : {}),
+      ...(options.catalogTransport ? { catalogTransport: options.catalogTransport } : {}),
       ...(options.now ? { now: options.now } : {}),
       ...(options.autoTimeouts ? { timeouts: options.autoTimeouts } : {})
     });
@@ -217,13 +219,15 @@ export class Assistant {
    * engine (data-class gate, budget, cache, breaker, log). Only while task triage is Suggest or Auto; otherwise, or
    * without an answer, null and the router uses word rules.
    */
-  private async turnDifficulty(task: string, dataClass: DataClass, sessionId: string, role: string, signal: AbortSignal): Promise<{ difficulty: 'simple' | 'normal' | 'hard'; strong: boolean } | null> {
+  private async turnDifficulty(task: string, dataClass: DataClass, sessionId: string, role: string, signal: AbortSignal): Promise<TurnDecision | null> {
     const mode = this.engine.mode('task.route');
     if (mode !== 'suggest' && mode !== 'auto') return null;
     const { triage } = await askTaskRoute(this.engine, { task, dataClass }, {
       signal, assertCurrent: () => { if (signal.aborted) throw new Error('aborted'); }, requester: role === 'subagent' ? 'orchestrator' : 'person', sessionId
     });
-    return triage ? { difficulty: triage.difficulty, strong: triage.p3 >= ROUTE_TAUS.strong } : null;
+    // Difficulty and task type from the same ten answers (kind → type inside its band; difficulty with its
+    // probabilities, so "small" can require high confidence).
+    return triage ? decisionFromTriage(triage, ROUTE_TAUS.strong) : null;
   }
 
   private async triage(sessionId: string, task: string, dataClass: DataClass | null, cwd: string): Promise<void> {

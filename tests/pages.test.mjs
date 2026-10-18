@@ -264,3 +264,64 @@ test('decision models page: Auto (Jev) rows in Russian and English — upstreams
   assert.deepEqual(secrets, [{ key: 'auto-upstream-local', value: JSON.stringify({ origin: 'http://127.0.0.1:8080', value: 'sk-local-123456' }) }]);
   assert.ok(!JSON.stringify(ui.requests).includes('sk-local-123456'), 'the key never goes to the service');
 });
+
+test('decision models page: Auto from data — catalog freshness and refresh, model table (read-only facts, exclude, tier), decisions with type, difficulty, score, price and why', async () => {
+  const { DEFAULT_ASSISTANT_SETTINGS } = await import('../src/shared/settings.ts');
+  const at = Date.UTC(2026, 9, 18, 9, 0, 0);
+  const auto = {
+    settings: {
+      upstreams: [{ id: 'or', preset: 'openrouter', baseUrl: 'https://openrouter.ai/api/v1', trust: 'D1', key: 'own', enabled: true, models: [], allModels: true, excluded: [] }],
+      preference: 'balanced', cheaperFallback: false, decider: 'jev', dailyUsdCap: 1, perCardUsdCap: 0.4, catalog: { autoRefresh: true, refreshHours: 168 }
+    },
+    readable: true, keys: { or: true },
+    catalog: { now: at, autoRefresh: true, refreshHours: 168, refreshing: false, bundled: false, lastError: null, lastAttemptAt: at, nextRefreshAt: at + 7 * 86_400_000, sources: [
+      { id: 'models.dev', fetchedAt: at, version: null, rows: 8000, measured: 0, stale: false, error: null },
+      { id: 'artificial-analysis', fetchedAt: at - 9 * 86_400_000, version: '4.3.2', rows: 690, measured: 221, stale: true, error: 'Artificial Analysis unavailable; earlier scores keep their age.' },
+      { id: 'livebench', fetchedAt: at, version: '2026-06-25', rows: 28, measured: 28, stale: false, error: null },
+      { id: 'openrouter', fetchedAt: at, version: null, rows: 300, measured: 0, stale: false, error: null }] },
+    models: { or: [
+      { id: 'vendor/alpha-1', listed: false, fromList: true, excluded: false, tier: null, effort: null, priceIn: 1, priceOut: 4, priceSource: 'openrouter', context: 400_000, known: true, measuredEfforts: ['high', 'low'], scores: { coding: { value: 57.5, effort: 'high', label: 'Artificial Analysis v4.3.2', historical: true } } },
+      { id: 'vendor/gamma-3', listed: false, fromList: true, excluded: true, tier: null, effort: null, priceIn: 0.2, priceOut: 0.8, priceSource: 'openrouter', context: 64_000, known: true, measuredEfforts: [], scores: {} }
+    ] },
+    waitingForList: [],
+    recent: [{ at, session: 'abcd1234', conversation: 'c', turn: 't', kind: 'turn', source: 'jev', tier: 'large', taskType: 'coding', difficulty: 'large', confidence: 0.05, why: 'best_score', upstream: 'or', model: 'vendor/alpha-1', effort: 'high', score: 57.5, scoreSource: 'Artificial Analysis v4.3.2', priceIn: 1, priceOut: 4, attempts: 1, failovers: [], status: 200, reason: 'jev', ttfbMs: 300, totalMs: 900, tokensIn: 10, tokensOut: 2, costUsd: 0.00012 }],
+    stats: { requests: 1, turns: 1, continuations: 0, small: 0, jevAsked: 1, jevAnswered: 1, rules: 0, leaseReuses: 0, failovers: 0, hosts: ['openrouter.ai'], spentToday: 0.0001, listening: true, cards: 1 }
+  };
+  const ui = page('settings/assistant.js', {
+    state: { settings: DEFAULT_ASSISTANT_SETTINGS, status: { enabled: false, backends: [] }, slots: {}, checks: {}, recent: [] },
+    'auto.state': auto, 'auto.save': ({ settings }) => settings, 'auto.refreshCatalog': () => auto.catalog
+  }, { secrets: { set: async () => undefined, delete: async () => undefined } });
+  await settle();
+  ui.context('en', 'sage');
+  const text = ui.app.text();
+  assert.match(text, /Artificial Analysis — loaded .*v4\.3\.2, 221 measured of 690 rows — old — Artificial Analysis unavailable/u);
+  assert.match(text, /OpenRouter models — loaded/u);
+  assert.match(text, /vendor\/alpha-1 400k 1\.00 · 4\.00 \(OpenRouter\) 57\.5 @high · Artificial Analysis v4\.3\.2 · old high, low/u);
+  assert.match(text, /vendor\/gamma-3 64k 0\.2 · 0\.8 \(OpenRouter\) unknown/u);
+  assert.match(text, /abcd1234 · turn · coding · large \(0\.05\) · vendor\/alpha-1@high · 57\.5 Artificial Analysis v4\.3\.2 · \$1\.00\/\$4\.00 · Jev \(best score\) · 200/u);
+  const all = ui.app.all();
+  const byName = name => all.find(node => node.name === name);
+  assert.equal(byName('auto-use-or-vendor/gamma-3').checked, false, 'the excluded model is unticked');
+  // Exclude a model: only the exclusion is saved.
+  byName('auto-use-or-vendor/alpha-1').checked = false;
+  for (const listener of byName('auto-use-or-vendor/alpha-1').listeners.change) listener();
+  await settle();
+  assert.deepEqual(ui.requests.filter(r => r.method === 'auto.save').at(-1).params.settings.upstreams[0].excluded, ['vendor/alpha-1']);
+  // A manual tier on a model from OpenRouter's list becomes an override; back to "by score" removes it again.
+  byName('auto-tier-or-vendor/alpha-1').value = 'small';
+  for (const listener of byName('auto-tier-or-vendor/alpha-1').listeners.change) listener();
+  await settle();
+  assert.deepEqual(ui.requests.filter(r => r.method === 'auto.save').at(-1).params.settings.upstreams[0].models, [{ id: 'vendor/alpha-1', tier: 'small' }]);
+  // Refresh now.
+  byName('auto-catalog-refresh').click();
+  await settle();
+  assert.ok(ui.requests.some(r => r.method === 'auto.refreshCatalog'));
+  ui.context('ru', 'night');
+  const ru = ui.app.text();
+  assert.match(ru, /Каталог/u);
+  assert.match(ru, /Обновить сейчас/u);
+  assert.match(ru, /загружено .*v4\.3\.2, измерено 221 строк из 690 — устарело/u);
+  assert.match(ru, /ход · код · большая \(0\.05\) · vendor\/alpha-1@high · 57\.5 Artificial Analysis v4\.3\.2 · \$1\.00\/\$4\.00 · Jev \(лучшая оценка\) · 200/u);
+  assert.match(ru, /неизвестно/u);
+  assert.doesNotMatch(ru, /Refresh now|Measured at|by score|best score/u, 'no English left in the Auto rows');
+});

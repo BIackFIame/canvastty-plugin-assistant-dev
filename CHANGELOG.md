@@ -9,6 +9,17 @@
   the first byte with cooldowns; per-card and daily USD caps; a log without text. OpenCode Zen and other providers are
   disabled for the card; a project config that picks models, containers and remote hosts are refused. `route` hands
   Auto to OpenCode subagents of an orchestrator on Auto. Rows on the Decision models page (en/ru) and a model badge.
+- **Auto (Jev) chooses from data**: Jev's per-turn triage now gives the task type (coding, review, research, writing,
+  chat) as well as the difficulty ("small" only at ≥ 0.9); the router scores the allowed, healthy models with the
+  public catalog (models.dev, Artificial Analysis, LiveBench; ported from the experimental catalog: fixed HTTPS
+  sources, atomic cache, background and manual refresh, no score transfer between variants, unknown stays unknown,
+  old prices not compared) and picks the best score for the type, the cheaper on a tie; cheap/balanced/best set the
+  score that may be given up only on a confidently small turn (10/3/0). OpenRouter upstreams offer OpenRouter's whole
+  model list with its prices and context (cached), with effort variants Auto sends; OpenAI-compatible upstreams take
+  your ids, priced from models.dev by address. Manual tiers stay as an override. The Decision models page shows the
+  catalog's freshness with Refresh now, a model table per upstream (price, context, score read-only; exclude, tier,
+  effort) and decisions with type, difficulty, model, score, price and reason. A labelled RU/EN task set
+  (`tests/fixtures/auto/jev-labelled-tasks.json`, 40 tasks) and `scripts/jev-labels.mjs` score a later live Jev run.
 - Tests check the manifest against a core without localized manifest strings by dropping only those keys.
 
 ## 0.2.0

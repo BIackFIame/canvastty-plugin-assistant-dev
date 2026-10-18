@@ -3,17 +3,21 @@ import { appendFileSync, mkdirSync, readFileSync, renameSync, statSync, writeFil
 import { createServer, type IncomingMessage, type Server, type ServerResponse } from 'node:http';
 import type { AddressInfo } from 'node:net';
 import { join } from 'node:path';
-import type { Difficulty } from '../harness/router.ts';
 import type { DataClassMode } from '../shared/settings.ts';
-import { candidates, latestUserText, requestKeys, requestKind, rulesDifficulty, tierFor, type Candidate, type RequestKind } from './classify.ts';
+import type { TaskType } from './catalog/scoring.ts';
+import { latestUserText, requestKeys, requestKind, rulesDifficulty, upstreamAllowed, type RequestKind } from './classify.ts';
+import type { Inventory, InventoryEntry } from './inventory.ts';
+import { plan, turnView, type Level, type SelectionReason, type TurnDecision, type TurnView } from './select.ts';
 import { DEFAULT_OUTPUT, type AutoRoutingSettings, type AutoTier, type AutoUpstream } from './settings.ts';
 import { hashToken, TokenStore, type LaunchGrant } from './tokens.ts';
 
 /**
  * The Auto (Jev) router: an OpenAI Chat Completions endpoint on 127.0.0.1 for agent CLIs started with "Model: Auto
  * (Jev)". It checks the card's per-launch key, decides once per new user turn which allowed model answers (Jev's task
- * triage within 2.5 s, else word rules; tool-call continuations keep the turn's choice; small-model calls skip Jev),
- * swaps only `model` in the body and passes the request and its stream through unchanged. Before the first byte
+ * triage within 2.5 s gives the task type and difficulty, else word rules; select.ts turns that and the catalog's
+ * scores and prices into an ordered list; tool-call continuations keep the turn's choice; small-model calls skip Jev),
+ * swaps `model` in the body (and, for an OpenRouter effort variant, adds `reasoning.effort` when the CLI sent none)
+ * and passes the request and its stream through unchanged. Before the first byte
  * reaches the CLI it moves to the next candidate on 404/408/409/425/429/5xx, a connect error or a timeout, and cools
  * that model or upstream down; after it, an upstream failure ends the stream with an error and nothing is replayed.
  * Per-card and per-day caps are reserved before a call. The log keeps keyed hashes, models and numbers — never text.
@@ -21,19 +25,21 @@ import { hashToken, TokenStore, type LaunchGrant } from './tokens.ts';
 
 export type DecisionSource = 'jev' | 'rules' | 'lease' | 'small';
 
-export interface TurnDecision { difficulty: Difficulty; strong: boolean }
+export type { TurnDecision } from './select.ts';
 
 export interface RouterDeps {
   /** `<plugin data>/auto`. */
   directory: string | null;
   settings(): AutoRoutingSettings;
+  /** Every model Auto may choose from, with prices, limits and scores (cached by the service). */
+  inventory(): Inventory;
   dataClassMode(): DataClassMode;
   /** The upstream's key, bound to its origin; null when none is saved (or it is bound elsewhere). */
   key(upstream: AutoUpstream): Promise<string | null>;
   /** Jev's view of a turn (the latest user text only), or null to use the rules; `signal` aborts at the budget. */
   decide?(text: string, grant: LaunchGrant, signal: AbortSignal): Promise<TurnDecision | null>;
   /** The card's model badge changed (only on a change). */
-  badge?(sessionId: string, model: { model: string; tier: AutoTier; source: DecisionSource } | null): void;
+  badge?(sessionId: string, model: { model: string; tier: Level; source: DecisionSource } | null): void;
   log?(level: 'info' | 'warn', message: string): void;
   transport?: typeof fetch;
   now?: () => number;
@@ -53,9 +59,23 @@ export interface DecisionRecord {
   turn: string;
   kind: RequestKind;
   source: DecisionSource;
+  /** The turn's level (small, medium, large), or the chosen model's manual tier. */
   tier: AutoTier | null;
+  /** The turn's task type and difficulty level, and Jev's confidence in "small" (null: rules, or not asked). */
+  taskType: TaskType | null;
+  difficulty: Level | null;
+  confidence: number | null;
+  /** Why this model: a code-authored reason (see select.ts). */
+  why: SelectionReason | null;
   upstream: string | null;
   model: string | null;
+  effort: string | null;
+  /** The chosen model's score for the type compared, and where it comes from (null: unknown). */
+  score: number | null;
+  scoreSource: string | null;
+  /** USD per million tokens of the chosen model (null: unknown). */
+  priceIn: number | null;
+  priceOut: number | null;
   attempts: number;
   failovers: Array<{ upstream: string; model: string; status: number | 'error' | 'timeout' }>;
   status: number;
@@ -75,7 +95,7 @@ export interface RouterStats {
   hosts: string[];
 }
 
-interface Lease { sessionId: string; turn: string; contract: string; tier: AutoTier; model: string | null; upstream: string | null; source: DecisionSource; decidedAt: number }
+interface Lease { sessionId: string; turn: string; contract: string; view: TurnView; model: string | null; source: DecisionSource; decidedAt: number }
 
 class HttpError extends Error {
   readonly status: number;
@@ -360,8 +380,9 @@ export class AutoRouter {
   private cool(key: string, ms: number): void { this.cooldowns.set(key, this.now() + ms); }
 
   /** Jev within its budget, else rules; never fails the request. */
-  private async decideTurn(text: string, grant: LaunchGrant, toolCount: number): Promise<{ decision: TurnDecision; source: 'jev' | 'rules'; reason: string }> {
+  private async decideTurn(text: string, grant: LaunchGrant, toolCount: number): Promise<{ view: TurnView; source: 'jev' | 'rules'; reason: string }> {
     const settings = this.deps.settings();
+    const rules = (reason: string): { view: TurnView; source: 'rules'; reason: string } => ({ view: turnView({ difficulty: rulesDifficulty(text, toolCount), strong: false }, 'rules', text), source: 'rules', reason });
     if (settings.decider === 'jev' && this.deps.decide && text) {
       this.stats.jevAsked++;
       const controller = new AbortController();
@@ -371,13 +392,24 @@ export class AutoRouter {
           this.deps.decide(text, grant, controller.signal),
           new Promise<null>(resolve => { timer = setTimeout(() => { controller.abort(); resolve(null); }, this.timeouts.jevMs); })
         ]);
-        if (answer) { this.stats.jevAnswered++; return { decision: answer, source: 'jev', reason: 'jev' }; }
-        return { decision: { difficulty: rulesDifficulty(text, toolCount), strong: false }, source: 'rules', reason: controller.signal.aborted ? 'jev_slow' : 'jev_unavailable' };
+        if (answer) { this.stats.jevAnswered++; return { view: turnView(answer, 'jev', text), source: 'jev', reason: 'jev' }; }
+        return rules(controller.signal.aborted ? 'jev_slow' : 'jev_unavailable');
       } catch {
-        return { decision: { difficulty: rulesDifficulty(text, toolCount), strong: false }, source: 'rules', reason: 'jev_error' };
+        return rules('jev_error');
       } finally { if (timer) clearTimeout(timer); }
     }
-    return { decision: { difficulty: rulesDifficulty(text, toolCount), strong: false }, source: 'rules', reason: settings.decider === 'rules' ? 'rules_only' : 'no_text' };
+    return rules(settings.decider === 'rules' ? 'rules_only' : 'no_text');
+  }
+
+  /** Who may take this request now: enabled, allowed, trusted with the card's class, not cooling down, large enough. */
+  private usable(grant: LaunchGrant, promptTokens: number, maxTokens: unknown): InventoryEntry[] {
+    const mode = this.deps.dataClassMode();
+    const healthy = this.deps.inventory().entries.filter(entry => entry.upstream.enabled && !entry.excluded
+      && upstreamAllowed(entry.upstream, grant.dataClass, mode) && !this.coolingDown(entry.upstream.id, entry.model));
+    // A model whose known context or output is too small for this request is left out, unless none would remain.
+    const wanted = typeof maxTokens === 'number' && maxTokens > 0 ? maxTokens : 0;
+    const fits = healthy.filter(entry => (entry.context === null || entry.context >= promptTokens + Math.min(wanted, 4_096)) && (entry.output === null || !wanted || entry.output >= Math.min(wanted, 32_768)));
+    return fits.length ? fits : healthy;
   }
 
   private async complete(request: IncomingMessage, response: ServerResponse, grant: LaunchGrant, tokenHash: string): Promise<void> {
@@ -400,37 +432,42 @@ export class AutoRouter {
     const keys = requestKeys(this.salt, tokenHash, body);
     const record: DecisionRecord = {
       at: started, session: grant.sessionId.slice(0, 8), conversation: keys.conversation, turn: keys.turn, kind, source: 'small', tier: null,
-      upstream: null, model: null, attempts: 0, failovers: [], status: 0, reason: '', ttfbMs: null, totalMs: 0, tokensIn: null, tokensOut: null, costUsd: null
+      taskType: null, difficulty: null, confidence: null, why: null, upstream: null, model: null, effort: null, score: null, scoreSource: null, priceIn: null, priceOut: null,
+      attempts: 0, failovers: [], status: 0, reason: '', ttfbMs: null, totalMs: 0, tokensIn: null, tokensOut: null, costUsd: null
     };
     try {
       // The decision: small calls the cheapest model; a continuation keeps its turn's choice; a new turn asks once.
-      let tier: AutoTier;
-      let preferred: string | null = null;
+      let request: Parameters<typeof plan>[1];
       if (kind === 'small') {
-        tier = 'small'; record.reason = 'small_model';
+        request = { kind: 'small' }; record.reason = 'small_model';
       } else {
         const lease = this.leases.get(keys.conversation);
         const fresh = lease && lease.contract === keys.contract && this.now() - lease.decidedAt < ROUTER_LIMITS.leaseMs;
+        let view: TurnView;
+        let preferred: string | null;
         if (lease && fresh && (kind === 'continuation' || lease.turn === keys.turn)) {
-          tier = lease.tier; preferred = lease.model; record.source = 'lease'; record.reason = 'same_turn'; this.stats.leaseReuses++;
+          view = lease.view; preferred = lease.model; record.source = 'lease'; record.reason = 'same_turn'; this.stats.leaseReuses++;
         } else {
           const decided = await this.decideTurn(latestUserText(body), grant, Array.isArray(body.tools) ? body.tools.length : 0);
           if (controller.signal.aborted) throw new HttpError(499, 'aborted', 'The call was cancelled.');
           if (decided.source === 'rules') this.stats.rules++;
-          tier = tierFor(decided.decision.difficulty, decided.decision.strong, settings.preference);
-          // Staying on the conversation's model when the tier did not change keeps the upstream's prompt cache warm.
-          preferred = lease && lease.tier === tier ? lease.model : null;
+          view = decided.view;
+          // Staying on the conversation's model for a turn of the same kind keeps the upstream's prompt cache warm.
+          preferred = lease && lease.view.level === view.level && lease.view.type === view.type ? lease.model : null;
           record.source = decided.source; record.reason = decided.reason;
         }
+        record.taskType = view.type; record.difficulty = view.level; record.confidence = view.confidence;
+        request = { kind: record.source === 'lease' ? 'continuation' : 'turn', view, preferred };
         this.leases.delete(keys.conversation);
-        this.leases.set(keys.conversation, { sessionId: grant.sessionId, turn: keys.turn, contract: keys.contract, tier, model: preferred, upstream: null, source: record.source, decidedAt: record.source === 'lease' && lease ? lease.decidedAt : this.now() });
+        this.leases.set(keys.conversation, { sessionId: grant.sessionId, turn: keys.turn, contract: keys.contract, view, model: preferred, source: record.source, decidedAt: record.source === 'lease' && lease ? lease.decidedAt : this.now() });
         while (this.leases.size > ROUTER_LIMITS.conversations) this.leases.delete(this.leases.keys().next().value!);
       }
-      record.tier = tier;
-      let list = candidates(settings, tier, { cardClass: grant.dataClass, mode: this.deps.dataClassMode(), coolingDown: this.coolingDown, cheapest: kind === 'small' });
-      if (preferred) list = [...list.filter(c => c.model.id === preferred), ...list.filter(c => c.model.id !== preferred)];
-      if (!list.length) throw new HttpError(503, 'no_model', 'Auto (Jev): no allowed model is available now (all are off, cooling down or not allowed for this card\'s data class).');
-      await this.forward(list.slice(0, ROUTER_LIMITS.attempts), body, grant, response, controller, record, kind, keys.conversation);
+      const chosen = plan(this.usable(grant, Math.ceil(raw.length / 4), body.max_tokens), request, { preference: settings.preference, cheaperFallback: settings.cheaperFallback });
+      record.why = chosen.why;
+      record.tier = request.kind === 'small' ? 'small' : request.view.level;
+      const list = chosen.list;
+      if (!list.length) throw new HttpError(503, 'no_model', 'Auto (Jev): no allowed model is available now (all are off, excluded, cooling down or not allowed for this card\'s data class).');
+      await this.forward(list.slice(0, ROUTER_LIMITS.attempts), body, grant, response, controller, record, kind, keys.conversation, chosen.scoredAs);
     } catch (error) {
       if (error instanceof HttpError) {
         record.status = error.status; record.reason ||= error.code;
@@ -450,24 +487,26 @@ export class AutoRouter {
     }
   }
 
-  private estimate(candidate: Candidate, bodyBytes: number, maxTokens: unknown): number {
-    const output = typeof maxTokens === 'number' && maxTokens > 0 ? Math.min(maxTokens, 32_768) : candidate.model.output ?? DEFAULT_OUTPUT;
-    return ((bodyBytes / 4) * (candidate.model.priceIn ?? 0) + output * (candidate.model.priceOut ?? 0)) / 1e6;
+  private estimate(entry: InventoryEntry, bodyBytes: number, maxTokens: unknown): number {
+    const output = typeof maxTokens === 'number' && maxTokens > 0 ? Math.min(maxTokens, 32_768) : entry.output ?? DEFAULT_OUTPUT;
+    return ((bodyBytes / 4) * (entry.priceIn ?? 0) + output * (entry.priceOut ?? 0)) / 1e6;
   }
 
-  private costOf(candidate: Candidate, usage: UsageReader['usage']): number | null {
+  private costOf(entry: InventoryEntry, usage: UsageReader['usage']): number | null {
     if (usage.cost !== null) return usage.cost;
     if (usage.in === null && usage.out === null) return null;
-    if (candidate.model.priceIn === undefined && candidate.model.priceOut === undefined) return null;
-    return ((usage.in ?? 0) * (candidate.model.priceIn ?? 0) + (usage.out ?? 0) * (candidate.model.priceOut ?? 0)) / 1e6;
+    if (entry.priceIn === null && entry.priceOut === null) return null;
+    return ((usage.in ?? 0) * (entry.priceIn ?? 0) + (usage.out ?? 0) * (entry.priceOut ?? 0)) / 1e6;
   }
 
-  private async forward(list: Candidate[], body: Record<string, unknown>, grant: LaunchGrant, response: ServerResponse, controller: AbortController, record: DecisionRecord, kind: RequestKind, conversation: string): Promise<void> {
+  private async forward(list: InventoryEntry[], body: Record<string, unknown>, grant: LaunchGrant, response: ServerResponse, controller: AbortController, record: DecisionRecord, kind: RequestKind, conversation: string, scoredAs: TaskType | null): Promise<void> {
     const settings = this.deps.settings();
     const stream = body.stream === true;
     let lastStatus = 503;
     let lastCode = 'no_upstream';
-    for (const candidate of list) {
+    let capped: HttpError | null = null;
+    for (const entry of list) {
+      const candidate = { upstream: entry.upstream, model: { id: entry.model } };
       if (controller.signal.aborted) throw new HttpError(499, 'aborted', 'The call was cancelled.');
       if (this.coolingDown(candidate.upstream.id, candidate.model.id)) continue;
       record.attempts++;
@@ -480,8 +519,17 @@ export class AutoRouter {
       };
       const key = candidate.upstream.key === 'none' ? null : await this.deps.key(candidate.upstream).catch(() => null);
       if (candidate.upstream.key !== 'none' && !key) { failover('error', candidate.upstream.id, COOLDOWN_MS.auth, 'no_key'); continue; }
-      const payload = Buffer.from(JSON.stringify({ ...body, model: candidate.model.id }), 'utf8');
-      const reservation = this.spend.reserve(grant.sessionId, this.estimate(candidate, payload.length, body.max_tokens), { daily: settings.dailyUsdCap, perCard: settings.perCardUsdCap });
+      // An OpenRouter effort variant: the effort it was scored at is sent, unless the CLI chose one itself.
+      const effort = entry.sendEffort && entry.effort && body.reasoning === undefined && body.reasoning_effort === undefined ? { reasoning: { effort: entry.effort } } : {};
+      const payload = Buffer.from(JSON.stringify({ ...body, model: candidate.model.id, ...effort }), 'utf8');
+      let reservation: ReturnType<Spend['reserve']>;
+      try {
+        reservation = this.spend.reserve(grant.sessionId, this.estimate(entry, payload.length, body.max_tokens), { daily: settings.dailyUsdCap, perCard: settings.perCardUsdCap });
+      } catch (error) {
+        // Over a cap with this model's estimate: a cheaper model further down may still fit.
+        if (error instanceof HttpError && error.status === 402) { capped ??= error; record.attempts--; continue; }
+        throw error;
+      }
       const attempt = new AbortController();
       const relay = (): void => attempt.abort();
       controller.signal.addEventListener('abort', relay, { once: true });
@@ -532,12 +580,16 @@ export class AutoRouter {
           continue;
         }
         if (first.done || !first.value?.length) { reservation.release(); failover('error', `${candidate.upstream.id}|${candidate.model.id}`, COOLDOWN_MS.transient, 'empty'); continue; }
-        record.upstream = candidate.upstream.id; record.model = candidate.model.id; record.tier = candidate.tier;
+        record.upstream = candidate.upstream.id; record.model = candidate.model.id; record.effort = entry.effort;
+        if (entry.tier) record.tier = entry.tier;
+        record.priceIn = entry.priceIn; record.priceOut = entry.priceOut;
+        const score = scoredAs ? entry.scores[scoredAs] : undefined;
+        record.score = score?.value ?? null; record.scoreSource = score ? `${score.label}${scoredAs !== record.taskType ? ` (${scoredAs})` : ''}${score.historical ? ', old' : ''}` : null;
         record.ttfbMs = this.now() - record.at;
         if (kind !== 'small') {
           const lease = this.leases.get(conversation);
-          if (lease) { lease.model = candidate.model.id; lease.upstream = candidate.upstream.id; }
-          this.showModel(grant.sessionId, candidate, record.source);
+          if (lease) lease.model = entry.key;
+          this.showModel(grant.sessionId, entry.model, (record.difficulty ?? 'medium'), record.source);
         }
         sent = true;
         response.writeHead(200, { 'content-type': upstream.headers.get('content-type') ?? (stream ? 'text/event-stream' : 'application/json'), 'cache-control': 'no-cache' });
@@ -562,7 +614,7 @@ export class AutoRouter {
         }
         if (stream) usage.end(); else { try { usage.json(JSON.parse(chunks.join(''))); } catch { /* no usage */ } }
         record.tokensIn = usage.usage.in; record.tokensOut = usage.usage.out;
-        const cost = this.costOf(candidate, usage.usage);
+        const cost = this.costOf(entry, usage.usage);
         record.costUsd = cost;
         reservation.commit(cost);
         if (failed && !controller.signal.aborted && !response.destroyed) {
@@ -578,13 +630,14 @@ export class AutoRouter {
         if (!sent) attempt.abort();
       }
     }
+    if (capped && record.attempts === 0) throw capped;
     throw new HttpError(lastStatus === 429 ? 429 : 503, lastCode, `Auto (Jev): no allowed model answered (last: ${lastCode}). It tries again on the next call.`);
   }
 
-  private showModel(sessionId: string, candidate: Candidate, source: DecisionSource): void {
-    if (this.shownModel.get(sessionId) === candidate.model.id) return;
-    this.shownModel.set(sessionId, candidate.model.id);
-    this.deps.badge?.(sessionId, { model: candidate.model.id, tier: candidate.tier, source });
+  private showModel(sessionId: string, model: string, level: Level, source: DecisionSource): void {
+    if (this.shownModel.get(sessionId) === model) return;
+    this.shownModel.set(sessionId, model);
+    this.deps.badge?.(sessionId, { model, tier: level, source });
   }
 
   private remember(record: DecisionRecord): void {

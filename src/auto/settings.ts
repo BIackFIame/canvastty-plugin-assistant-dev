@@ -4,6 +4,7 @@
  * upstream's origin and read by the service only at call time. Shared by the service and the page: no Node APIs.
  */
 import { validUrl, type DataClass } from '../shared/settings.ts';
+import { isEffort, type ReasoningEffort } from './catalog/identity.ts';
 
 export type AutoTier = 'small' | 'medium' | 'large';
 export const AUTO_TIERS: readonly AutoTier[] = ['small', 'medium', 'large'];
@@ -16,8 +17,17 @@ export type AutoDecider = 'jev' | 'rules';
 export interface AutoModel {
   /** The upstream's exact model id, for example `qwen/qwen3-coder`. */
   id: string;
-  tier: AutoTier;
-  /** USD per million tokens, input and output: orders cheap/best and estimates cost when the upstream reports none. */
+  /**
+   * A manual tier (optional): the model then answers turns of that tier first, whatever the catalog says. Without
+   * one, Auto chooses it by its catalog score for the turn's task type.
+   */
+  tier?: AutoTier;
+  /**
+   * The effort this model runs at. On OpenRouter Auto sends it (`reasoning.effort`); on another upstream it only says
+   * which benchmark row describes the model (the upstream's own setting), and nothing extra is sent.
+   */
+  effort?: ReasoningEffort;
+  /** USD per million tokens, input and output (the person's own figures win over the catalog's). */
   priceIn?: number;
   priceOut?: number;
   /** Tokens; the smallest across the allow-list goes into the CLI's limits. */
@@ -34,8 +44,20 @@ export interface AutoUpstream {
   trust: DataClass;
   /** `own`: the key saved for this upstream; `jev`: the Jev · OpenRouter key (same origin, OpenRouter only). */
   key: 'own' | 'jev' | 'none';
+  /** Models listed by the person: the whole allow-list of an OpenAI-compatible upstream; overrides and additions on OpenRouter. */
   models: AutoModel[];
+  /** OpenRouter: also offer every suitable model from OpenRouter's own list (with its context and prices). */
+  allModels: boolean;
+  /** Model ids Auto never uses (the person's exclude toggles). */
+  excluded: string[];
   enabled: boolean;
+}
+
+export interface AutoCatalogSettings {
+  /** Refresh the public catalog in the background while Auto has an upstream. */
+  autoRefresh: boolean;
+  /** Ratings and models.dev; OpenRouter's list is refreshed daily. */
+  refreshHours: number;
 }
 
 export interface AutoRoutingSettings {
@@ -47,17 +69,22 @@ export interface AutoRoutingSettings {
   /** USD; 0 means no Auto calls at all. */
   dailyUsdCap: number;
   perCardUsdCap: number;
+  catalog: AutoCatalogSettings;
 }
 
 export const OPENROUTER_BASE_URL = 'https://openrouter.ai/api/v1';
 export const MAX_AUTO_UPSTREAMS = 8;
-export const MAX_AUTO_MODELS = 16;
+export const MAX_AUTO_MODELS = 64;
+export const MAX_EXCLUDED = 256;
 export const DEFAULT_CONTEXT = 128_000;
 export const DEFAULT_OUTPUT = 8_192;
 
 export const DEFAULT_AUTO_SETTINGS: AutoRoutingSettings = {
-  upstreams: [], preference: 'balanced', cheaperFallback: false, decider: 'jev', dailyUsdCap: 1, perCardUsdCap: 0.4
+  upstreams: [], preference: 'balanced', cheaperFallback: false, decider: 'jev', dailyUsdCap: 1, perCardUsdCap: 0.4,
+  catalog: { autoRefresh: true, refreshHours: 168 }
 };
+/** Fields older saved settings may lack: filled with these. */
+const OPTIONAL_KEYS = ['catalog'];
 
 const ID = /^[a-z0-9][a-z0-9-]{0,23}$/u;
 const MODEL_ID = /^[A-Za-z0-9][A-Za-z0-9._:/@+-]{0,159}$/u;
@@ -85,7 +112,7 @@ export function originOf(baseUrl: string): string { return new URL(baseUrl).orig
 
 export function validateAutoUpstream(value: unknown): AutoUpstream {
   if (!isRecord(value)) fail('Invalid upstream.');
-  only(value, ['id', 'preset', 'baseUrl', 'trust', 'key', 'models', 'enabled'], 'Upstream');
+  only(value, ['id', 'preset', 'baseUrl', 'trust', 'key', 'models', 'allModels', 'excluded', 'enabled'], 'Upstream');
   if (typeof value.id !== 'string' || !ID.test(value.id)) fail('Upstream id: lowercase letters, digits and dashes, at most 24.');
   if (value.preset !== 'openrouter' && value.preset !== 'openai-compatible') fail('Unknown upstream kind.');
   if (typeof value.enabled !== 'boolean') fail('Invalid upstream.');
@@ -103,21 +130,30 @@ export function validateAutoUpstream(value: unknown): AutoUpstream {
   const seen = new Set<string>();
   for (const raw of value.models) {
     if (!isRecord(raw)) fail('Invalid model.');
-    only(raw, ['id', 'tier', 'priceIn', 'priceOut', 'context', 'output'], 'Model');
+    only(raw, ['id', 'tier', 'effort', 'priceIn', 'priceOut', 'context', 'output'], 'Model');
     if (typeof raw.id !== 'string' || !MODEL_ID.test(raw.id)) fail('Invalid model id.');
     if (seen.has(raw.id)) fail(`Model ${raw.id} is listed twice.`);
     seen.add(raw.id);
-    if (!AUTO_TIERS.includes(raw.tier as AutoTier)) fail('Invalid model tier.');
+    if (raw.tier !== undefined && !AUTO_TIERS.includes(raw.tier as AutoTier)) fail('Invalid model tier.');
+    if (raw.effort !== undefined && !isEffort(raw.effort)) fail('Invalid model effort.');
     if (!price(raw.priceIn) || !price(raw.priceOut)) fail('Invalid model price.');
     if (!tokens(raw.context) || !tokens(raw.output)) fail('Invalid model limits.');
-    models.push(structuredClone(raw) as unknown as AutoModel);
+    const model: AutoModel = { id: raw.id };
+    for (const key of ['tier', 'effort', 'priceIn', 'priceOut', 'context', 'output'] as const) if (raw[key] !== undefined) (model as unknown as Record<string, unknown>)[key] = raw[key];
+    models.push(model);
   }
-  return { id: value.id, preset: value.preset, baseUrl: baseUrl.replace(/\/+$/u, ''), trust: value.trust as DataClass, key, models, enabled: value.enabled };
+  const allModels = value.allModels ?? value.preset === 'openrouter';
+  if (typeof allModels !== 'boolean') fail('Invalid upstream.');
+  if (allModels && value.preset !== 'openrouter') fail('Only OpenRouter publishes a model list Auto can use on its own.');
+  const excluded = value.excluded ?? [];
+  if (!Array.isArray(excluded) || excluded.length > MAX_EXCLUDED || excluded.some(id => typeof id !== 'string' || !MODEL_ID.test(id))) fail(`At most ${MAX_EXCLUDED} excluded models, by their ids.`);
+  return { id: value.id, preset: value.preset, baseUrl: baseUrl.replace(/\/+$/u, ''), trust: value.trust as DataClass, key, models, allModels, excluded: [...new Set(excluded as string[])], enabled: value.enabled };
 }
 
 export function validateAutoSettings(value: unknown): AutoRoutingSettings {
   if (!isRecord(value)) fail('Invalid Auto (Jev) settings.');
   only(value, Object.keys(DEFAULT_AUTO_SETTINGS), 'Auto (Jev) settings');
+  for (const key of Object.keys(DEFAULT_AUTO_SETTINGS)) if (!OPTIONAL_KEYS.includes(key) && !Object.hasOwn(value, key)) fail(`Auto (Jev) settings: ${key} is missing.`);
   if (!Array.isArray(value.upstreams) || value.upstreams.length > MAX_AUTO_UPSTREAMS) fail(`At most ${MAX_AUTO_UPSTREAMS} upstreams.`);
   const upstreams = value.upstreams.map(validateAutoUpstream);
   if (new Set(upstreams.map(entry => entry.id)).size !== upstreams.length) fail('Two upstreams have the same id.');
@@ -125,7 +161,11 @@ export function validateAutoSettings(value: unknown): AutoRoutingSettings {
   if (typeof value.cheaperFallback !== 'boolean') fail('Invalid fallback choice.');
   if (value.decider !== 'jev' && value.decider !== 'rules') fail('Invalid decider.');
   if (!usd(value.dailyUsdCap) || !usd(value.perCardUsdCap)) fail('Caps are USD from 0 to 100.');
-  return { upstreams, preference: value.preference as AutoPreference, cheaperFallback: value.cheaperFallback, decider: value.decider, dailyUsdCap: value.dailyUsdCap as number, perCardUsdCap: value.perCardUsdCap as number };
+  const catalog = value.catalog ?? DEFAULT_AUTO_SETTINGS.catalog;
+  if (!isRecord(catalog)) fail('Invalid catalog settings.');
+  only(catalog, ['autoRefresh', 'refreshHours'], 'Catalog settings');
+  if (typeof catalog.autoRefresh !== 'boolean' || !Number.isInteger(catalog.refreshHours) || (catalog.refreshHours as number) < 1 || (catalog.refreshHours as number) > 720) fail('Catalog refresh: every 1 to 720 hours.');
+  return { upstreams, preference: value.preference as AutoPreference, cheaperFallback: value.cheaperFallback, decider: value.decider, dailyUsdCap: value.dailyUsdCap as number, perCardUsdCap: value.perCardUsdCap as number, catalog: { autoRefresh: catalog.autoRefresh, refreshHours: catalog.refreshHours as number } };
 }
 
 /** As saved, made valid: a bad upstream disables only itself; other fields fall back to their defaults alone. */

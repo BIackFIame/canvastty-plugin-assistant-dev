@@ -1,0 +1,313 @@
+{
+ "description": "Labelled tasks for measuring Jev's per-turn classification (difficulty level and task type) on a later live run. Expected values are the owner's intent, not model output. Entries marked 'from' reuse the 20-task English set of the earlier run (pr-backlog/15-live-fixes-report.md; simple→small, hard→large); its Russian half and Jev's per-task answers were not kept, so it cannot be re-measured offline.",
+ "version": 1,
+ "levels": [
+  "small",
+  "medium",
+  "large"
+ ],
+ "types": [
+  "coding",
+  "review",
+  "research",
+  "writing",
+  "chat"
+ ],
+ "tasks": [
+  {
+   "id": "t01",
+   "lang": "en",
+   "text": "format the touched files with prettier",
+   "level": "small",
+   "type": "coding",
+   "from": "old-1"
+  },
+  {
+   "id": "t02",
+   "lang": "en",
+   "text": "run unit tests and report failures",
+   "level": "small",
+   "type": "coding",
+   "from": "old-2"
+  },
+  {
+   "id": "t03",
+   "lang": "en",
+   "text": "rename a local variable",
+   "level": "small",
+   "type": "coding",
+   "from": "old-3"
+  },
+  {
+   "id": "t04",
+   "lang": "en",
+   "text": "fix a typo in the README",
+   "level": "small",
+   "type": "writing",
+   "from": "old-4"
+  },
+  {
+   "id": "t05",
+   "lang": "en",
+   "text": "add a missing import",
+   "level": "small",
+   "type": "coding",
+   "from": "old-5"
+  },
+  {
+   "id": "t06",
+   "lang": "en",
+   "text": "update a changelog entry",
+   "level": "small",
+   "type": "writing",
+   "from": "old-6"
+  },
+  {
+   "id": "t07",
+   "lang": "en",
+   "text": "remove an unused import",
+   "level": "small",
+   "type": "coding",
+   "from": "old-8"
+  },
+  {
+   "id": "t08",
+   "lang": "en",
+   "text": "update a button label",
+   "level": "small",
+   "type": "coding",
+   "from": "old-9"
+  },
+  {
+   "id": "t09",
+   "lang": "ru",
+   "text": "Исправь опечатку в заголовке README",
+   "level": "small",
+   "type": "writing"
+  },
+  {
+   "id": "t10",
+   "lang": "ru",
+   "text": "Переименуй переменную tmp в buffer в utils.ts",
+   "level": "small",
+   "type": "coding"
+  },
+  {
+   "id": "t11",
+   "lang": "ru",
+   "text": "Подними версию пакета до 1.4.2 в package.json",
+   "level": "small",
+   "type": "coding"
+  },
+  {
+   "id": "t12",
+   "lang": "ru",
+   "text": "Отсортируй список зависимостей по алфавиту",
+   "level": "small",
+   "type": "coding"
+  },
+  {
+   "id": "t13",
+   "lang": "en",
+   "text": "What does the --dry-run flag of this script do?",
+   "level": "small",
+   "type": "research"
+  },
+  {
+   "id": "t14",
+   "lang": "ru",
+   "text": "Привет! Ты здесь?",
+   "level": "small",
+   "type": "chat"
+  },
+  {
+   "id": "t15",
+   "lang": "en",
+   "text": "Add a --json flag to the export command that prints the result as JSON",
+   "level": "medium",
+   "type": "coding"
+  },
+  {
+   "id": "t16",
+   "lang": "en",
+   "text": "Write unit tests for the date parser, including leap years",
+   "level": "medium",
+   "type": "coding"
+  },
+  {
+   "id": "t17",
+   "lang": "en",
+   "text": "Review this pull request for obvious bugs and missing tests",
+   "level": "medium",
+   "type": "review"
+  },
+  {
+   "id": "t18",
+   "lang": "en",
+   "text": "Explain how the cache invalidation in the API layer works",
+   "level": "medium",
+   "type": "research"
+  },
+  {
+   "id": "t19",
+   "lang": "en",
+   "text": "Write a README section describing the new configuration options",
+   "level": "medium",
+   "type": "writing"
+  },
+  {
+   "id": "t20",
+   "lang": "en",
+   "text": "Find why the CLI prints the help text twice and fix it",
+   "level": "medium",
+   "type": "coding"
+  },
+  {
+   "id": "t21",
+   "lang": "ru",
+   "text": "Добавь пагинацию в список заказов на странице администратора",
+   "level": "medium",
+   "type": "coding"
+  },
+  {
+   "id": "t22",
+   "lang": "ru",
+   "text": "Сделай ревью изменений в модуле оплаты и перечисли замечания",
+   "level": "medium",
+   "type": "review"
+  },
+  {
+   "id": "t23",
+   "lang": "ru",
+   "text": "Разберись, почему тест на сериализацию иногда падает на Windows, и исправь",
+   "level": "medium",
+   "type": "coding"
+  },
+  {
+   "id": "t24",
+   "lang": "ru",
+   "text": "Напиши описание pull request для этих изменений",
+   "level": "medium",
+   "type": "writing"
+  },
+  {
+   "id": "t25",
+   "lang": "ru",
+   "text": "Сравни две библиотеки для валидации схем и посоветуй одну",
+   "level": "medium",
+   "type": "research"
+  },
+  {
+   "id": "t26",
+   "lang": "ru",
+   "text": "Перепиши функцию загрузки файлов на async/await без изменения поведения",
+   "level": "medium",
+   "type": "coding"
+  },
+  {
+   "id": "t27",
+   "lang": "en",
+   "text": "Summarize the differences between our v1 and v2 REST endpoints",
+   "level": "medium",
+   "type": "research"
+  },
+  {
+   "id": "t28",
+   "lang": "en",
+   "text": "design a migration plan for the public API",
+   "level": "large",
+   "type": "coding",
+   "from": "old-11"
+  },
+  {
+   "id": "t29",
+   "lang": "en",
+   "text": "investigate a cross-service deadlock",
+   "level": "large",
+   "type": "coding",
+   "from": "old-12"
+  },
+  {
+   "id": "t30",
+   "lang": "en",
+   "text": "review an authentication boundary",
+   "level": "large",
+   "type": "review",
+   "from": "old-13"
+  },
+  {
+   "id": "t31",
+   "lang": "en",
+   "text": "find the cause of a data race and propose a safe fix",
+   "level": "large",
+   "type": "coding",
+   "from": "old-14"
+  },
+  {
+   "id": "t32",
+   "lang": "en",
+   "text": "redesign the storage schema without data loss",
+   "level": "large",
+   "type": "coding",
+   "from": "old-15"
+  },
+  {
+   "id": "t33",
+   "lang": "en",
+   "text": "evaluate threat scenarios for token handling",
+   "level": "large",
+   "type": "review",
+   "from": "old-16"
+  },
+  {
+   "id": "t34",
+   "lang": "en",
+   "text": "plan a backwards-compatible protocol change",
+   "level": "large",
+   "type": "coding",
+   "from": "old-17"
+  },
+  {
+   "id": "t35",
+   "lang": "ru",
+   "text": "Спроектируй миграцию базы данных с PostgreSQL 12 на 16 без простоя",
+   "level": "large",
+   "type": "coding"
+  },
+  {
+   "id": "t36",
+   "lang": "ru",
+   "text": "Найди причину гонки при параллельной записи в журнал и предложи безопасное исправление",
+   "level": "large",
+   "type": "coding"
+  },
+  {
+   "id": "t37",
+   "lang": "ru",
+   "text": "Проведи аудит безопасности модели прав доступа и опиши угрозы",
+   "level": "large",
+   "type": "review"
+  },
+  {
+   "id": "t38",
+   "lang": "ru",
+   "text": "Исследуй, почему производительность упала на 40% после обновления, и найди первопричину",
+   "level": "large",
+   "type": "research"
+  },
+  {
+   "id": "t39",
+   "lang": "ru",
+   "text": "Перепроектируй архитектуру плагинов так, чтобы сторонний код работал в песочнице",
+   "level": "large",
+   "type": "coding"
+  },
+  {
+   "id": "t40",
+   "lang": "en",
+   "text": "Write a design document for multi-region replication with conflict resolution",
+   "level": "large",
+   "type": "writing"
+  }
+ ]
+}

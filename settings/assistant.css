@@ -18,3 +18,9 @@ button { min-height: 2.31rem; padding: 0.31rem 0.92rem; border: 0; border-radius
 .add { display: flex; gap: 0.46rem; flex-wrap: wrap; align-items: center; margin: 0.46rem 0; }
 .recent code { font-size: 0.92rem; }
 .status { position: fixed; left: 0; right: 0; bottom: 0; padding: 0.46rem 1.23rem; min-height: 1.4em; background: var(--surface); border-top: 1px solid var(--line); }
+.table-wrap { overflow-x: auto; margin: 0.31rem 0; }
+.model-table { border-collapse: collapse; width: 100%; font-size: 0.92rem; }
+.model-table th, .model-table td { text-align: left; padding: 0.23rem 0.46rem; border-bottom: 1px solid var(--line); vertical-align: middle; white-space: nowrap; }
+.model-table th { font-weight: 600; }
+.model-table select { min-height: 1.85rem; padding: 0.08rem 0.31rem; }
+.models { margin-top: 0.46rem; }

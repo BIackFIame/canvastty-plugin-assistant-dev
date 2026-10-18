@@ -10,6 +10,11 @@ import { join } from 'node:path';
 import { AutoRouter } from '../src/auto/router.ts';
 import { validateAutoSettings } from '../src/auto/settings.ts';
 import { candidates, requestKind, tierFor, latestUserText } from '../src/auto/classify.ts';
+import { buildInventory } from '../src/auto/inventory.ts';
+
+/** No catalog at all: every model is routed by its manual tier (or is unknown). */
+const NO_CATALOG = { asOf: 0, benchmarks: [], models: [], providers: [], pricesStale: true, openRouter: null, openRouterPricesStale: true };
+const inventoryOf = settings => buildInventory(settings, NO_CATALOG);
 import { startFakeUpstream } from './helpers/fake-upstream.mjs';
 
 const base = realpathSync(mkdtempSync(join(tmpdir(), 'canvastty-auto-router-')));
@@ -41,9 +46,10 @@ async function setup(t, { behaviours = {}, models = TIERED, extra = {}, decide, 
   const router = new AutoRouter({
     directory: dir,
     settings: () => settings,
+    inventory: () => inventoryOf(settings),
     dataClassMode: () => 'strict',
     key: async () => upstreamKey,
-    decide: decide ?? (async text => { jev.calls++; jev.texts.push(text); return { difficulty: /hard|architecture/u.test(text) ? 'hard' : /typo/u.test(text) ? 'simple' : 'normal', strong: false }; }),
+    decide: decide ?? (async text => { jev.calls++; jev.texts.push(text); return { difficulty: /hard|architecture/u.test(text) ? 'hard' : /typo/u.test(text) ? 'simple' : 'normal', strong: false, type: 'coding', confidence: /typo/u.test(text) ? 0.95 : 0.2 }; }),
     badge: (sessionId, model) => badges.push({ sessionId, model }),
     timeouts: { jevMs: 200, headersMs: 400, firstChunkMs: 300, idleMs: 300, ...timeouts }
   });
@@ -112,7 +118,7 @@ test('keys: a restarted service keeps running cards\' keys and port; a closed ca
   assert.equal(statSync(join(dir, 'tokens.json')).mode & 0o777, 0o600);
   await first.router.stop();
   // The service restarts: same folder, same port, same key.
-  const second = new AutoRouter({ directory: dir, settings: () => settingsFor(first.upstream.url, TIERED), dataClassMode: () => 'strict', key: async () => 'up-key' });
+  const second = new AutoRouter({ directory: dir, settings: () => settingsFor(first.upstream.url, TIERED), inventory: () => inventoryOf(settingsFor(first.upstream.url, TIERED)), dataClassMode: () => 'strict', key: async () => 'up-key' });
   t.after(() => second.stop());
   await second.resume();
   assert.equal(second.listening, port, 'the same port as before');
@@ -289,7 +295,8 @@ test('the decision log has hashes, models and numbers only: no prompt, no key, n
   await call(port, { token, body: userTurn(`Please handle ${MARKER} carefully`) });
   await call(port, { token, body: continuation(`Please handle ${MARKER} carefully`, 2) });
   const record = router.recent()[1];
-  assert.deepEqual(Object.keys(record).sort(), ['at', 'attempts', 'conversation', 'costUsd', 'failovers', 'kind', 'model', 'reason', 'session', 'source', 'status', 'tier', 'tokensIn', 'tokensOut', 'totalMs', 'ttfbMs', 'turn', 'upstream'].sort());
+  assert.deepEqual(Object.keys(record).sort(), ['at', 'attempts', 'confidence', 'conversation', 'costUsd', 'difficulty', 'effort', 'failovers', 'kind', 'model', 'priceIn', 'priceOut', 'reason', 'score', 'scoreSource', 'session', 'source', 'status', 'taskType', 'tier', 'tokensIn', 'tokensOut', 'totalMs', 'ttfbMs', 'turn', 'upstream', 'why'].sort());
+  assert.deepEqual([record.taskType, record.difficulty, record.why], ['coding', 'medium', 'manual_tier']);
   assert.equal(record.session, 'card-000');
   assert.equal(record.tokensIn, 120);
   assert.equal(record.costUsd, 0.000123);

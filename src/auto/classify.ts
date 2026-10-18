@@ -1,7 +1,9 @@
 import { createHmac } from 'node:crypto';
 import { ruleDifficulty, type Difficulty } from '../harness/router.ts';
 import { classRank, type DataClass, type DataClassMode } from '../shared/settings.ts';
-import { AUTO_TIERS, type AutoModel, type AutoPreference, type AutoRoutingSettings, type AutoTier, type AutoUpstream } from './settings.ts';
+import type { InventoryEntry } from './inventory.ts';
+import { manualOrder } from './select.ts';
+import type { AutoModel, AutoRoutingSettings, AutoTier, AutoUpstream } from './settings.ts';
 
 /**
  * What one Chat Completions request is, and which models may answer it. Pure: no I/O.
@@ -65,15 +67,7 @@ export function requestKeys(salt: Buffer, tokenHash: string, body: Record<string
   };
 }
 
-const TIER_OF: Readonly<Record<Difficulty, AutoTier>> = { simple: 'small', normal: 'medium', hard: 'large' };
-
-/** Difficulty (and "design-level") → tier, shifted by the preference (cheap −1, best +1), clamped. */
-export function tierFor(difficulty: Difficulty, strong: boolean, preference: AutoPreference): AutoTier {
-  let index = AUTO_TIERS.indexOf(strong ? 'large' : TIER_OF[difficulty]);
-  if (preference === 'cheap') index -= 1;
-  if (preference === 'best') index += 1;
-  return AUTO_TIERS[Math.max(0, Math.min(AUTO_TIERS.length - 1, index))]!;
-}
+export { tierFor } from './select.ts';
 
 /** Word rules plus size: a long turn or a large tool set is not "simple". */
 export function rulesDifficulty(text: string, toolCount: number): Difficulty {
@@ -92,27 +86,23 @@ export function upstreamAllowed(upstream: AutoUpstream, cardClass: DataClass, mo
   return mode === 'warn' || classRank(upstream.trust) >= classRank(cardClass);
 }
 
-const priceOf = (model: AutoModel): number | null => model.priceIn === undefined && model.priceOut === undefined ? null : (model.priceIn ?? 0) + (model.priceOut ?? 0) * 3;
-
 /**
- * Models to try, in order: the tier's models (ordered by preference), then stronger tiers, then — only when the
- * person allows it — cheaper ones. Upstreams that are off, cooling down or not trusted with the card's class are left out.
+ * Manually tiered models to try, in order: the tier's models (ordered by preference), then stronger tiers, then —
+ * only when the person allows it — cheaper ones. Upstreams that are off, cooling down or not trusted with the card's
+ * class are left out. (The router itself plans over the whole inventory: see select.ts.)
  */
 export function candidates(settings: AutoRoutingSettings, tier: AutoTier, options: { cardClass: DataClass; mode: DataClassMode; coolingDown: (upstreamId: string, modelId: string) => boolean; cheapest?: boolean }): Candidate[] {
-  const usable = settings.upstreams.filter(upstream => upstream.enabled && upstreamAllowed(upstream, options.cardClass, options.mode));
-  const ofTier = (wanted: AutoTier): Candidate[] => {
-    const list: Candidate[] = [];
-    for (const upstream of usable) for (const model of upstream.models) if (model.tier === wanted && !options.coolingDown(upstream.id, model.id)) list.push({ upstream, model, tier: wanted });
-    const order = options.cheapest ? 'cheap' : settings.preference;
-    if (order === 'balanced') return list;
-    // Stable: equal or unknown prices keep the person's order; unknown prices go last.
-    return list.map((candidate, index) => ({ candidate, index, price: priceOf(candidate.model) }))
-      .sort((a, b) => (a.price === null ? 1 : 0) - (b.price === null ? 1 : 0) || (a.price === null || b.price === null ? 0 : order === 'cheap' ? a.price - b.price : b.price - a.price) || a.index - b.index)
-      .map(entry => entry.candidate);
-  };
-  const at = AUTO_TIERS.indexOf(tier);
-  const order: AutoTier[] = [tier, ...AUTO_TIERS.slice(at + 1), ...(settings.cheaperFallback || options.cheapest ? AUTO_TIERS.slice(0, at).reverse() : [])];
-  return order.flatMap(ofTier);
+  const entries: InventoryEntry[] = [];
+  for (const upstream of settings.upstreams) {
+    if (!upstream.enabled || !upstreamAllowed(upstream, options.cardClass, options.mode)) continue;
+    for (const model of upstream.models) {
+      if (!model.tier || options.coolingDown(upstream.id, model.id)) continue;
+      entries.push({ key: `${upstream.id}|${model.id}|`, upstream, model: model.id, effort: null, sendEffort: false, tier: model.tier, listed: true, fromList: false, excluded: false,
+        priceIn: model.priceIn ?? null, priceOut: model.priceOut ?? null, priceSource: 'person', context: model.context ?? null, output: model.output ?? null, known: false, measuredEfforts: [], scores: {} });
+    }
+  }
+  return manualOrder(entries, tier, { preference: settings.preference, cheaperFallback: settings.cheaperFallback, ...(options.cheapest ? { cheapest: true } : {}) })
+    .map(entry => ({ upstream: entry.upstream, model: entry.upstream.models.find(model => model.id === entry.model)!, tier: entry.tier! }));
 }
 
 /** The smallest context and output across the allowed models: what the CLI is told it may send and ask for. */

@@ -36,12 +36,30 @@
     refresh();
   }
 
+  // src/auto/catalog/identity.ts
+  var EFFORTS = ["none", "minimal", "low", "medium", "high", "xhigh", "max", "ultra"];
+
   // src/ui/autoRouting.ts
+  var newAutoView = () => ({ checks: /* @__PURE__ */ new Map(), filter: /* @__PURE__ */ new Map(), type: "coding", shown: /* @__PURE__ */ new Map(), refreshing: false });
   var OPENROUTER = "https://openrouter.ai/api/v1";
+  var TYPES = ["coding", "review", "research", "writing", "chat"];
+  var PAGE = 40;
   var AUTO_PAGE_STRINGS = {
     en: {
       title: "Model: Auto (Jev)",
-      lead: "For OpenCode cards started with Model: Auto (Jev) (launcher \u2192 Advanced \u2192 Use CanvasTTY Assistant). A local router on 127.0.0.1, protected by a key per card, picks one of the models below for each new turn: Jev (task triage, when it is Suggest or Auto above) judges how hard the turn is, otherwise word rules do. Tool steps keep the turn's model; titles use the cheapest one. Prompts go only to the upstream that answers; Jev gets only the latest user text, under the data rules below. Leave the launcher's Model at Default and choose no model account.",
+      lead: "For OpenCode cards started with Model: Auto (Jev) (launcher \u2192 Advanced \u2192 Use CanvasTTY Assistant). A local router on 127.0.0.1, protected by a key per card, picks a model for each new turn from data: Jev (task triage, when it is Suggest or Auto above) says the task type and how hard the turn is, otherwise word rules do; the catalog's benchmark score for that type and the price decide among the models you allow. Tool steps keep the turn's model; titles use the cheapest one. Prompts go only to the upstream that answers; Jev gets only the latest user text, under the data rules below. Leave the launcher's Model at Default and choose no model account.",
+      catalog: "Catalog",
+      refresh: "Refresh now",
+      refreshing: "Refreshing\u2026",
+      catalogLead: "Public sources read from fixed addresses: models.dev (models, prices, limits), Artificial Analysis and LiveBench (measured scores per model and effort), OpenRouter's model list. No task text or key is sent. A score belongs to one exact model and effort; nothing else inherits it, and a model with no row of its own stays unknown. Old scores still count (marked old); prices older than 7 days do not.",
+      sourceName: { "models.dev": "models.dev", "artificial-analysis": "Artificial Analysis", livebench: "LiveBench", openrouter: "OpenRouter models" },
+      source: (s, date) => `${s.fetchedAt === null ? "not loaded" : `loaded ${date(s.fetchedAt)}`}${s.version ? `, v${s.version}` : ""}${s.rows ? `, ${s.measured ? `${s.measured} measured of ` : ""}${s.rows} rows` : ""}${s.fetchedAt !== null && s.stale ? " \u2014 old" : ""}${s.error ? ` \u2014 ${s.error}` : ""}`,
+      bundled: "Using the scores that ship with the plugin until the first download.",
+      next: (date) => `Next background refresh: ${date}.`,
+      noNext: "Background refresh is off (or no upstream is on).",
+      autoRefresh: "Refresh in the background",
+      every: "every, hours",
+      lastError: (e) => `Last refresh: ${e}.`,
       upstreams: "Upstreams",
       none: "None yet.",
       add: "Add",
@@ -63,37 +81,66 @@
       keyPlaceholder: "Key",
       saveKey: "Save key",
       removeKey: "Remove key",
+      allModels: "Offer every suitable OpenRouter model (tools, text, a fixed price; no :free variants)",
+      waiting: "OpenRouter's list is not loaded yet: refresh the catalog.",
       models: "Models",
       modelId: "Model id",
+      filter: "Filter",
+      scoreFor: "Score for",
+      type: { coding: "coding", review: "review", research: "research", writing: "writing", chat: "chat" },
+      col: { use: "Use", model: "Model", context: "Context", price: "$/M in \xB7 out", score: "Score", efforts: "Measured at", effort: "Effort", tier: "Tier", remove: "" },
       tier: { small: "small", medium: "medium", large: "large" },
+      tierAuto: "by score",
+      effortDefault: "default",
+      unknown: "unknown",
+      old: "old",
+      fromPerson: "yours",
+      fromList: "OpenRouter",
+      fromDev: "models.dev",
+      shown: (shown, total) => `${shown} of ${total} models`,
+      more: "Show more",
       priceIn: "$/M in",
       priceOut: "$/M out",
       addModel: "Add model",
       noModels: "No models: add at least one.",
+      tableHelp: "Price, context and score come from the catalog (read-only). Untick a model to exclude it. A manual tier makes the model answer turns of that tier first; an effort names the setting it runs at (on OpenRouter Auto sends it).",
       checkOk: (listed, missing) => `Works${listed !== null ? ` (${listed} models listed)` : ""}.${missing.length ? ` Not listed by it: ${missing.join(", ")}.` : ""}`,
       checkFail: (status2) => status2 === null ? "No answer, or no key saved." : `It answered ${status2}.`,
       choices: "Choices",
       preference: "Preference",
       pref: { cheap: "Cheap", balanced: "Balanced", best: "Best" },
-      prefHelp: "Cheap goes one tier down and the lowest price first; Best one tier up and the highest price first.",
-      cheaper: "If a tier has no usable model, a cheaper one may answer (a stronger one is always tried first)",
+      prefHelp: "Every turn takes the best score for its task type, and the cheaper model on a tie. Only a turn Jev is sure is small (\u2265 0.9) may give up score for price: Cheap up to 10 points, Balanced 3, Best none. Unknown scores never beat known ones.",
+      cheaper: "Manual tiers: if a tier has no usable model, a cheaper tier may answer (a stronger one is always tried first)",
       decider: "Who judges a turn",
       deciderJev: "Jev, word rules when it does not answer",
       deciderRules: "Word rules only",
       daily: "Daily cap, USD",
       perCard: "Per card, USD",
-      capsHelp: "Counted from the cost the upstream reports, or from the prices you entered. 0 stops Auto.",
+      capsHelp: "Counted from the cost the upstream reports, or from the catalog's prices. 0 stops Auto.",
       save: "Save",
-      recent: "Recent routing",
+      recent: "Recent decisions",
       noRecent: "Nothing routed yet.",
       stats: (s) => `${s.requests} model calls, Jev asked ${s.jevAsked} times (${s.jevAnswered} answered), ${s.leaseReuses} reused a turn's choice, ${s.failovers} failovers; today $${s.spentToday.toFixed(4)}; ${s.listening ? `listening for ${s.cards} card(s)` : "not listening"}${s.hosts.length ? `; sent to ${s.hosts.join(", ")}` : ""}.`,
       kind: { turn: "turn", continuation: "tool step", small: "title" },
-      source: { jev: "Jev", rules: "rules", lease: "same turn", small: "small rule" },
+      sourceOf: { jev: "Jev", rules: "rules", lease: "same turn", small: "small rule" },
+      why: { small_model: "cheapest", manual_tier: "your tier", best_score: "best score", cheaper_tie: "best score, cheaper", cheaper_within_loss: "cheaper, within the allowed loss", kept_turn_model: "turn's model", manual_tier_fallback: "your tiers (nothing scored)", unknown_scores: "no scores: middle price", no_model: "no model" },
       unreadable: "The saved Auto (Jev) settings could not be read yet; nothing can be changed until they are."
     },
     ru: {
       title: "\u041C\u043E\u0434\u0435\u043B\u044C: \u0410\u0432\u0442\u043E (Jev)",
-      lead: "\u0414\u043B\u044F \u043E\u043A\u043E\u043D OpenCode, \u0437\u0430\u043F\u0443\u0449\u0435\u043D\u043D\u044B\u0445 \u0441 \u043C\u043E\u0434\u0435\u043B\u044C\u044E \xAB\u0410\u0432\u0442\u043E (Jev)\xBB (\u0437\u0430\u043F\u0443\u0441\u043A \u2192 \u0414\u043E\u043F\u043E\u043B\u043D\u0438\u0442\u0435\u043B\u044C\u043D\u043E \u2192 \u0410\u0441\u0441\u0438\u0441\u0442\u0435\u043D\u0442 CanvasTTY). \u041B\u043E\u043A\u0430\u043B\u044C\u043D\u044B\u0439 \u043C\u0430\u0440\u0448\u0440\u0443\u0442\u0438\u0437\u0430\u0442\u043E\u0440 \u043D\u0430 127.0.0.1 \u0441 \u043A\u043B\u044E\u0447\u043E\u043C \u043D\u0430 \u043A\u0430\u0436\u0434\u043E\u0435 \u043E\u043A\u043D\u043E \u043D\u0430 \u043A\u0430\u0436\u0434\u043E\u043C \u043D\u043E\u0432\u043E\u043C \u0445\u043E\u0434\u0435 \u0432\u044B\u0431\u0438\u0440\u0430\u0435\u0442 \u043E\u0434\u043D\u0443 \u0438\u0437 \u043C\u043E\u0434\u0435\u043B\u0435\u0439 \u043D\u0438\u0436\u0435: \u043D\u0430\u0441\u043A\u043E\u043B\u044C\u043A\u043E \u0445\u043E\u0434 \u0441\u043B\u043E\u0436\u043D\u044B\u0439, \u0440\u0435\u0448\u0430\u0435\u0442 Jev (\u0440\u0430\u0437\u0431\u043E\u0440 \u0437\u0430\u0434\u0430\u0447\u0438, \u043A\u043E\u0433\u0434\u0430 \u043E\u043D \u0432 \u0440\u0435\u0436\u0438\u043C\u0435 \xAB\u041F\u043E\u0434\u0441\u043A\u0430\u0437\u043A\u0438\xBB \u0438\u043B\u0438 \xAB\u0410\u0432\u0442\u043E\xBB \u0432\u044B\u0448\u0435), \u0438\u043D\u0430\u0447\u0435 \u0441\u043B\u043E\u0432\u0435\u0441\u043D\u044B\u0435 \u043F\u0440\u0430\u0432\u0438\u043B\u0430. \u0428\u0430\u0433\u0438 \u0441 \u0438\u043D\u0441\u0442\u0440\u0443\u043C\u0435\u043D\u0442\u0430\u043C\u0438 \u043E\u0441\u0442\u0430\u044E\u0442\u0441\u044F \u043D\u0430 \u043C\u043E\u0434\u0435\u043B\u0438 \u0445\u043E\u0434\u0430, \u0437\u0430\u0433\u043E\u043B\u043E\u0432\u043A\u0438 \u2014 \u043D\u0430 \u0441\u0430\u043C\u043E\u0439 \u0434\u0435\u0448\u0451\u0432\u043E\u0439. \u0417\u0430\u043F\u0440\u043E\u0441\u044B \u0443\u0445\u043E\u0434\u044F\u0442 \u0442\u043E\u043B\u044C\u043A\u043E \u043F\u043E\u0441\u0442\u0430\u0432\u0449\u0438\u043A\u0443, \u043A\u043E\u0442\u043E\u0440\u044B\u0439 \u043E\u0442\u0432\u0435\u0447\u0430\u0435\u0442; Jev \u043F\u043E\u043B\u0443\u0447\u0430\u0435\u0442 \u0442\u043E\u043B\u044C\u043A\u043E \u043F\u043E\u0441\u043B\u0435\u0434\u043D\u0438\u0439 \u0442\u0435\u043A\u0441\u0442 \u043F\u043E\u043B\u044C\u0437\u043E\u0432\u0430\u0442\u0435\u043B\u044F \u043F\u043E \u043F\u0440\u0430\u0432\u0438\u043B\u0430\u043C \u0434\u0430\u043D\u043D\u044B\u0445 \u043D\u0438\u0436\u0435. \u0412 \u043E\u043A\u043D\u0435 \u0437\u0430\u043F\u0443\u0441\u043A\u0430 \u043E\u0441\u0442\u0430\u0432\u044C\u0442\u0435 \xAB\u041C\u043E\u0434\u0435\u043B\u044C\xBB \u043F\u043E \u0443\u043C\u043E\u043B\u0447\u0430\u043D\u0438\u044E \u0438 \u043D\u0435 \u0432\u044B\u0431\u0438\u0440\u0430\u0439\u0442\u0435 \u0430\u043A\u043A\u0430\u0443\u043D\u0442 \u043C\u043E\u0434\u0435\u043B\u0438.",
+      lead: "\u0414\u043B\u044F \u043E\u043A\u043E\u043D OpenCode, \u0437\u0430\u043F\u0443\u0449\u0435\u043D\u043D\u044B\u0445 \u0441 \u043C\u043E\u0434\u0435\u043B\u044C\u044E \xAB\u0410\u0432\u0442\u043E (Jev)\xBB (\u0437\u0430\u043F\u0443\u0441\u043A \u2192 \u0414\u043E\u043F\u043E\u043B\u043D\u0438\u0442\u0435\u043B\u044C\u043D\u043E \u2192 \u0410\u0441\u0441\u0438\u0441\u0442\u0435\u043D\u0442 CanvasTTY). \u041B\u043E\u043A\u0430\u043B\u044C\u043D\u044B\u0439 \u043C\u0430\u0440\u0448\u0440\u0443\u0442\u0438\u0437\u0430\u0442\u043E\u0440 \u043D\u0430 127.0.0.1 \u0441 \u043A\u043B\u044E\u0447\u043E\u043C \u043D\u0430 \u043A\u0430\u0436\u0434\u043E\u0435 \u043E\u043A\u043D\u043E \u043D\u0430 \u043A\u0430\u0436\u0434\u043E\u043C \u043D\u043E\u0432\u043E\u043C \u0445\u043E\u0434\u0435 \u0432\u044B\u0431\u0438\u0440\u0430\u0435\u0442 \u043C\u043E\u0434\u0435\u043B\u044C \u043F\u043E \u0434\u0430\u043D\u043D\u044B\u043C: Jev (\u0440\u0430\u0437\u0431\u043E\u0440 \u0437\u0430\u0434\u0430\u0447\u0438, \u043A\u043E\u0433\u0434\u0430 \u043E\u043D \u0432 \u0440\u0435\u0436\u0438\u043C\u0435 \xAB\u041F\u043E\u0434\u0441\u043A\u0430\u0437\u043A\u0438\xBB \u0438\u043B\u0438 \xAB\u0410\u0432\u0442\u043E\xBB \u0432\u044B\u0448\u0435) \u043D\u0430\u0437\u044B\u0432\u0430\u0435\u0442 \u0442\u0438\u043F \u0437\u0430\u0434\u0430\u0447\u0438 \u0438 \u0441\u043B\u043E\u0436\u043D\u043E\u0441\u0442\u044C \u0445\u043E\u0434\u0430, \u0438\u043D\u0430\u0447\u0435 \u044D\u0442\u043E \u0434\u0435\u043B\u0430\u044E\u0442 \u0441\u043B\u043E\u0432\u0435\u0441\u043D\u044B\u0435 \u043F\u0440\u0430\u0432\u0438\u043B\u0430; \u0441\u0440\u0435\u0434\u0438 \u0440\u0430\u0437\u0440\u0435\u0448\u0451\u043D\u043D\u044B\u0445 \u0432\u0430\u043C\u0438 \u043C\u043E\u0434\u0435\u043B\u0435\u0439 \u0440\u0435\u0448\u0430\u044E\u0442 \u043E\u0446\u0435\u043D\u043A\u0430 \u0431\u0435\u043D\u0447\u043C\u0430\u0440\u043A\u0430 \u0434\u043B\u044F \u044D\u0442\u043E\u0433\u043E \u0442\u0438\u043F\u0430 \u0438\u0437 \u043A\u0430\u0442\u0430\u043B\u043E\u0433\u0430 \u0438 \u0446\u0435\u043D\u0430. \u0428\u0430\u0433\u0438 \u0441 \u0438\u043D\u0441\u0442\u0440\u0443\u043C\u0435\u043D\u0442\u0430\u043C\u0438 \u043E\u0441\u0442\u0430\u044E\u0442\u0441\u044F \u043D\u0430 \u043C\u043E\u0434\u0435\u043B\u0438 \u0445\u043E\u0434\u0430, \u0437\u0430\u0433\u043E\u043B\u043E\u0432\u043A\u0438 \u2014 \u043D\u0430 \u0441\u0430\u043C\u043E\u0439 \u0434\u0435\u0448\u0451\u0432\u043E\u0439. \u0417\u0430\u043F\u0440\u043E\u0441\u044B \u0443\u0445\u043E\u0434\u044F\u0442 \u0442\u043E\u043B\u044C\u043A\u043E \u043F\u043E\u0441\u0442\u0430\u0432\u0449\u0438\u043A\u0443, \u043A\u043E\u0442\u043E\u0440\u044B\u0439 \u043E\u0442\u0432\u0435\u0447\u0430\u0435\u0442; Jev \u043F\u043E\u043B\u0443\u0447\u0430\u0435\u0442 \u0442\u043E\u043B\u044C\u043A\u043E \u043F\u043E\u0441\u043B\u0435\u0434\u043D\u0438\u0439 \u0442\u0435\u043A\u0441\u0442 \u043F\u043E\u043B\u044C\u0437\u043E\u0432\u0430\u0442\u0435\u043B\u044F \u043F\u043E \u043F\u0440\u0430\u0432\u0438\u043B\u0430\u043C \u0434\u0430\u043D\u043D\u044B\u0445 \u043D\u0438\u0436\u0435. \u0412 \u043E\u043A\u043D\u0435 \u0437\u0430\u043F\u0443\u0441\u043A\u0430 \u043E\u0441\u0442\u0430\u0432\u044C\u0442\u0435 \xAB\u041C\u043E\u0434\u0435\u043B\u044C\xBB \u043F\u043E \u0443\u043C\u043E\u043B\u0447\u0430\u043D\u0438\u044E \u0438 \u043D\u0435 \u0432\u044B\u0431\u0438\u0440\u0430\u0439\u0442\u0435 \u0430\u043A\u043A\u0430\u0443\u043D\u0442 \u043C\u043E\u0434\u0435\u043B\u0438.",
+      catalog: "\u041A\u0430\u0442\u0430\u043B\u043E\u0433",
+      refresh: "\u041E\u0431\u043D\u043E\u0432\u0438\u0442\u044C \u0441\u0435\u0439\u0447\u0430\u0441",
+      refreshing: "\u041E\u0431\u043D\u043E\u0432\u043B\u044F\u044E\u2026",
+      catalogLead: "\u041F\u0443\u0431\u043B\u0438\u0447\u043D\u044B\u0435 \u0438\u0441\u0442\u043E\u0447\u043D\u0438\u043A\u0438 \u0441 \u0444\u0438\u043A\u0441\u0438\u0440\u043E\u0432\u0430\u043D\u043D\u044B\u0445 \u0430\u0434\u0440\u0435\u0441\u043E\u0432: models.dev (\u043C\u043E\u0434\u0435\u043B\u0438, \u0446\u0435\u043D\u044B, \u043F\u0440\u0435\u0434\u0435\u043B\u044B), Artificial Analysis \u0438 LiveBench (\u0438\u0437\u043C\u0435\u0440\u0435\u043D\u043D\u044B\u0435 \u043E\u0446\u0435\u043D\u043A\u0438 \u043F\u043E \u043C\u043E\u0434\u0435\u043B\u0438 \u0438 \u0443\u0440\u043E\u0432\u043D\u044E \u0440\u0430\u0441\u0441\u0443\u0436\u0434\u0435\u043D\u0438\u044F), \u0441\u043F\u0438\u0441\u043E\u043A \u043C\u043E\u0434\u0435\u043B\u0435\u0439 OpenRouter. \u0422\u0435\u043A\u0441\u0442 \u0437\u0430\u0434\u0430\u0447 \u0438 \u043A\u043B\u044E\u0447\u0438 \u043D\u0435 \u043E\u0442\u043F\u0440\u0430\u0432\u043B\u044F\u044E\u0442\u0441\u044F. \u041E\u0446\u0435\u043D\u043A\u0430 \u043E\u0442\u043D\u043E\u0441\u0438\u0442\u0441\u044F \u043A \u043E\u0434\u043D\u043E\u0439 \u0442\u043E\u0447\u043D\u043E\u0439 \u043C\u043E\u0434\u0435\u043B\u0438 \u0438 \u0443\u0440\u043E\u0432\u043D\u044E \u0440\u0430\u0441\u0441\u0443\u0436\u0434\u0435\u043D\u0438\u044F, \u0434\u0440\u0443\u0433\u0438\u043C \u043D\u0435 \u043F\u0435\u0440\u0435\u0434\u0430\u0451\u0442\u0441\u044F; \u043C\u043E\u0434\u0435\u043B\u044C \u0431\u0435\u0437 \u0441\u043E\u0431\u0441\u0442\u0432\u0435\u043D\u043D\u043E\u0439 \u0441\u0442\u0440\u043E\u043A\u0438 \u043E\u0441\u0442\u0430\u0451\u0442\u0441\u044F \u043D\u0435\u0438\u0437\u0432\u0435\u0441\u0442\u043D\u043E\u0439. \u0421\u0442\u0430\u0440\u044B\u0435 \u043E\u0446\u0435\u043D\u043A\u0438 \u0443\u0447\u0438\u0442\u044B\u0432\u0430\u044E\u0442\u0441\u044F (\u0441 \u043F\u043E\u043C\u0435\u0442\u043A\u043E\u0439), \u0446\u0435\u043D\u044B \u0441\u0442\u0430\u0440\u0448\u0435 7 \u0434\u043D\u0435\u0439 \u2014 \u043D\u0435\u0442.",
+      sourceName: { "models.dev": "models.dev", "artificial-analysis": "Artificial Analysis", livebench: "LiveBench", openrouter: "\u041C\u043E\u0434\u0435\u043B\u0438 OpenRouter" },
+      source: (s, date) => `${s.fetchedAt === null ? "\u043D\u0435 \u0437\u0430\u0433\u0440\u0443\u0436\u0435\u043D\u043E" : `\u0437\u0430\u0433\u0440\u0443\u0436\u0435\u043D\u043E ${date(s.fetchedAt)}`}${s.version ? `, v${s.version}` : ""}${s.rows ? s.measured ? `, \u0438\u0437\u043C\u0435\u0440\u0435\u043D\u043E ${s.measured} \u0441\u0442\u0440\u043E\u043A \u0438\u0437 ${s.rows}` : `, \u0441\u0442\u0440\u043E\u043A: ${s.rows}` : ""}${s.fetchedAt !== null && s.stale ? " \u2014 \u0443\u0441\u0442\u0430\u0440\u0435\u043B\u043E" : ""}${s.error ? ` \u2014 ${s.error}` : ""}`,
+      bundled: "\u0414\u043E \u043F\u0435\u0440\u0432\u043E\u0439 \u0437\u0430\u0433\u0440\u0443\u0437\u043A\u0438 \u0438\u0441\u043F\u043E\u043B\u044C\u0437\u0443\u044E\u0442\u0441\u044F \u043E\u0446\u0435\u043D\u043A\u0438, \u043F\u043E\u0441\u0442\u0430\u0432\u043B\u044F\u0435\u043C\u044B\u0435 \u0441 \u043F\u043B\u0430\u0433\u0438\u043D\u043E\u043C.",
+      next: (date) => `\u0421\u043B\u0435\u0434\u0443\u044E\u0449\u0435\u0435 \u0444\u043E\u043D\u043E\u0432\u043E\u0435 \u043E\u0431\u043D\u043E\u0432\u043B\u0435\u043D\u0438\u0435: ${date}.`,
+      noNext: "\u0424\u043E\u043D\u043E\u0432\u043E\u0435 \u043E\u0431\u043D\u043E\u0432\u043B\u0435\u043D\u0438\u0435 \u0432\u044B\u043A\u043B\u044E\u0447\u0435\u043D\u043E (\u0438\u043B\u0438 \u043D\u0435\u0442 \u0432\u043A\u043B\u044E\u0447\u0451\u043D\u043D\u043E\u0433\u043E \u043F\u043E\u0441\u0442\u0430\u0432\u0449\u0438\u043A\u0430).",
+      autoRefresh: "\u041E\u0431\u043D\u043E\u0432\u043B\u044F\u0442\u044C \u0432 \u0444\u043E\u043D\u0435",
+      every: "\u043A\u0430\u0436\u0434\u044B\u0435, \u0447\u0430\u0441\u043E\u0432",
+      lastError: (e) => `\u041F\u043E\u0441\u043B\u0435\u0434\u043D\u0435\u0435 \u043E\u0431\u043D\u043E\u0432\u043B\u0435\u043D\u0438\u0435: ${e}.`,
       upstreams: "\u041F\u043E\u0441\u0442\u0430\u0432\u0449\u0438\u043A\u0438",
       none: "\u041F\u043E\u043A\u0430 \u043D\u0435\u0442.",
       add: "\u0414\u043E\u0431\u0430\u0432\u0438\u0442\u044C",
@@ -115,32 +162,49 @@
       keyPlaceholder: "\u041A\u043B\u044E\u0447",
       saveKey: "\u0421\u043E\u0445\u0440\u0430\u043D\u0438\u0442\u044C \u043A\u043B\u044E\u0447",
       removeKey: "\u0423\u0434\u0430\u043B\u0438\u0442\u044C \u043A\u043B\u044E\u0447",
+      allModels: "\u041F\u0440\u0435\u0434\u043B\u0430\u0433\u0430\u0442\u044C \u0432\u0441\u0435 \u043F\u043E\u0434\u0445\u043E\u0434\u044F\u0449\u0438\u0435 \u043C\u043E\u0434\u0435\u043B\u0438 OpenRouter (\u0438\u043D\u0441\u0442\u0440\u0443\u043C\u0435\u043D\u0442\u044B, \u0442\u0435\u043A\u0441\u0442, \u0444\u0438\u043A\u0441\u0438\u0440\u043E\u0432\u0430\u043D\u043D\u0430\u044F \u0446\u0435\u043D\u0430; \u0431\u0435\u0437 \u0432\u0430\u0440\u0438\u0430\u043D\u0442\u043E\u0432 :free)",
+      waiting: "\u0421\u043F\u0438\u0441\u043E\u043A OpenRouter \u0435\u0449\u0451 \u043D\u0435 \u0437\u0430\u0433\u0440\u0443\u0436\u0435\u043D: \u043E\u0431\u043D\u043E\u0432\u0438\u0442\u0435 \u043A\u0430\u0442\u0430\u043B\u043E\u0433.",
       models: "\u041C\u043E\u0434\u0435\u043B\u0438",
       modelId: "Id \u043C\u043E\u0434\u0435\u043B\u0438",
+      filter: "\u0424\u0438\u043B\u044C\u0442\u0440",
+      scoreFor: "\u041E\u0446\u0435\u043D\u043A\u0430 \u0434\u043B\u044F",
+      type: { coding: "\u043A\u043E\u0434", review: "\u0440\u0435\u0432\u044C\u044E", research: "\u0438\u0441\u0441\u043B\u0435\u0434\u043E\u0432\u0430\u043D\u0438\u0435", writing: "\u0442\u0435\u043A\u0441\u0442\u044B", chat: "\u043E\u0431\u0449\u0435\u043D\u0438\u0435" },
+      col: { use: "\u0418\u0441\u043F.", model: "\u041C\u043E\u0434\u0435\u043B\u044C", context: "\u041A\u043E\u043D\u0442\u0435\u043A\u0441\u0442", price: "$/\u041C \u0432\u0445\u043E\u0434 \xB7 \u0432\u044B\u0445\u043E\u0434", score: "\u041E\u0446\u0435\u043D\u043A\u0430", efforts: "\u0418\u0437\u043C\u0435\u0440\u0435\u043D\u0430 \u043F\u0440\u0438", effort: "\u0420\u0430\u0441\u0441\u0443\u0436\u0434\u0435\u043D\u0438\u0435", tier: "\u0423\u0440\u043E\u0432\u0435\u043D\u044C", remove: "" },
       tier: { small: "\u043C\u0430\u043B\u0435\u043D\u044C\u043A\u0430\u044F", medium: "\u0441\u0440\u0435\u0434\u043D\u044F\u044F", large: "\u0431\u043E\u043B\u044C\u0448\u0430\u044F" },
+      tierAuto: "\u043F\u043E \u043E\u0446\u0435\u043D\u043A\u0435",
+      effortDefault: "\u043F\u043E \u0443\u043C\u043E\u043B\u0447\u0430\u043D\u0438\u044E",
+      unknown: "\u043D\u0435\u0438\u0437\u0432\u0435\u0441\u0442\u043D\u043E",
+      old: "\u0441\u0442\u0430\u0440\u0430\u044F",
+      fromPerson: "\u0432\u0430\u0448\u0430",
+      fromList: "OpenRouter",
+      fromDev: "models.dev",
+      shown: (shown, total) => `${shown} \u0438\u0437 ${total} \u043C\u043E\u0434\u0435\u043B\u0435\u0439`,
+      more: "\u041F\u043E\u043A\u0430\u0437\u0430\u0442\u044C \u0435\u0449\u0451",
       priceIn: "$/\u041C \u0432\u0445\u043E\u0434",
       priceOut: "$/\u041C \u0432\u044B\u0445\u043E\u0434",
       addModel: "\u0414\u043E\u0431\u0430\u0432\u0438\u0442\u044C \u043C\u043E\u0434\u0435\u043B\u044C",
       noModels: "\u041C\u043E\u0434\u0435\u043B\u0435\u0439 \u043D\u0435\u0442: \u0434\u043E\u0431\u0430\u0432\u044C\u0442\u0435 \u0445\u043E\u0442\u044F \u0431\u044B \u043E\u0434\u043D\u0443.",
+      tableHelp: "\u0426\u0435\u043D\u0430, \u043A\u043E\u043D\u0442\u0435\u043A\u0441\u0442 \u0438 \u043E\u0446\u0435\u043D\u043A\u0430 \u0431\u0435\u0440\u0443\u0442\u0441\u044F \u0438\u0437 \u043A\u0430\u0442\u0430\u043B\u043E\u0433\u0430 (\u0442\u043E\u043B\u044C\u043A\u043E \u0447\u0442\u0435\u043D\u0438\u0435). \u0421\u043D\u0438\u043C\u0438\u0442\u0435 \u043E\u0442\u043C\u0435\u0442\u043A\u0443, \u0447\u0442\u043E\u0431\u044B \u0438\u0441\u043A\u043B\u044E\u0447\u0438\u0442\u044C \u043C\u043E\u0434\u0435\u043B\u044C. \u0420\u0443\u0447\u043D\u043E\u0439 \u0443\u0440\u043E\u0432\u0435\u043D\u044C \u0434\u0430\u0451\u0442 \u043C\u043E\u0434\u0435\u043B\u0438 \u0445\u043E\u0434\u044B \u044D\u0442\u043E\u0433\u043E \u0443\u0440\u043E\u0432\u043D\u044F \u0432 \u043F\u0435\u0440\u0432\u0443\u044E \u043E\u0447\u0435\u0440\u0435\u0434\u044C; \u0443\u0440\u043E\u0432\u0435\u043D\u044C \u0440\u0430\u0441\u0441\u0443\u0436\u0434\u0435\u043D\u0438\u044F \u0443\u043A\u0430\u0437\u044B\u0432\u0430\u0435\u0442 \u043D\u0430\u0441\u0442\u0440\u043E\u0439\u043A\u0443, \u0441 \u043A\u043E\u0442\u043E\u0440\u043E\u0439 \u043E\u043D\u0430 \u0440\u0430\u0431\u043E\u0442\u0430\u0435\u0442 (\u043D\u0430 OpenRouter \xAB\u0410\u0432\u0442\u043E\xBB \u0435\u0433\u043E \u043E\u0442\u043F\u0440\u0430\u0432\u043B\u044F\u0435\u0442).",
       checkOk: (listed, missing) => `\u0420\u0430\u0431\u043E\u0442\u0430\u0435\u0442${listed !== null ? ` (\u043C\u043E\u0434\u0435\u043B\u0435\u0439 \u0432 \u0441\u043F\u0438\u0441\u043A\u0435: ${listed})` : ""}.${missing.length ? ` \u041D\u0435\u0442 \u0432 \u0435\u0433\u043E \u0441\u043F\u0438\u0441\u043A\u0435: ${missing.join(", ")}.` : ""}`,
       checkFail: (status2) => status2 === null ? "\u041D\u0435\u0442 \u043E\u0442\u0432\u0435\u0442\u0430 \u0438\u043B\u0438 \u043D\u0435 \u0441\u043E\u0445\u0440\u0430\u043D\u0451\u043D \u043A\u043B\u044E\u0447." : `\u041E\u0442\u0432\u0435\u0442: ${status2}.`,
       choices: "\u0412\u044B\u0431\u043E\u0440",
       preference: "\u041F\u0440\u0435\u0434\u043F\u043E\u0447\u0442\u0435\u043D\u0438\u0435",
       pref: { cheap: "\u0414\u0435\u0448\u0435\u0432\u043B\u0435", balanced: "\u0421\u0431\u0430\u043B\u0430\u043D\u0441\u0438\u0440\u043E\u0432\u0430\u043D\u043D\u043E", best: "\u041B\u0443\u0447\u0448\u0435" },
-      prefHelp: "\xAB\u0414\u0435\u0448\u0435\u0432\u043B\u0435\xBB \u2014 \u043D\u0430 \u0443\u0440\u043E\u0432\u0435\u043D\u044C \u043D\u0438\u0436\u0435 \u0438 \u0441\u043D\u0430\u0447\u0430\u043B\u0430 \u0441\u0430\u043C\u0430\u044F \u043D\u0438\u0437\u043A\u0430\u044F \u0446\u0435\u043D\u0430; \xAB\u041B\u0443\u0447\u0448\u0435\xBB \u2014 \u043D\u0430 \u0443\u0440\u043E\u0432\u0435\u043D\u044C \u0432\u044B\u0448\u0435 \u0438 \u0441\u043D\u0430\u0447\u0430\u043B\u0430 \u0441\u0430\u043C\u0430\u044F \u0432\u044B\u0441\u043E\u043A\u0430\u044F.",
-      cheaper: "\u0415\u0441\u043B\u0438 \u043D\u0430 \u0443\u0440\u043E\u0432\u043D\u0435 \u043D\u0435\u0442 \u0434\u043E\u0441\u0442\u0443\u043F\u043D\u043E\u0439 \u043C\u043E\u0434\u0435\u043B\u0438, \u043C\u043E\u0436\u0435\u0442 \u043E\u0442\u0432\u0435\u0442\u0438\u0442\u044C \u0431\u043E\u043B\u0435\u0435 \u0434\u0435\u0448\u0451\u0432\u0430\u044F (\u0441\u043D\u0430\u0447\u0430\u043B\u0430 \u0432\u0441\u0435\u0433\u0434\u0430 \u043F\u0440\u043E\u0431\u0443\u0435\u0442\u0441\u044F \u0431\u043E\u043B\u0435\u0435 \u0441\u0438\u043B\u044C\u043D\u0430\u044F)",
+      prefHelp: "\u041A\u0430\u0436\u0434\u044B\u0439 \u0445\u043E\u0434 \u043F\u043E\u043B\u0443\u0447\u0430\u0435\u0442 \u043B\u0443\u0447\u0448\u0443\u044E \u043E\u0446\u0435\u043D\u043A\u0443 \u0434\u043B\u044F \u0441\u0432\u043E\u0435\u0433\u043E \u0442\u0438\u043F\u0430 \u0437\u0430\u0434\u0430\u0447\u0438, \u043F\u0440\u0438 \u0440\u0430\u0432\u0435\u043D\u0441\u0442\u0432\u0435 \u2014 \u0431\u043E\u043B\u0435\u0435 \u0434\u0435\u0448\u0451\u0432\u0443\u044E \u043C\u043E\u0434\u0435\u043B\u044C. \u041F\u043E\u0436\u0435\u0440\u0442\u0432\u043E\u0432\u0430\u0442\u044C \u043E\u0446\u0435\u043D\u043A\u043E\u0439 \u0440\u0430\u0434\u0438 \u0446\u0435\u043D\u044B \u043C\u043E\u0436\u043D\u043E \u0442\u043E\u043B\u044C\u043A\u043E \u043D\u0430 \u0445\u043E\u0434\u0435, \u043A\u043E\u0442\u043E\u0440\u044B\u0439 Jev \u0443\u0432\u0435\u0440\u0435\u043D\u043D\u043E (\u2265 0,9) \u0441\u0447\u0438\u0442\u0430\u0435\u0442 \u043F\u0440\u043E\u0441\u0442\u044B\u043C: \xAB\u0414\u0435\u0448\u0435\u0432\u043B\u0435\xBB \u2014 \u0434\u043E 10 \u0431\u0430\u043B\u043B\u043E\u0432, \xAB\u0421\u0431\u0430\u043B\u0430\u043D\u0441\u0438\u0440\u043E\u0432\u0430\u043D\u043D\u043E\xBB \u2014 3, \xAB\u041B\u0443\u0447\u0448\u0435\xBB \u2014 \u043D\u0438\u0441\u043A\u043E\u043B\u044C\u043A\u043E. \u041D\u0435\u0438\u0437\u0432\u0435\u0441\u0442\u043D\u0430\u044F \u043E\u0446\u0435\u043D\u043A\u0430 \u043D\u0438\u043A\u043E\u0433\u0434\u0430 \u043D\u0435 \u043F\u043E\u0431\u0435\u0436\u0434\u0430\u0435\u0442 \u0438\u0437\u0432\u0435\u0441\u0442\u043D\u0443\u044E.",
+      cheaper: "\u0420\u0443\u0447\u043D\u044B\u0435 \u0443\u0440\u043E\u0432\u043D\u0438: \u0435\u0441\u043B\u0438 \u043D\u0430 \u0443\u0440\u043E\u0432\u043D\u0435 \u043D\u0435\u0442 \u0434\u043E\u0441\u0442\u0443\u043F\u043D\u043E\u0439 \u043C\u043E\u0434\u0435\u043B\u0438, \u043C\u043E\u0436\u0435\u0442 \u043E\u0442\u0432\u0435\u0442\u0438\u0442\u044C \u0431\u043E\u043B\u0435\u0435 \u0434\u0435\u0448\u0451\u0432\u044B\u0439 (\u0441\u043D\u0430\u0447\u0430\u043B\u0430 \u0432\u0441\u0435\u0433\u0434\u0430 \u043F\u0440\u043E\u0431\u0443\u0435\u0442\u0441\u044F \u0431\u043E\u043B\u0435\u0435 \u0441\u0438\u043B\u044C\u043D\u044B\u0439)",
       decider: "\u041A\u0442\u043E \u043E\u0446\u0435\u043D\u0438\u0432\u0430\u0435\u0442 \u0445\u043E\u0434",
       deciderJev: "Jev, \u0441\u043B\u043E\u0432\u0435\u0441\u043D\u044B\u0435 \u043F\u0440\u0430\u0432\u0438\u043B\u0430, \u0435\u0441\u043B\u0438 \u043E\u043D \u043D\u0435 \u043E\u0442\u0432\u0435\u0442\u0438\u043B",
       deciderRules: "\u0422\u043E\u043B\u044C\u043A\u043E \u0441\u043B\u043E\u0432\u0435\u0441\u043D\u044B\u0435 \u043F\u0440\u0430\u0432\u0438\u043B\u0430",
       daily: "\u041F\u0440\u0435\u0434\u0435\u043B \u0432 \u0434\u0435\u043D\u044C, USD",
       perCard: "\u041D\u0430 \u043E\u043A\u043D\u043E, USD",
-      capsHelp: "\u0421\u0447\u0438\u0442\u0430\u0435\u0442\u0441\u044F \u043F\u043E \u0441\u0442\u043E\u0438\u043C\u043E\u0441\u0442\u0438, \u043A\u043E\u0442\u043E\u0440\u0443\u044E \u0441\u043E\u043E\u0431\u0449\u0430\u0435\u0442 \u043F\u043E\u0441\u0442\u0430\u0432\u0449\u0438\u043A, \u0438\u043B\u0438 \u043F\u043E \u0432\u0432\u0435\u0434\u0451\u043D\u043D\u044B\u043C \u0446\u0435\u043D\u0430\u043C. 0 \u043E\u0441\u0442\u0430\u043D\u0430\u0432\u043B\u0438\u0432\u0430\u0435\u0442 \xAB\u0410\u0432\u0442\u043E\xBB.",
+      capsHelp: "\u0421\u0447\u0438\u0442\u0430\u0435\u0442\u0441\u044F \u043F\u043E \u0441\u0442\u043E\u0438\u043C\u043E\u0441\u0442\u0438, \u043A\u043E\u0442\u043E\u0440\u0443\u044E \u0441\u043E\u043E\u0431\u0449\u0430\u0435\u0442 \u043F\u043E\u0441\u0442\u0430\u0432\u0449\u0438\u043A, \u0438\u043B\u0438 \u043F\u043E \u0446\u0435\u043D\u0430\u043C \u043A\u0430\u0442\u0430\u043B\u043E\u0433\u0430. 0 \u043E\u0441\u0442\u0430\u043D\u0430\u0432\u043B\u0438\u0432\u0430\u0435\u0442 \xAB\u0410\u0432\u0442\u043E\xBB.",
       save: "\u0421\u043E\u0445\u0440\u0430\u043D\u0438\u0442\u044C",
       recent: "\u041F\u043E\u0441\u043B\u0435\u0434\u043D\u0438\u0435 \u0440\u0435\u0448\u0435\u043D\u0438\u044F",
       noRecent: "\u041F\u043E\u043A\u0430 \u043D\u0438\u0447\u0435\u0433\u043E \u043D\u0435 \u043C\u0430\u0440\u0448\u0440\u0443\u0442\u0438\u0437\u0438\u0440\u043E\u0432\u0430\u043D\u043E.",
       stats: (s) => `\u0412\u044B\u0437\u043E\u0432\u043E\u0432 \u043C\u043E\u0434\u0435\u043B\u0435\u0439: ${s.requests}, Jev \u0441\u043F\u0440\u043E\u0448\u0435\u043D ${s.jevAsked} \u0440\u0430\u0437 (\u043E\u0442\u0432\u0435\u0442\u0438\u043B ${s.jevAnswered}), \u0440\u0435\u0448\u0435\u043D\u0438\u0435 \u0445\u043E\u0434\u0430 \u043F\u043E\u0432\u0442\u043E\u0440\u043D\u043E: ${s.leaseReuses}, \u043F\u0435\u0440\u0435\u043A\u043B\u044E\u0447\u0435\u043D\u0438\u0439: ${s.failovers}; \u0441\u0435\u0433\u043E\u0434\u043D\u044F $${s.spentToday.toFixed(4)}; ${s.listening ? `\u0441\u043B\u0443\u0448\u0430\u0435\u0442, \u043E\u043A\u043E\u043D: ${s.cards}` : "\u043D\u0435 \u0441\u043B\u0443\u0448\u0430\u0435\u0442"}${s.hosts.length ? `; \u043E\u0442\u043F\u0440\u0430\u0432\u043B\u0435\u043D\u043E \u043D\u0430 ${s.hosts.join(", ")}` : ""}.`,
       kind: { turn: "\u0445\u043E\u0434", continuation: "\u0448\u0430\u0433 \u0438\u043D\u0441\u0442\u0440\u0443\u043C\u0435\u043D\u0442\u0430", small: "\u0437\u0430\u0433\u043E\u043B\u043E\u0432\u043E\u043A" },
-      source: { jev: "Jev", rules: "\u043F\u0440\u0430\u0432\u0438\u043B\u0430", lease: "\u0442\u043E\u0442 \u0436\u0435 \u0445\u043E\u0434", small: "\u043F\u0440\u0430\u0432\u0438\u043B\u043E \u043C\u0430\u043B\u0435\u043D\u044C\u043A\u043E\u0439" },
+      sourceOf: { jev: "Jev", rules: "\u043F\u0440\u0430\u0432\u0438\u043B\u0430", lease: "\u0442\u043E\u0442 \u0436\u0435 \u0445\u043E\u0434", small: "\u043F\u0440\u0430\u0432\u0438\u043B\u043E \u043C\u0430\u043B\u0435\u043D\u044C\u043A\u043E\u0439" },
+      why: { small_model: "\u0441\u0430\u043C\u0430\u044F \u0434\u0435\u0448\u0451\u0432\u0430\u044F", manual_tier: "\u0432\u0430\u0448 \u0443\u0440\u043E\u0432\u0435\u043D\u044C", best_score: "\u043B\u0443\u0447\u0448\u0430\u044F \u043E\u0446\u0435\u043D\u043A\u0430", cheaper_tie: "\u043B\u0443\u0447\u0448\u0430\u044F \u043E\u0446\u0435\u043D\u043A\u0430, \u0434\u0435\u0448\u0435\u0432\u043B\u0435", cheaper_within_loss: "\u0434\u0435\u0448\u0435\u0432\u043B\u0435, \u0432 \u043F\u0440\u0435\u0434\u0435\u043B\u0430\u0445 \u0434\u043E\u043F\u0443\u0441\u0442\u0438\u043C\u043E\u0439 \u043F\u043E\u0442\u0435\u0440\u0438", kept_turn_model: "\u043C\u043E\u0434\u0435\u043B\u044C \u0445\u043E\u0434\u0430", manual_tier_fallback: "\u0432\u0430\u0448\u0438 \u0443\u0440\u043E\u0432\u043D\u0438 (\u043E\u0446\u0435\u043D\u043E\u043A \u043D\u0435\u0442)", unknown_scores: "\u043E\u0446\u0435\u043D\u043E\u043A \u043D\u0435\u0442: \u0441\u0440\u0435\u0434\u043D\u044F\u044F \u0446\u0435\u043D\u0430", no_model: "\u043D\u0435\u0442 \u043C\u043E\u0434\u0435\u043B\u0438" },
       unreadable: "\u0421\u043E\u0445\u0440\u0430\u043D\u0451\u043D\u043D\u044B\u0435 \u043D\u0430\u0441\u0442\u0440\u043E\u0439\u043A\u0438 \xAB\u0410\u0432\u0442\u043E (Jev)\xBB \u0435\u0449\u0451 \u043D\u0435 \u043F\u0440\u043E\u0447\u0438\u0442\u0430\u043D\u044B; \u043F\u043E\u043A\u0430 \u0438\u0445 \u043D\u0435\u043B\u044C\u0437\u044F \u043C\u0435\u043D\u044F\u0442\u044C."
     }
   };
@@ -158,7 +222,10 @@
   var labelled = (label, control) => el("div", { className: "row" }, el("span", { className: "label", textContent: label }), control);
   var number = (value) => value.trim() === "" ? void 0 : Number(value);
   var isLocal = (url) => /^http:\/\/(?:127\.0\.0\.1|localhost|\[::1\])(?::\d+)?\//u.test(`${url}/`);
-  function renderAuto(state2, t2, page, checks) {
+  var usd = (value) => value === null ? "\u2014" : value >= 1 ? value.toFixed(2) : String(Math.round(value * 1e3) / 1e3);
+  var kTokens = (value) => value === null ? "\u2014" : value >= 1e6 ? `${Math.round(value / 1e5) / 10}M` : `${Math.round(value / 1e3)}k`;
+  var dateOf = (at) => new Date(at).toLocaleString(document.documentElement.lang || "en", { year: "numeric", month: "2-digit", day: "2-digit", hour: "2-digit", minute: "2-digit", hourCycle: "h23" });
+  function renderAuto(state2, t2, page, view) {
     const settings = state2.settings;
     const save2 = (change) => {
       const next = structuredClone(settings);
@@ -168,10 +235,11 @@
     const section = el("section", { className: "auto", dataset: { section: "auto" } });
     section.append(el("h2", { textContent: t2.title }), el("p", { className: "muted", textContent: t2.lead }));
     if (!state2.readable) section.append(el("p", { className: "muted", textContent: t2.unreadable }));
+    if (state2.catalog) section.append(catalogSection(state2.catalog, settings, t2, page, view, save2));
     section.append(el("h2", { textContent: t2.upstreams }));
     const list = el("ul", { className: "backends" });
     if (!settings.upstreams.length) list.append(el("li", { className: "muted", textContent: t2.none }));
-    for (const upstream of settings.upstreams) list.append(upstreamRow(upstream, state2, t2, page, save2, checks));
+    for (const upstream of settings.upstreams) list.append(upstreamRow(upstream, state2, t2, page, save2, view));
     section.append(list, addUpstream(settings, t2, save2));
     section.append(
       el("h2", { textContent: t2.choices }),
@@ -200,17 +268,65 @@
     section.append(el("h2", { textContent: t2.recent }), el("p", { className: "muted", textContent: t2.stats(state2.stats), dataset: { auto: "stats" } }));
     const recent = el("ul", { className: "recent", dataset: { auto: "recent" } });
     if (!state2.recent.length) recent.append(el("li", { className: "muted", textContent: t2.noRecent }));
-    for (const record of state2.recent.slice(0, 20)) {
-      const time = new Date(record.at).toLocaleTimeString(document.documentElement.lang || "en", { hour: "2-digit", minute: "2-digit", second: "2-digit", hourCycle: "h23" });
-      const tier = record.tier ? t2.tier[record.tier] : "\u2014";
-      const cost = record.costUsd === null ? "" : ` \xB7 $${record.costUsd.toFixed(5)}`;
-      const failovers = record.failovers.length ? ` \xB7 \u21B7${record.failovers.length}` : "";
-      recent.append(el("li", {}, `${time} \xB7 ${record.session} \xB7 ${t2.kind[record.kind] ?? record.kind} \xB7 ${tier} \xB7 `, el("code", { textContent: record.model ?? "\u2014" }), ` \xB7 ${t2.source[record.source] ?? record.source} (${record.reason}) \xB7 ${record.status}${failovers}${cost}`));
-    }
+    for (const record of state2.recent.slice(0, 20)) recent.append(recentRow(record, t2));
     section.append(recent);
     return section;
   }
-  function upstreamRow(upstream, state2, t2, page, save2, checks) {
+  function recentRow(record, t2) {
+    const time = new Date(record.at).toLocaleTimeString(document.documentElement.lang || "en", { hour: "2-digit", minute: "2-digit", second: "2-digit", hourCycle: "h23" });
+    const level = record.difficulty ?? record.tier;
+    const parts = [time, record.session, t2.kind[record.kind] ?? record.kind];
+    if (record.taskType) parts.push(t2.type[record.taskType] ?? record.taskType);
+    parts.push(`${level ? t2.tier[level] ?? level : "\u2014"}${typeof record.confidence === "number" ? ` (${record.confidence.toFixed(2)})` : ""}`);
+    const tail = [];
+    if (typeof record.score === "number") tail.push(`${record.score.toFixed(1)} ${record.scoreSource ?? ""}`.trim());
+    else if (record.model && record.why) tail.push(t2.unknown);
+    if (typeof record.priceIn === "number" || typeof record.priceOut === "number") tail.push(`$${usd(record.priceIn ?? null)}/$${usd(record.priceOut ?? null)}`);
+    tail.push(`${t2.sourceOf[record.source] ?? record.source} (${record.why ? t2.why[record.why] ?? record.why : record.reason})`);
+    tail.push(String(record.status));
+    if (record.failovers.length) tail.push(`\u21B7${record.failovers.length}`);
+    if (record.costUsd !== null) tail.push(`$${record.costUsd.toFixed(5)}`);
+    return el("li", {}, `${parts.join(" \xB7 ")} \xB7 `, el("code", { textContent: `${record.model ?? "\u2014"}${record.effort ? `@${record.effort}` : ""}` }), ` \xB7 ${tail.join(" \xB7 ")}`);
+  }
+  function catalogSection(status2, settings, t2, page, view, save2) {
+    const box = el("div", { dataset: { auto: "catalog" } });
+    box.append(el("h2", { textContent: t2.catalog }), el("p", { className: "muted", textContent: t2.catalogLead }));
+    const sources = el("ul", { className: "recent" });
+    for (const source of status2.sources) sources.append(el("li", { dataset: { source: source.id } }, el("strong", { textContent: t2.sourceName[source.id] ?? source.id }), ` \u2014 ${t2.source(source, dateOf)}`));
+    box.append(sources);
+    if (status2.bundled) box.append(el("p", { className: "muted", textContent: t2.bundled }));
+    if (status2.lastError) box.append(el("p", { className: "muted", textContent: t2.lastError(status2.lastError) }));
+    box.append(el("p", { className: "muted", textContent: status2.nextRefreshAt ? t2.next(dateOf(status2.nextRefreshAt)) : t2.noNext }));
+    const busy = view.refreshing || status2.refreshing;
+    const refresh = el("button", { type: "button", textContent: busy ? t2.refreshing : t2.refresh, name: "auto-catalog-refresh", disabled: busy });
+    refresh.addEventListener("click", () => {
+      view.refreshing = true;
+      page.reload();
+      page.request("auto.refreshCatalog").catch((error) => page.say(error instanceof Error ? error.message : String(error))).finally(() => {
+        view.refreshing = false;
+        page.reload();
+      });
+    });
+    const hours = el("input", { type: "number", name: "auto-catalog-hours", min: "1", max: "720", step: "1", value: String(settings.catalog.refreshHours) });
+    hours.addEventListener("change", () => {
+      const value = Math.round(Number(hours.value));
+      if (value >= 1 && value <= 720) save2((next) => {
+        next.catalog.refreshHours = value;
+      });
+    });
+    box.append(el(
+      "div",
+      { className: "row" },
+      refresh,
+      checkOf("auto-catalog-auto", settings.catalog.autoRefresh, t2.autoRefresh, (value) => save2((next) => {
+        next.catalog.autoRefresh = value;
+      })),
+      el("span", { textContent: t2.every }),
+      hours
+    ));
+    return box;
+  }
+  function upstreamRow(upstream, state2, t2, page, save2, view) {
     const edit = (change) => save2((next) => {
       change(next.upstreams.find((entry) => entry.id === upstream.id));
     });
@@ -219,14 +335,14 @@
     const trustOptions = [["D0", "D0"], ["D1", "D1"], ["D2", "D2"], ...isLocal(upstream.baseUrl) ? [["D3", "D3"]] : []];
     const check = el("button", { type: "button", textContent: t2.check, name: `auto-check-${upstream.id}` });
     check.addEventListener("click", () => {
-      checks.set(upstream.id, t2.checking);
+      view.checks.set(upstream.id, t2.checking);
       page.reload();
       page.request("auto.test", { upstreamId: upstream.id }).then((result2) => {
         const r = result2;
-        checks.set(upstream.id, r.ok ? t2.checkOk(r.listed, r.missing) : t2.checkFail(r.status));
+        view.checks.set(upstream.id, r.ok ? t2.checkOk(r.listed, r.missing) : t2.checkFail(r.status));
         page.reload();
       }, (error) => {
-        checks.set(upstream.id, error instanceof Error ? error.message : String(error));
+        view.checks.set(upstream.id, error instanceof Error ? error.message : String(error));
         page.reload();
       });
     });
@@ -280,45 +396,148 @@
       keyRow.append(input, saveKey, removeKey);
     }
     item.append(keyRow);
-    const models = el("ul", { className: "recent" });
-    if (!upstream.models.length) models.append(el("li", { className: "muted", textContent: t2.noModels }));
-    for (const model of upstream.models) {
-      const drop = el("button", { type: "button", textContent: t2.remove });
-      drop.addEventListener("click", () => edit((entry) => {
-        entry.models = entry.models.filter((other) => other.id !== model.id);
-      }));
-      const prices = model.priceIn !== void 0 || model.priceOut !== void 0 ? ` \xB7 $${model.priceIn ?? 0}/$${model.priceOut ?? 0}` : "";
-      models.append(el(
-        "li",
-        { className: "row", dataset: { model: model.id } },
-        el("code", { textContent: model.id }),
-        selectOf(`auto-tier-${upstream.id}-${model.id}`, model.tier, ["small", "medium", "large"].map((tier2) => [tier2, t2.tier[tier2]]), (value) => edit((entry) => {
-          entry.models.find((other) => other.id === model.id).tier = value;
-        })),
-        el("span", { className: "muted", textContent: prices }),
-        drop
-      ));
+    if (upstream.preset === "openrouter") {
+      item.append(checkOf(`auto-all-${upstream.id}`, upstream.allModels, t2.allModels, (value) => edit((entry) => {
+        entry.allModels = value;
+      })));
+      if (state2.waitingForList?.includes(upstream.id)) item.append(el("p", { className: "muted", textContent: t2.waiting }));
+    }
+    item.append(modelTable(upstream, state2.models?.[upstream.id] ?? null, t2, page, edit, view));
+    const result = view.checks.get(upstream.id);
+    if (result) item.append(el("div", { className: "check-result", textContent: result, dataset: { result: upstream.id } }));
+    return item;
+  }
+  function setOverride(entry, id, fromList, change) {
+    let model = entry.models.find((other) => other.id === id);
+    if (!model) {
+      model = { id };
+      entry.models.push(model);
+    }
+    change(model);
+    if (fromList && Object.keys(model).length === 1) entry.models = entry.models.filter((other) => other !== model);
+  }
+  function modelTable(upstream, rows, t2, page, edit, view) {
+    const box = el("div", { className: "models", dataset: { models: upstream.id } });
+    const all = rows ?? upstream.models.map((model) => ({
+      id: model.id,
+      listed: true,
+      fromList: false,
+      excluded: (upstream.excluded ?? []).includes(model.id),
+      tier: model.tier ?? null,
+      effort: model.effort ?? null,
+      priceIn: model.priceIn ?? null,
+      priceOut: model.priceOut ?? null,
+      priceSource: model.priceIn !== void 0 || model.priceOut !== void 0 ? "person" : null,
+      context: model.context ?? null,
+      known: false,
+      measuredEfforts: [],
+      scores: {}
+    }));
+    const filter = view.filter.get(upstream.id) ?? "";
+    const query = filter.trim().toLowerCase();
+    const matching = query ? all.filter((row2) => row2.id.toLowerCase().includes(query)) : all;
+    const shownCount = Math.min(matching.length, view.shown.get(upstream.id) ?? PAGE);
+    const filterInput = el("input", { name: `auto-filter-${upstream.id}`, placeholder: t2.filter, value: filter });
+    filterInput.addEventListener("change", () => {
+      view.filter.set(upstream.id, filterInput.value);
+      view.shown.delete(upstream.id);
+      page.reload();
+    });
+    const typeSelect = selectOf(`auto-score-type-${upstream.id}`, view.type, TYPES.map((type) => [type, t2.type[type]]), (value) => {
+      view.type = value;
+      page.reload();
+    });
+    box.append(el(
+      "div",
+      { className: "row" },
+      el("span", { className: "label", textContent: t2.models }),
+      filterInput,
+      el("span", { textContent: t2.scoreFor }),
+      typeSelect,
+      el("span", { className: "muted", textContent: t2.shown(shownCount, matching.length) })
+    ));
+    box.append(el("p", { className: "muted", textContent: t2.tableHelp }));
+    if (!all.length) box.append(el("p", { className: "muted", textContent: t2.noModels }));
+    else {
+      const table = el("table", { className: "model-table" });
+      const head = el("tr");
+      for (const label of [t2.col.use, t2.col.model, t2.col.context, t2.col.price, t2.col.score, t2.col.efforts, t2.col.effort, t2.col.tier, t2.col.remove]) head.append(el("th", { textContent: label }));
+      table.append(el("thead", {}, head));
+      const body = el("tbody");
+      for (const row2 of matching.slice(0, shownCount)) {
+        const use = el("input", { type: "checkbox", checked: !row2.excluded, name: `auto-use-${upstream.id}-${row2.id}` });
+        use.addEventListener("change", () => edit((entry) => {
+          entry.excluded = use.checked ? entry.excluded.filter((id2) => id2 !== row2.id) : [.../* @__PURE__ */ new Set([...entry.excluded, row2.id])];
+        }));
+        const score = row2.scores[view.type];
+        const priceFrom = row2.priceSource === "person" ? t2.fromPerson : row2.priceSource === "openrouter" ? t2.fromList : row2.priceSource === "models.dev" ? t2.fromDev : "";
+        const efforts = upstream.preset === "openrouter" ? row2.measuredEfforts : [...EFFORTS];
+        const effortSelect = selectOf(
+          `auto-effort-${upstream.id}-${row2.id}`,
+          row2.effort ?? "",
+          [["", t2.effortDefault], ...[.../* @__PURE__ */ new Set([...row2.effort ? [row2.effort] : [], ...efforts])].map((effort) => [effort, effort])],
+          (value) => edit((entry) => setOverride(entry, row2.id, row2.fromList, (model) => {
+            if (value) model.effort = value;
+            else delete model.effort;
+          }))
+        );
+        const tierSelect = selectOf(
+          `auto-tier-${upstream.id}-${row2.id}`,
+          row2.tier ?? "",
+          [["", t2.tierAuto], ...["small", "medium", "large"].map((tier2) => [tier2, t2.tier[tier2]])],
+          (value) => edit((entry) => setOverride(entry, row2.id, row2.fromList, (model) => {
+            if (value) model.tier = value;
+            else delete model.tier;
+          }))
+        );
+        const drop = el("button", { type: "button", textContent: t2.remove, name: `auto-drop-${upstream.id}-${row2.id}` });
+        drop.addEventListener("click", () => edit((entry) => {
+          entry.models = entry.models.filter((other) => other.id !== row2.id);
+        }));
+        body.append(el(
+          "tr",
+          { dataset: { model: row2.id } },
+          el("td", {}, use),
+          el("td", {}, el("code", { textContent: row2.id })),
+          el("td", { textContent: kTokens(row2.context) }),
+          el("td", { textContent: row2.priceIn === null && row2.priceOut === null ? t2.unknown : `${usd(row2.priceIn)} \xB7 ${usd(row2.priceOut)}${priceFrom ? ` (${priceFrom})` : ""}` }),
+          el("td", { textContent: score ? `${score.value.toFixed(1)}${score.effort ? ` @${score.effort}` : ""} \xB7 ${score.label}${score.historical ? ` \xB7 ${t2.old}` : ""}` : t2.unknown }),
+          el("td", { textContent: row2.measuredEfforts.join(", ") || "\u2014" }),
+          el("td", {}, effortSelect),
+          el("td", {}, tierSelect),
+          el("td", {}, row2.listed && !row2.fromList ? drop : "")
+        ));
+      }
+      table.append(body);
+      box.append(el("div", { className: "table-wrap" }, table));
+      if (shownCount < matching.length) {
+        const more = el("button", { type: "button", textContent: t2.more, name: `auto-more-${upstream.id}` });
+        more.addEventListener("click", () => {
+          view.shown.set(upstream.id, shownCount + PAGE);
+          page.reload();
+        });
+        box.append(more);
+      }
     }
     const id = el("input", { name: `auto-model-id-${upstream.id}`, placeholder: t2.modelId });
-    const tier = selectOf(`auto-model-tier-${upstream.id}`, "medium", ["small", "medium", "large"].map((value) => [value, t2.tier[value]]), () => void 0);
+    const tier = selectOf(`auto-model-tier-${upstream.id}`, "", [["", t2.tierAuto], ...["small", "medium", "large"].map((value) => [value, t2.tier[value]])], () => void 0);
     const priceIn = el("input", { type: "number", min: "0", step: "0.01", placeholder: t2.priceIn, name: `auto-price-in-${upstream.id}` });
     const priceOut = el("input", { type: "number", min: "0", step: "0.01", placeholder: t2.priceOut, name: `auto-price-out-${upstream.id}` });
     const add = el("button", { type: "button", textContent: t2.addModel, name: `auto-add-model-${upstream.id}` });
     add.addEventListener("click", () => {
       const modelId = id.value.trim();
       if (!modelId) return;
-      const model = { id: modelId, tier: tier.value };
+      const model = { id: modelId };
+      if (tier.value) model.tier = tier.value;
       const pin = number(priceIn.value), pout = number(priceOut.value);
       if (pin !== void 0) model.priceIn = pin;
       if (pout !== void 0) model.priceOut = pout;
       edit((entry) => {
-        entry.models.push(model);
+        if (!entry.models.some((other) => other.id === modelId)) entry.models.push(model);
       });
     });
-    item.append(el("div", {}, el("span", { className: "label", textContent: t2.models }), models), el("div", { className: "add" }, id, tier, priceIn, priceOut, add));
-    const result = checks.get(upstream.id);
-    if (result) item.append(el("div", { className: "check-result", textContent: result, dataset: { result: upstream.id } }));
-    return item;
+    box.append(el("div", { className: "add" }, id, tier, priceIn, priceOut, add));
+    return box;
   }
   function addUpstream(settings, t2, save2) {
     const form = el("div", { className: "add" });
@@ -331,7 +550,7 @@
     const add = el("button", { type: "button", textContent: t2.add, name: "auto-add-upstream" });
     add.addEventListener("click", () => {
       const kind = preset.value;
-      const entry = { id: id.value.trim(), preset: kind, baseUrl: kind === "openrouter" ? OPENROUTER : url.value.trim(), trust: "D1", key: "own", models: [], enabled: true };
+      const entry = { id: id.value.trim(), preset: kind, baseUrl: kind === "openrouter" ? OPENROUTER : url.value.trim(), trust: "D1", key: "own", models: [], allModels: kind === "openrouter", excluded: [], enabled: true };
       save2((next) => {
         next.upstreams.push(entry);
       });
@@ -457,7 +676,7 @@
   var autoStrings = AUTO_PAGE_STRINGS.en;
   var state = null;
   var autoState = null;
-  var autoChecks = /* @__PURE__ */ new Map();
+  var autoView = newAutoView();
   var root = document.querySelector("#app");
   var status = document.querySelector("#status");
   var PRESETS = [
@@ -707,7 +926,7 @@
         reload: () => {
           void load().catch((error) => say(errorText(error)));
         }
-      }, autoChecks)] : []
+      }, autoView)] : []
     );
   }
   host2.onContext(({ appearance }) => {

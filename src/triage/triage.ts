@@ -26,6 +26,8 @@ export interface Triage {
   difficultyBand: Band | null;
   /** Probability of the top difficulty level (design decisions). */
   p3: number;
+  /** The difficulty answer's probability per level (lowest first), whatever its band; null without one. */
+  difficultyProbabilities: number[] | null;
   /** In the auto band only. */
   scope: string | null;
   destructive: number; outsideProject: number; networkPublish: number; secrets: number;
@@ -56,7 +58,7 @@ export function readTriage(answers: Readonly<Record<string, S1Answer>>, bands: R
   }
   const scope = answers.scope?.type === 'choice' && bands.scope === 'auto' ? answers.scope.choice : null;
   return {
-    kind, kindBand, category, difficulty, difficultyBand, p3, scope,
+    kind, kindBand, category, difficulty, difficultyBand, p3, difficultyProbabilities: score ? [...score.probabilities] : null, scope,
     destructive: p(answers, 'destructive'), outsideProject: p(answers, 'outside_project'), networkPublish: p(answers, 'network_publish'), secrets: p(answers, 'secrets'),
     untrusted: p(answers, 'untrusted_input'), parallel: p(answers, 'parallelizable'), underspecified: p(answers, 'underspecified')
   };

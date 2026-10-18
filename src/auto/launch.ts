@@ -2,8 +2,9 @@ import { randomBytes } from 'node:crypto';
 import { existsSync, readFileSync, statSync } from 'node:fs';
 import { dirname, join, resolve } from 'node:path';
 import { classRank, type DataClass, type DataClassMode } from '../shared/settings.ts';
-import { limitsOf, upstreamAllowed } from './classify.ts';
+import { upstreamAllowed } from './classify.ts';
 import type { AutoRefusal } from './i18n.ts';
+import { median, type Inventory } from './inventory.ts';
 import { DEFAULT_CONTEXT, DEFAULT_OUTPUT, type AutoRoutingSettings } from './settings.ts';
 
 /**
@@ -91,15 +92,19 @@ export interface AutoLaunchInput {
   dataClass: DataClass;
   settings: AutoRoutingSettings;
   mode: DataClassMode;
+  /** What Auto may choose from now (see inventory.ts). */
+  inventory: Inventory;
 }
 
 /** Why this launch cannot use Auto, or null. Never waits on the network. */
 export function autoRefusal(input: AutoLaunchInput): AutoRefusal | null {
   if (input.provider !== 'opencode') return 'provider';
   if (input.environment && !LOCAL_ENVIRONMENT_KINDS.includes(input.environment.kind)) return 'environment';
-  const usable = input.settings.upstreams.filter(upstream => upstream.enabled && upstream.models.length > 0);
-  if (!usable.length || input.settings.dailyUsdCap <= 0 || input.settings.perCardUsdCap <= 0) return 'noUpstream';
-  if (!usable.some(upstream => upstreamAllowed(upstream, input.dataClass, input.mode))) return 'dataClass';
+  const offered = input.inventory.entries.filter(entry => entry.upstream.enabled && !entry.excluded);
+  const waiting = input.inventory.waitingForList.some(id => input.settings.upstreams.find(upstream => upstream.id === id)?.enabled);
+  if (input.settings.dailyUsdCap <= 0 || input.settings.perCardUsdCap <= 0) return 'noUpstream';
+  if (!offered.length) return waiting ? 'listLoading' : 'noUpstream';
+  if (!offered.some(entry => upstreamAllowed(entry.upstream, input.dataClass, input.mode))) return 'dataClass';
   const project = projectModelConfig(input.cwd);
   if (project.unreadable) return 'projectUnreadable';
   if (project.found) return 'project';
@@ -114,17 +119,40 @@ export function clampClass(requested: DataClass, parent: DataClass | null): Data
 export const ROUTER_KEY_ENV = 'CTTY_JEV_ROUTER_KEY';
 
 /** The contribution for an OpenCode launch: its config file, the per-launch key and the model argument. */
-export function openCodeContribution(input: { port: number; token: string; settings: AutoRoutingSettings; providerId?: string }): { env: Record<string, string>; args: string[]; files: Array<{ relPath: string; content: string }>; thirdPartyModel: true } {
+/**
+ * The context and output the CLI is told it may use. A person's own short list: the smallest across it (every model
+ * must take every turn). With OpenRouter's whole list: the median context of the models Auto prefers (scored or
+ * manually tiered), since the router sends a long turn only to models whose context holds it; output stays at the
+ * default (a model with a known smaller output limit is skipped for larger requests).
+ */
+export function limitsFor(inventory: Inventory): { context: number; output: number } {
+  const offered = inventory.entries.filter(entry => entry.upstream.enabled && !entry.excluded);
+  const contexts = (list: typeof offered): number[] => list.map(entry => entry.context).filter((value): value is number => typeof value === 'number');
+  const outputs = offered.map(entry => entry.output).filter((value): value is number => typeof value === 'number');
+  if (offered.every(entry => entry.listed)) {
+    const known = contexts(offered);
+    return { context: known.length ? Math.min(...known) : DEFAULT_CONTEXT, output: outputs.length ? Math.min(...outputs) : DEFAULT_OUTPUT };
+  }
+  // One context per model (its effort variants share it).
+  const seen = new Set<string>();
+  const preferred = offered.filter(entry => (entry.tier !== null || Object.keys(entry.scores).length > 0) && !seen.has(`${entry.upstream.id}|${entry.model}`) && !!seen.add(`${entry.upstream.id}|${entry.model}`));
+  const context = median(contexts(preferred.length ? preferred : offered)) ?? DEFAULT_CONTEXT;
+  return { context: Math.max(16_384, Math.min(context, 1_000_000)), output: DEFAULT_OUTPUT };
+}
+
+export function openCodeContribution(input: { port: number; token: string; limit: { context: number; output: number }; providerId?: string }): { env: Record<string, string>; args: string[]; files: Array<{ relPath: string; content: string }>; thirdPartyModel: true } {
   // A random provider id per launch: a project's config cannot target it.
   const id = input.providerId ?? `ctty-jev-${randomBytes(3).toString('hex')}`;
-  const limit = limitsOf(input.settings, { context: DEFAULT_CONTEXT, output: DEFAULT_OUTPUT });
+  const limit = input.limit;
+  const keyReference = `{env:${ROUTER_KEY_ENV}}`;
   const config = {
     $schema: 'https://opencode.ai/config.json',
     provider: {
       [id]: {
         npm: '@ai-sdk/openai-compatible',
         name: 'Auto (Jev)',
-        options: { baseURL: `http://127.0.0.1:${input.port}/v1`, apiKey: `{env:${ROUTER_KEY_ENV}}` },
+        // OpenCode substitutes the per-launch key from the environment: the file never holds it.
+        options: { baseURL: `http://127.0.0.1:${input.port}/v1`, apiKey: keyReference },
         models: {
           auto: { name: 'Auto (Jev)', tool_call: true, limit },
           'auto-small': { name: 'Auto (Jev) small', tool_call: true, limit }

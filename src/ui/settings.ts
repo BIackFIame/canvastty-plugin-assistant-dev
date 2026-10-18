@@ -5,7 +5,7 @@
 import type { AssistantBackendPreset, AssistantBackendSettings, AssistantBackendStatus, AssistantCheckResult, AssistantSettings } from '../shared/settings.ts';
 import type { RecentReview } from '../review/reviewService.ts';
 import { applyAppearance, whenIdle, type Appearance } from './common.ts';
-import { AUTO_PAGE_STRINGS, renderAuto, type AutoState } from './autoRouting.ts';
+import { AUTO_PAGE_STRINGS, newAutoView, renderAuto, type AutoState } from './autoRouting.ts';
 
 interface PluginHost {
   onContext(listener: (context: { appearance: Appearance }) => void): void;
@@ -68,7 +68,7 @@ let autoStrings = AUTO_PAGE_STRINGS.en;
 let state: State | null = null;
 let autoState: AutoState | null = null;
 /** The last «Проверить» result per Auto upstream, until the page reloads. */
-const autoChecks = new Map<string, string>();
+const autoView = newAutoView();
 const root = document.querySelector('#app')!;
 const status = document.querySelector('#status')!;
 
@@ -296,7 +296,7 @@ function render(): void {
       deleteSecret: key => host.secrets.delete(key),
       say,
       reload: () => { void load().catch(error => say(errorText(error))); }
-    }, autoChecks)] : [])
+    }, autoView)] : [])
   );
 }
 

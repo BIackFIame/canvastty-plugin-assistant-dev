@@ -3,8 +3,12 @@ import type { Host } from '../rpc.ts';
 import type { Locale } from '../harness/i18n.ts';
 import type { Badge } from '../harness/badges.ts';
 import type { DataClass, DataClassMode } from '../shared/settings.ts';
+import bundledCatalog from './catalog/bundled.json' with { type: 'json' };
+import { CatalogStore, type CatalogStatus } from './catalog/catalog.ts';
+import { BenchmarkIndex, TASK_TYPES, type TaskType } from './catalog/scoring.ts';
 import { AUTO_STRINGS, badgeText } from './i18n.ts';
-import { autoRefusal, openCodeContribution } from './launch.ts';
+import { buildInventory, type Inventory, type InventoryEntry } from './inventory.ts';
+import { autoRefusal, limitsFor, openCodeContribution } from './launch.ts';
 import { AutoRouter, type DecisionRecord, type RouterDeps, type RouterStats, type TurnDecision } from './router.ts';
 import {
   JEV_OPENROUTER_SECRET, normalizeAutoSettings, originOf, upstreamSecret, validateAutoSettings,
@@ -34,8 +38,31 @@ export interface AutoServiceOptions {
   decide?(text: string, grant: LaunchGrant, signal: AbortSignal): Promise<TurnDecision | null>;
   publishBadge(sessionId: string, badge: Badge | null): void;
   transport?: typeof fetch;
+  /** For the public catalog downloads (tests pass a fake; nothing else may reach the network). */
+  catalogTransport?: typeof fetch;
+  /** The first background catalog refresh waits this long after start (default 20 s). */
+  catalogStartDelayMs?: number;
   now?: () => number;
   timeouts?: RouterDeps['timeouts'];
+}
+
+/** One model of an upstream as the decision models page shows it (read-only facts plus the person's choices). */
+export interface ModelRow {
+  id: string;
+  listed: boolean;
+  /** OpenRouter's own list offers it. */
+  fromList: boolean;
+  excluded: boolean;
+  tier: string | null;
+  effort: string | null;
+  priceIn: number | null;
+  priceOut: number | null;
+  priceSource: InventoryEntry['priceSource'];
+  context: number | null;
+  known: boolean;
+  measuredEfforts: string[];
+  /** The best variant's score per task type (null: unknown), and that variant's effort. */
+  scores: Partial<Record<TaskType, { value: number; effort: string | null; label: string; historical: boolean }>>;
 }
 
 export interface AutoPrepareInput {
@@ -50,16 +77,28 @@ export class AutoService {
   settings: AutoRoutingSettings;
   readable: boolean;
   readonly router: AutoRouter;
+  readonly catalog: CatalogStore;
   private readonly options: AutoServiceOptions;
+  private memo: { settings: AutoRoutingSettings; version: number; hour: number; inventory: Inventory } | null = null;
+  private index: { version: number; hour: number; index: BenchmarkIndex } | null = null;
 
   constructor(options: AutoServiceOptions) {
     this.options = options;
     this.readable = options.savedUnavailable !== true;
     this.settings = normalizeAutoSettings(this.readable ? options.saved : null);
     const strings = AUTO_STRINGS[options.locale];
+    this.catalog = new CatalogStore({
+      directory: join(options.dataDir, 'auto'), bundled: bundledCatalog,
+      ...(options.catalogTransport ? { transport: options.catalogTransport } : {}),
+      ...(options.now ? { now: options.now } : {}),
+      ...(options.catalogStartDelayMs !== undefined ? { startDelayMs: options.catalogStartDelayMs } : {}),
+      onChange: () => { this.memo = null; }
+    });
+    this.configureCatalog();
     this.router = new AutoRouter({
       directory: join(options.dataDir, 'auto'),
       settings: () => this.settings,
+      inventory: () => this.inventory(),
       dataClassMode: options.dataClassMode,
       key: upstream => this.keyFor(upstream),
       ...(options.decide ? { decide: options.decide } : {}),
@@ -80,12 +119,36 @@ export class AutoService {
     return stored.origin === originOf(upstream.baseUrl) ? stored.value : null;
   }
 
-  loaded(saved: unknown): void { this.settings = normalizeAutoSettings(saved); this.readable = true; }
+  loaded(saved: unknown): void { this.settings = normalizeAutoSettings(saved); this.readable = true; this.configureCatalog(); }
+
+  /** Background refresh only while an upstream is on; OpenRouter's list only when an OpenRouter upstream uses it. */
+  private configureCatalog(): void {
+    const enabled = this.settings.upstreams.filter(upstream => upstream.enabled);
+    this.catalog.configure({
+      autoRefresh: this.settings.catalog.autoRefresh && enabled.length > 0,
+      refreshHours: this.settings.catalog.refreshHours,
+      openRouter: enabled.some(upstream => upstream.preset === 'openrouter' && upstream.allModels)
+    });
+  }
+
+  /** The models Auto may choose from, rebuilt when the settings or the catalog change (and hourly, for staleness). */
+  inventory(): Inventory {
+    const hour = Math.floor((this.options.now ?? Date.now)() / 3_600_000);
+    const memo = this.memo;
+    if (memo && memo.settings === this.settings && memo.version === this.catalog.version && memo.hour === hour) return memo.inventory;
+    const routing = this.catalog.routing();
+    if (!this.index || this.index.version !== this.catalog.version || this.index.hour !== hour) this.index = { version: this.catalog.version, hour, index: new BenchmarkIndex(routing) };
+    const inventory = buildInventory(this.settings, routing, this.index.index);
+    this.memo = { settings: this.settings, version: this.catalog.version, hour, inventory };
+    return inventory;
+  }
 
   /** `model: "auto"` for this launch: refuse with a reason, or the contribution with a fresh key. Never waits on a model. */
   async prepare(input: AutoPrepareInput): Promise<AutoPrepareAnswer> {
     const strings = AUTO_STRINGS[this.options.locale];
-    const refusal = autoRefusal({ provider: input.provider, role: input.role, cwd: input.cwd, environment: input.environment, dataClass: input.dataClass, settings: this.settings, mode: this.options.dataClassMode() });
+    const inventory = this.inventory();
+    const refusal = autoRefusal({ provider: input.provider, role: input.role, cwd: input.cwd, environment: input.environment, dataClass: input.dataClass, settings: this.settings, mode: this.options.dataClassMode(), inventory });
+    if (refusal === 'listLoading') void this.catalog.refresh().catch(() => undefined);
     if (refusal) return { refuse: { reason: strings[refusal] } };
     let granted: { token: string; port: number };
     try {
@@ -94,7 +157,7 @@ export class AutoService {
       this.options.host.log('warn', `Auto (Jev): no local port (${error instanceof Error ? error.message.slice(0, 120) : 'error'})`);
       return { refuse: { reason: strings.router } };
     }
-    return openCodeContribution({ port: granted.port, token: granted.token, settings: this.settings });
+    return openCodeContribution({ port: granted.port, token: granted.token, limit: limitsFor(inventory) });
   }
 
   /** For `route`: the launch options that give a subagent Auto too, when the caller itself runs on it. */
@@ -104,17 +167,47 @@ export class AutoService {
 
   sessionClosed(sessionId: string): void { this.router.closeSession(sessionId); }
   sessionsKnown(ids: ReadonlySet<string>): void { this.router.retainSessions(ids); }
-  resume(): Promise<void> { return this.router.resume(); }
-  stop(): Promise<void> { return this.router.stop(); }
+  /** Service start: the catalog caches are read, and cards that still hold keys get their listener back. */
+  async resume(): Promise<void> { await this.catalog.load(); await this.router.resume(); }
+  stop(): Promise<void> { this.catalog.dispose(); return this.router.stop(); }
+
+  /** «Обновить каталог»: downloads every source now (fixed public addresses; no task text, no key). */
+  async refreshCatalog(): Promise<CatalogStatus> {
+    try { await this.catalog.refresh({ force: true }); } catch { /* the status says what failed */ }
+    return this.catalog.status();
+  }
+
+  /** Each upstream's models for the page: one row per model id, the best variant's score per task type. */
+  modelRows(): Record<string, ModelRow[]> {
+    const rows: Record<string, ModelRow[]> = {};
+    const byModel = new Map<string, ModelRow>();
+    for (const entry of this.inventory().entries) {
+      const key = `${entry.upstream.id}|${entry.model}`;
+      let row = byModel.get(key);
+      if (!row) {
+        const person = entry.upstream.models.find(model => model.id === entry.model);
+        row = { id: entry.model, listed: entry.listed, fromList: entry.fromList, excluded: entry.excluded, tier: entry.tier, effort: person?.effort ?? null, priceIn: entry.priceIn, priceOut: entry.priceOut,
+          priceSource: entry.priceSource, context: entry.context, known: entry.known, measuredEfforts: entry.measuredEfforts, scores: {} };
+        byModel.set(key, row);
+        (rows[entry.upstream.id] ??= []).push(row);
+      }
+      for (const type of TASK_TYPES) {
+        const score = entry.scores[type];
+        if (score && (!row.scores[type] || score.value > row.scores[type]!.value)) row.scores[type] = { value: score.value, effort: entry.effort, label: score.label, historical: score.historical };
+      }
+    }
+    for (const list of Object.values(rows)) list.sort((a, b) => Number(b.listed) - Number(a.listed) || (b.scores.coding?.value ?? b.scores.chat?.value ?? -1) - (a.scores.coding?.value ?? a.scores.chat?.value ?? -1) || a.id.localeCompare(b.id));
+    return rows;
+  }
 
   // ---------------------------------------------------------------------------------------------------------------
   // The decision models page
   // ---------------------------------------------------------------------------------------------------------------
 
-  async state(): Promise<{ settings: AutoRoutingSettings; readable: boolean; keys: Record<string, boolean>; recent: DecisionRecord[]; stats: RouterStats & { spentToday: number; listening: boolean; cards: number } }> {
+  async state(): Promise<{ settings: AutoRoutingSettings; readable: boolean; keys: Record<string, boolean>; recent: DecisionRecord[]; stats: RouterStats & { spentToday: number; listening: boolean; cards: number }; catalog: CatalogStatus; models: Record<string, ModelRow[]>; waitingForList: string[] }> {
     const keys: Record<string, boolean> = {};
     for (const upstream of this.settings.upstreams) keys[upstream.id] = upstream.key === 'none' ? true : !!(await this.keyFor(upstream).catch(() => null));
-    return { settings: this.settings, readable: this.readable, keys, recent: this.router.recent(), stats: this.router.statsView() };
+    return { settings: this.settings, readable: this.readable, keys, recent: this.router.recent(), stats: this.router.statsView(), catalog: this.catalog.status(), models: this.modelRows(), waitingForList: this.inventory().waitingForList };
   }
 
   async save(value: unknown): Promise<AutoRoutingSettings> {
@@ -122,6 +215,7 @@ export class AutoService {
     const next = validateAutoSettings(value);
     await this.options.host.callHost('storage.set', { key: AUTO_STORAGE_KEY, value: next });
     this.settings = next;
+    this.configureCatalog();
     this.options.host.emit('settings', null);
     return next;
   }

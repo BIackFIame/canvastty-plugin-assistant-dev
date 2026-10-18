@@ -11,6 +11,9 @@ import { dirname, join } from 'node:path';
 import test from 'node:test';
 import { manifestForCore } from './helpers/core-manifest.mjs';
 import { startFakeUpstream } from './helpers/fake-upstream.mjs';
+import { aaHtml, livebenchCategories, livebenchCsv, modelsDev } from './helpers/catalog-fixtures.mjs';
+import { normalizeArtificialAnalysis } from '../src/auto/catalog/artificialAnalysis.ts';
+import { normalizeBenchmarks, normalizeModels, RATINGS_CACHE_FILE } from '../src/auto/catalog/catalog.ts';
 
 const core = process.env.CANVASTTY_REPO;
 const root = new URL('../', import.meta.url).pathname;
@@ -129,13 +132,21 @@ test('Model: Auto (Jev) through CanvasTTY: install, launch an OpenCode card, rou
   terminals.configureLaunchPipeline(new LaunchPipeline({
     contributors: () => manager.launchContributors(), call, secret: async (_pluginId, key) => secrets.get(key) ?? null, runsRoot
   }));
+  // A catalog the service already downloaded (fresh, so nothing is due: the service fetches nothing).
+  const catalogAt = Date.now() - 60_000;
+  const { models: catalogModels, providers } = normalizeModels(modelsDev());
+  await mkdir(join(userData, 'plugin-data', 'canvastty-assistant', 'auto'), { recursive: true });
+  await writeFile(join(userData, 'plugin-data', 'canvastty-assistant', 'auto', RATINGS_CACHE_FILE), JSON.stringify({
+    version: 2, fetchedAt: catalogAt, modelsFetchedAt: catalogAt, models: catalogModels, providers, sourceErrors: {},
+    benchmarks: [...normalizeArtificialAnalysis(aaHtml(), catalogAt), ...normalizeBenchmarks(livebenchCsv(), livebenchCategories(), '2026-10-01', catalogAt)]
+  }));
   await supervisor.sync(manager.trustedServiceSpecs());
   await waitFor(() => sessions.subscribers.size === 1);
 
   // The person configures an upstream on the Decision models page.
   await supervisor.request('canvastty-assistant', 'assistant', 'auto.save', { settings: {
     upstreams: [{ id: 'fake', preset: 'openai-compatible', baseUrl: upstream.url, trust: 'D2', key: 'own', enabled: true, models: [{ id: 'vendor/small', tier: 'small' }, { id: 'vendor/medium', tier: 'medium' }, { id: 'vendor/large', tier: 'large' }] }],
-    preference: 'balanced', cheaperFallback: false, decider: 'rules', dailyUsdCap: 1, perCardUsdCap: 0.5
+    preference: 'balanced', cheaperFallback: false, decider: 'rules', dailyUsdCap: 1, perCardUsdCap: 0.5, catalog: { autoRefresh: false, refreshHours: 168 }
   } });
   assert.equal((await manager.storageGet('canvastty-assistant', 'autoRouting')).upstreams[0].id, 'fake');
   const state = await supervisor.request('canvastty-assistant', 'assistant', 'auto.state', {});
@@ -196,4 +207,29 @@ test('Model: Auto (Jev) through CanvasTTY: install, launch an OpenCode card, rou
   const stats = await supervisor.request('canvastty-assistant', 'assistant', 'auto.state', {});
   assert.deepEqual(stats.stats.hosts, [`127.0.0.1:${upstream.port}`]);
   assert.ok(stats.recent.every(record => !JSON.stringify(record).includes('typo')), 'no text in the decisions');
+
+  // From data: the person lists model ids without tiers; the service scores them from its catalog cache and the
+  // router picks the best coding score (alpha-1 at high effort, 57.5) over a cheaper one (beta-2, 55) and an unknown one.
+  await supervisor.request('canvastty-assistant', 'assistant', 'auto.save', { settings: {
+    upstreams: [{ id: 'fake', preset: 'openai-compatible', baseUrl: upstream.url, trust: 'D2', key: 'own', enabled: true,
+      models: [{ id: 'vendor/beta-2', priceIn: 0.5, priceOut: 2 }, { id: 'vendor/alpha-1', effort: 'high', priceIn: 1, priceOut: 4 }, { id: 'vendor/mystery', priceIn: 0.01, priceOut: 0.01 }] }],
+    preference: 'best', cheaperFallback: false, decider: 'rules', dailyUsdCap: 1, perCardUsdCap: 0.5, catalog: { autoRefresh: false, refreshHours: 168 }
+  } });
+  const scored = await supervisor.request('canvastty-assistant', 'assistant', 'auto.state', {});
+  assert.equal(scored.catalog.bundled, false, 'the cache, not the bundled snapshot');
+  assert.equal(scored.catalog.sources.find(source => source.id === 'artificial-analysis').fetchedAt, catalogAt);
+  assert.deepEqual(scored.models.fake.map(row => [row.id, row.scores.coding?.value ?? null]), [['vendor/alpha-1', 57.5], ['vendor/beta-2', 55], ['vendor/mystery', null]]);
+  const dataCard = terminals.create({ provider: 'opencode', cwd: project, profile: 'normal', position: { x: 0, y: 0 }, role: 'agent', title: 'Data', launchOptions: { 'canvastty-assistant': { model: 'auto' } } });
+  const dataStarted = await waitFor(() => spawned.find(entry => entry.options?.env?.CTTY_JEV_ROUTER_KEY && ![token, childKey].includes(entry.options.env.CTTY_JEV_ROUTER_KEY)));
+  const dataConfig = JSON.parse(readFileSync(dataStarted.options.env.OPENCODE_CONFIG, 'utf8'));
+  const dataPort = Number(/127\.0\.0\.1:(\d+)/u.exec(Object.values(dataConfig.provider)[0].options.baseURL)[1]);
+  const routed2 = await fetch(`http://127.0.0.1:${dataPort}/v1/chat/completions`, { method: 'POST', headers: { authorization: `Bearer ${dataStarted.options.env.CTTY_JEV_ROUTER_KEY}`, 'content-type': 'application/json' }, body: JSON.stringify({ model: 'auto', stream: true, messages: [{ role: 'user', content: 'Fix the failing parser test' }] }) });
+  assert.equal(routed2.status, 200);
+  await routed2.text();
+  assert.equal(upstream.posts().at(-1).model, 'vendor/alpha-1');
+  assert.equal(upstream.posts().at(-1).json.reasoning, undefined, 'an OpenAI-compatible upstream gets no effort field: the effort only names its setting');
+  const decided = (await supervisor.request('canvastty-assistant', 'assistant', 'auto.state', {})).recent[0];
+  assert.deepEqual([decided.taskType, decided.difficulty, decided.model, decided.score, decided.why, decided.priceIn], ['coding', 'medium', 'vendor/alpha-1', 57.5, 'best_score', 1]);
+  assert.ok(!JSON.stringify(decided).includes('parser'), 'no text in the decision');
+  terminals.dispose(dataCard.id);
 });

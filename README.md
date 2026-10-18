@@ -113,16 +113,33 @@ model account (an account and Auto on one launch are refused: both configure Ope
   config are not used. A project whose own OpenCode config chooses models or providers is refused instead (OpenCode
   lets the project config win). Containers and remote hosts are refused (they cannot reach this computer's
   127.0.0.1); other CLIs come later.
-- **Decision**: for each new user turn, Jev (task triage, while it is Suggest or Auto on the Decision models page)
-  judges the latest user text within 2.5 s; otherwise word rules decide. simple/normal/hard → small/medium/large,
-  shifted by your preference (cheap −1, best +1). Tool steps keep the turn's model; titles and summaries use the
-  cheapest model and ask nobody — about one decision per turn, not per model call.
-- **Upstreams** (Decision models page): OpenRouter (its own key or the Jev · OpenRouter key) and any OpenAI-compatible
-  base URL with a key and exact model ids, each with a tier, optional prices and your trust (D0–D2; D3 only for a
-  server on this computer). Keys are write-only, bound to the upstream's address. The request is passed on with only
-  `model` changed; a 404/408/409/425/429/5xx, a connect error or a timeout **before the first byte** moves to the next
-  model and cools the failed one down (429 honours `Retry-After`); a bad request (400) is returned; a stream that
-  fails midway ends with an error and is never replayed.
+- **Decision, from data**: for each new user turn, Jev (task triage, while it is Suggest or Auto on the Decision models
+  page) reads the latest user text within 2.5 s and returns the **task type** (coding, review, research, writing,
+  chat) and the **difficulty** (small, medium, large); "small" needs ≥ 0.9 probability on the two easiest levels,
+  otherwise it is medium. Without Jev, word rules give both (never "sure"). Among the models you allow that are
+  healthy now (not cooling down, trusted with the card's data class, large enough for the request, within the caps),
+  the one with the best **catalog score for that task type** answers; on a tie the cheaper one. Only a turn Jev is
+  sure is small may give up score for price: **Cheap** up to 10 points, **Balanced** 3, **Best** none. A model with
+  no score never beats one with a score; when nothing has a score, your manual tiers decide, else the known model of
+  middle price. Tool steps keep the turn's model; titles and summaries use the cheapest model and ask nobody — about
+  one decision per turn, not per model call. Each decision is logged with type, difficulty, model, effort, score and
+  its source, price and a reason code — no text.
+- **Catalog**: models.dev (models, prices, limits), Artificial Analysis and LiveBench (measured scores per exact model
+  and effort) and OpenRouter's model list, read from fixed HTTPS addresses (no task text, no key), cached on disk and
+  refreshed in the background (weekly; OpenRouter's list daily) while an upstream is on, or with **Refresh now**. A
+  score belongs to one exact model and effort and never moves to another variant; a model without its own row stays
+  unknown. Old scores still count (marked old); prices older than 7 days are not compared. Measured rows ship with the
+  plugin for a computer that never went online.
+- **Upstreams** (Decision models page): **OpenRouter** (its own key or the Jev · OpenRouter key) offers its whole list of
+  suitable models (tools, text, a fixed price; no `:free` variants) with OpenRouter's context and prices; a model with
+  measured efforts is offered at each of them, and Auto sends that effort (`reasoning.effort`) unless the CLI set one.
+  **OpenAI-compatible** base URLs take your exact model ids; prices come from models.dev when it lists that address,
+  or from you. Each model row shows its context, price and score (read-only), with an exclude toggle and an optional
+  manual tier and effort. Your trust per upstream: D0–D2; D3 only for a server on this computer. Keys are write-only,
+  bound to the upstream's address. The request is passed on with only `model` changed (plus the effort above); a
+  404/408/409/425/429/5xx, a connect error or a timeout **before the first byte** moves to the next model and cools the
+  failed one down (429 honours `Retry-After`); a bad request (400) is returned; a stream that fails midway ends with an
+  error and is never replayed.
 - **Caps**: per card and per day in USD, held before each call so parallel calls cannot pass them; counted from the
   cost the upstream reports (OpenRouter does) or your prices. A spent cap answers 402.
 - **Subagents**: `route` hands an orchestrator on Auto `launchOptions: {"canvastty-assistant": {"model": "auto"}}` for

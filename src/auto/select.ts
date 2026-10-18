@@ -1,0 +1,199 @@
+import type { Difficulty } from '../harness/router.ts';
+import type { Triage } from '../triage/triage.ts';
+import type { TaskType } from './catalog/scoring.ts';
+import { blendedPrice, type InventoryEntry } from './inventory.ts';
+import { AUTO_TIERS, type AutoPreference, type AutoTier } from './settings.ts';
+
+/**
+ * How Auto (Jev) picks a model for a turn, from data:
+ *
+ * 1. The turn: its task type (coding, review, research, writing, chat) and difficulty level (small, medium, large),
+ *    from Jev's task triage or, when Jev does not answer, from word rules. "Small" from Jev needs confidence ≥ 0.9
+ *    (the probability of the two lowest difficulty levels); anything less is medium. Rules are never "confident".
+ * 2. Candidates: the models the person allows (all a configured upstream offers, minus the excluded ones) that are
+ *    healthy now (not cooling down, trusted with the card's data class, context large enough, within the caps).
+ * 3. A model with a manual tier answers turns of its tier first (the person's explicit choice wins over data).
+ * 4. The others by score: the catalog score for the turn's task type, in one comparable cohort. The preference sets
+ *    how many points of score may be given up for a lower price, and only on a confidently small turn
+ *    (cheap 10, balanced 3, best 0); every other turn takes the best score. Within what is allowed: the cheaper one,
+ *    then the lower effort, then the higher score. Ties are equal scores: the cheaper one wins.
+ * 5. Unknown scores never compete with known ones. When nothing is scored: manual tiers, else the known model of
+ *    middle price (the catalog knows the model and its price), never simply the cheapest.
+ *
+ * Writing has no Artificial Analysis score; when no candidate has a score for the turn's type, the overall ("chat")
+ * score is used, and the decision says so.
+ */
+
+export type Level = 'small' | 'medium' | 'large';
+export const SMALL_CONFIDENCE = 0.9;
+/** Points (0–100) of score the preference may give up for price on a confidently small turn. */
+export const QUALITY_LOSS: Readonly<Record<AutoPreference, number>> = { best: 0, balanced: 3, cheap: 10 };
+
+/** Jev's (or the rules') view of one turn. */
+export interface TurnDecision {
+  difficulty: Difficulty;
+  /** Design-level work (the top difficulty level is likely). */
+  strong: boolean;
+  /** Null: Jev did not say (below its confidence band); the word rules name the type. */
+  type?: TaskType | null;
+  /** Probability that the turn is in the two lowest difficulty levels (needed for "small"). */
+  confidence?: number | null;
+}
+
+export interface TurnView {
+  type: TaskType;
+  typeFrom: 'jev' | 'rules';
+  level: Level;
+  /** Jev, at ≥ 0.9: the only case where the preference may give up score for price. */
+  confident: boolean;
+  confidence: number | null;
+  difficulty: Difficulty;
+  strong: boolean;
+}
+
+const KIND_TYPE: Readonly<Record<string, TaskType>> = {
+  code_change: 'coding', debug: 'coding', operations: 'coding', review: 'review', research: 'research', writing: 'writing', other: 'chat', unclear: 'chat'
+};
+
+/** Jev's task triage answers → the turn decision (type only inside its confidence band). */
+export function decisionFromTriage(triage: Pick<Triage, 'kind' | 'kindBand' | 'difficulty' | 'p3'> & { difficultyProbabilities?: number[] | null }, strongAt: number): TurnDecision {
+  const probabilities = triage.difficultyProbabilities ?? null;
+  const confidence = probabilities && probabilities.length >= 2 ? Math.round(((probabilities[0] ?? 0) + (probabilities[1] ?? 0)) * 1_000) / 1_000 : null;
+  return {
+    difficulty: triage.difficulty, strong: triage.p3 >= strongAt,
+    type: triage.kind !== null && triage.kindBand === 'auto' ? KIND_TYPE[triage.kind] ?? 'chat' : null,
+    confidence
+  };
+}
+
+const REVIEW = /\b(?:review|audit|look over|code review)\b|ревью|аудит|проверь (?:код|изменения|дифф|pr)/iu;
+const WRITING = /\b(?:readme|changelog|release notes|documentation|docs|blog post|article|e-?mail|letter|commit message|pr description)\b|документаци|ченджлог|статью|письмо|описание (?:pr|пулл?-?реквеста)|текст для/iu;
+const CODING = /\b(?:fix|implement|refactor|rename|bug|tests?|function|class|method|compile|build|endpoint|migrat\w*|deadlock|race|crash|stack trace|typescript|python|code)\b|исправ|реализ|рефактор|переименуй|функци|класс|баг|ошибк|тест|код|сборк|падает/iu;
+const RESEARCH = /\b(?:explain|why|how does|what is|research|investigate|compare|find out|look up|summari[sz]e)\b|объясни|почему|как работает|что такое|исследуй|сравни|разберись|выясни/iu;
+
+/** Word rules for the task type (used when Jev does not answer, or is not sure of the type). */
+export function ruleTaskType(text: string): TaskType {
+  const sample = text.slice(0, 4_000);
+  if (REVIEW.test(sample)) return 'review';
+  if (WRITING.test(sample)) return 'writing';
+  if (CODING.test(sample)) return 'coding';
+  if (RESEARCH.test(sample)) return 'research';
+  return 'chat';
+}
+
+export function turnView(decision: TurnDecision, from: 'jev' | 'rules', text: string): TurnView {
+  const confidence = from === 'jev' && typeof decision.confidence === 'number' && Number.isFinite(decision.confidence) ? Math.max(0, Math.min(1, decision.confidence)) : null;
+  let level: Level;
+  if (decision.strong || decision.difficulty === 'hard') level = 'large';
+  else if (decision.difficulty === 'simple' && (from === 'rules' || (confidence ?? 0) >= SMALL_CONFIDENCE)) level = 'small';
+  else level = 'medium';
+  const type = from === 'jev' && decision.type ? decision.type : ruleTaskType(text);
+  return {
+    type, typeFrom: from === 'jev' && decision.type ? 'jev' : 'rules', level,
+    confident: from === 'jev' && level === 'small' && (confidence ?? 0) >= SMALL_CONFIDENCE,
+    confidence, difficulty: level === 'small' ? 'simple' : level === 'large' ? 'hard' : 'normal', strong: decision.strong
+  };
+}
+
+/** A level (and design-level work) → a manual tier, shifted by the preference (cheap −1, best +1), clamped. */
+export function tierFor(difficulty: Difficulty, strong: boolean, preference: AutoPreference): AutoTier {
+  const base: Record<Difficulty, AutoTier> = { simple: 'small', normal: 'medium', hard: 'large' };
+  let index = AUTO_TIERS.indexOf(strong ? 'large' : base[difficulty]);
+  if (preference === 'cheap') index -= 1;
+  if (preference === 'best') index += 1;
+  return AUTO_TIERS[Math.max(0, Math.min(AUTO_TIERS.length - 1, index))]!;
+}
+
+const comparePrice = (a: InventoryEntry, b: InventoryEntry): number => {
+  const x = blendedPrice(a), y = blendedPrice(b);
+  if (x === null || y === null) return (x === null ? 1 : 0) - (y === null ? 1 : 0);
+  return x - y;
+};
+const EFFORT_RANK = ['none', 'minimal', 'low', 'medium', 'high', 'xhigh', 'max', 'ultra'];
+const effortRank = (entry: InventoryEntry): number => entry.effort ? EFFORT_RANK.indexOf(entry.effort) : -1;
+
+/**
+ * Manually tiered models, as the tier rules always ordered them: the tier's own models (cheap: lowest price first;
+ * best: highest first; balanced: the person's order), then stronger tiers, then — only when the person allows it —
+ * cheaper ones.
+ */
+export function manualOrder(entries: readonly InventoryEntry[], tier: AutoTier, options: { preference: AutoPreference; cheaperFallback: boolean; cheapest?: boolean }): InventoryEntry[] {
+  const ofTier = (wanted: AutoTier): InventoryEntry[] => {
+    const list = entries.filter(entry => entry.tier === wanted);
+    const order = options.cheapest ? 'cheap' : options.preference;
+    if (order === 'balanced') return list;
+    return list.map((entry, index) => ({ entry, index }))
+      .sort((a, b) => {
+        const x = blendedPrice(a.entry), y = blendedPrice(b.entry);
+        return (x === null ? 1 : 0) - (y === null ? 1 : 0) || (x === null || y === null ? 0 : order === 'cheap' ? x - y : y - x) || a.index - b.index;
+      })
+      .map(item => item.entry);
+  };
+  const at = AUTO_TIERS.indexOf(tier);
+  const order: AutoTier[] = [tier, ...AUTO_TIERS.slice(at + 1), ...(options.cheaperFallback || options.cheapest ? AUTO_TIERS.slice(0, at).reverse() : [])];
+  return order.flatMap(ofTier);
+}
+
+export type SelectionReason = 'small_model' | 'manual_tier' | 'best_score' | 'cheaper_tie' | 'cheaper_within_loss' | 'kept_turn_model' | 'manual_tier_fallback' | 'unknown_scores' | 'no_model';
+
+export interface Plan {
+  list: InventoryEntry[];
+  why: SelectionReason;
+  /** The task type whose scores were compared (the turn's, or "chat" when nothing had one for it). */
+  scoredAs: TaskType | null;
+  best: number | null;
+  loss: number;
+}
+
+/** The known-good model of middle price first: the catalog knows it and its price; then the rest by price. */
+function conservative(entries: readonly InventoryEntry[]): InventoryEntry[] {
+  const good = entries.filter(entry => entry.known && blendedPrice(entry) !== null);
+  const prices = good.map(entry => blendedPrice(entry)!).sort((a, b) => a - b);
+  const middle = prices.length ? prices[Math.floor((prices.length - 1) / 2)]! : null;
+  const ordered = middle === null ? [] : [...good].sort((a, b) => Math.abs(blendedPrice(a)! - middle) - Math.abs(blendedPrice(b)! - middle) || comparePrice(b, a) || a.key.localeCompare(b.key));
+  return [...ordered, ...entries.filter(entry => !ordered.includes(entry)).sort((a, b) => comparePrice(a, b) || a.key.localeCompare(b.key))];
+}
+
+/**
+ * The models to try for a request, best first (the router tries them in order until one answers). `usable` holds
+ * only candidates that may take this request now (enabled, not excluded, trusted, not cooling down, large enough).
+ */
+export function plan(usable: readonly InventoryEntry[], request: { kind: 'small' } | { kind: 'turn' | 'continuation'; view: TurnView; preferred: string | null }, options: { preference: AutoPreference; cheaperFallback: boolean }): Plan {
+  if (!usable.length) return { list: [], why: 'no_model', scoredAs: null, best: null, loss: 0 };
+  if (request.kind === 'small') {
+    // Titles and summaries: the cheapest priced model at its default (or lowest) effort, no Jev.
+    const list = [...usable].sort((a, b) => comparePrice(a, b) || effortRank(a) - effortRank(b) || a.key.localeCompare(b.key));
+    return { list, why: 'small_model', scoredAs: null, best: null, loss: 0 };
+  }
+  const { view } = request;
+  const manual = usable.filter(entry => entry.tier !== null);
+  const auto = usable.filter(entry => entry.tier === null);
+  const tier = tierFor(view.difficulty, view.strong, options.preference);
+  const manualList = manualOrder(manual, tier, { preference: options.preference, cheaperFallback: options.cheaperFallback });
+  const manualFirst = manualList.filter(entry => entry.tier === tier);
+  const manualRest = manualList.filter(entry => entry.tier !== tier);
+  const scoredAs: TaskType = auto.some(entry => entry.scores[view.type]) ? view.type : 'chat';
+  const scored = auto.filter(entry => entry.scores[scoredAs]);
+  const value = (entry: InventoryEntry): number => entry.scores[scoredAs]!.value;
+  const best = scored.length ? Math.max(...scored.map(value)) : null;
+  const loss = view.level === 'small' && view.confident ? QUALITY_LOSS[options.preference] : 0;
+  const eligible = best === null ? [] : scored.filter(entry => value(entry) >= best - loss - 1e-9)
+    .sort((a, b) => comparePrice(a, b) || effortRank(a) - effortRank(b) || value(b) - value(a) || a.key.localeCompare(b.key));
+  const others = scored.filter(entry => !eligible.includes(entry)).sort((a, b) => value(b) - value(a) || comparePrice(a, b) || a.key.localeCompare(b.key));
+  const unknown = conservative(auto.filter(entry => !entry.scores[scoredAs]));
+  let list = [...manualFirst, ...eligible, ...others, ...manualRest, ...unknown];
+  let why: SelectionReason = manualFirst.length ? 'manual_tier'
+    : eligible.length ? (value(eligible[0]!) >= best! - 1e-9 ? (eligible.filter(entry => value(entry) >= best! - 1e-9).length > 1 ? 'cheaper_tie' : 'best_score') : 'cheaper_within_loss')
+      : manualRest.length ? 'manual_tier_fallback' : 'unknown_scores';
+  // The turn's model stays for its tool steps (and a new turn of the same kind keeps the upstream's prompt cache warm
+  // when that model is among the first choices anyway).
+  if (request.preferred) {
+    const kept = list.find(entry => entry.key === request.preferred);
+    const firstGroup = manualFirst.length ? manualFirst : eligible.length ? eligible : list;
+    if (kept && (request.kind === 'continuation' || firstGroup.includes(kept))) {
+      if (kept !== list[0]) why = request.kind === 'continuation' ? 'kept_turn_model' : why;
+      list = [kept, ...list.filter(entry => entry !== kept)];
+    }
+  }
+  return { list, why, scoredAs: scored.length ? scoredAs : null, best, loss };
+}

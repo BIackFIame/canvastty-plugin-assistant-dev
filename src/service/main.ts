@@ -61,6 +61,7 @@ serve({
     'auto.save': async params => (await ready).auto.save(params.settings),
     'auto.keySlot': async params => (await ready).auto.keySlot(str(params.upstreamId)),
     'auto.test': async params => (await ready).auto.test(str(params.upstreamId)),
+    'auto.refreshCatalog': async () => (await ready).auto.refreshCatalog(),
     // The Flow preview and Task board cards.
     'harness.view': async () => (await ready).harness.view(),
     'flows.choices': async params => (await ready).harness.flowChoices(str(params.orchestratorId)),
