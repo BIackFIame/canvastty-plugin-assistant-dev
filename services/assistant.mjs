@@ -11485,6 +11485,13 @@ function retryAfterMs2(header, now) {
   const ms = Number.isFinite(seconds) ? seconds * 1e3 : Date.parse(header) - now;
   return Number.isFinite(ms) && ms > 0 ? Math.min(ms, COOLDOWN_MS.maxRetryAfter) : null;
 }
+var COLD_OUTPUT_TOKENS = 4096;
+var OUTPUT_SAMPLES_MIN = 3;
+var OUTPUT_SAMPLES_MAX = 50;
+function percentile3(values, p2) {
+  const sorted = [...values].sort((a, b) => a - b);
+  return sorted[Math.min(sorted.length - 1, Math.max(0, Math.ceil(p2 * sorted.length) - 1))];
+}
 var Spend = class {
   day = "";
   total = 0;
@@ -11538,12 +11545,18 @@ var Spend = class {
     this.roll();
     return this.cards.get(id)?.spent ?? 0;
   }
-  /** Holds `estimate` against both caps; throws 402 when either is spent. */
+  /**
+   * Holds `estimate` against both caps; throws 402 when either is spent, saying how much is left and what the call
+   * needs. The estimate is realistic (see AutoRouter.estimate), and `commit` replaces it with the cost the upstream
+   * reported: a call can pass a cap by at most its own error, never by the sum of parallel calls.
+   */
   reserve(sessionId, estimate2, caps) {
     this.roll();
     const card = this.card(sessionId);
-    if (this.total + this.held >= caps.daily || this.total + this.held + estimate2 > caps.daily) throw new HttpError(402, "daily_cap", "Auto (Jev): the daily cap is reached; change it on the Decision models page.");
-    if (card.spent + card.held >= caps.perCard || card.spent + card.held + estimate2 > caps.perCard) throw new HttpError(402, "card_cap", "Auto (Jev): this card's cap is reached; change it on the Decision models page.");
+    const usd2 = (value) => `$${value < 0.01 ? value.toFixed(4) : value.toFixed(2)}`;
+    const dayLeft = Math.max(0, caps.daily - this.total - this.held), cardLeft = Math.max(0, caps.perCard - card.spent - card.held);
+    if (dayLeft <= 0 || estimate2 > dayLeft) throw new HttpError(402, "daily_cap", `Auto (Jev): the daily cap is reached: ${usd2(dayLeft)} of ${usd2(caps.daily)} left, this call needs about ${usd2(estimate2)}. Change it on the Decision models page.`);
+    if (cardLeft <= 0 || estimate2 > cardLeft) throw new HttpError(402, "card_cap", `Auto (Jev): this card's cap is reached: ${usd2(cardLeft)} of ${usd2(caps.perCard)} left, this call needs about ${usd2(estimate2)}. Change it on the Decision models page.`);
     this.held += estimate2;
     card.held += estimate2;
     let done = false;
@@ -11556,9 +11569,9 @@ var Spend = class {
     return {
       commit: (cost) => {
         free();
-        const usd2 = cost ?? estimate2;
-        this.total += usd2;
-        card.spent += usd2;
+        const usd3 = cost ?? estimate2;
+        this.total += usd3;
+        card.spent += usd3;
         this.save();
       },
       release: free
@@ -11619,6 +11632,8 @@ var AutoRouter = class {
   port = null;
   leases = /* @__PURE__ */ new Map();
   cooldowns = /* @__PURE__ */ new Map();
+  /** Output tokens of each card's last calls (memory only), for realistic cap reservations. */
+  outputs = /* @__PURE__ */ new Map();
   active = /* @__PURE__ */ new Map();
   activeTotal = 0;
   shownModel = /* @__PURE__ */ new Map();
@@ -11748,6 +11763,7 @@ var AutoRouter = class {
     if (this.shownModel.delete(sessionId)) this.deps.badge?.(sessionId, null);
     this.mainConversation.delete(sessionId);
     this.spend.forget(sessionId);
+    this.outputs.delete(sessionId);
   }
   /** Cards CanvasTTY no longer lists lose their keys (after a restart of the service). */
   retainSessions(known) {
@@ -12002,9 +12018,25 @@ var AutoRouter = class {
       this.idle();
     }
   }
-  estimate(entry, bodyBytes, maxTokens) {
-    const output = typeof maxTokens === "number" && maxTokens > 0 ? Math.min(maxTokens, 32768) : entry.output ?? DEFAULT_OUTPUT;
+  /**
+   * The reservation for one call: its input at the input price, plus the output this card's calls really produce
+   * (the 90th percentile of its last outputs; 4k tokens until 3 were seen), never more than the call's own
+   * max_tokens. Holding the full max_tokens (128k on OpenCode) made a card stop at a cap long before it was spent.
+   */
+  estimate(entry, bodyBytes, maxTokens, sessionId) {
+    const limit2 = typeof maxTokens === "number" && maxTokens > 0 ? Math.min(maxTokens, 32768) : entry.output ?? DEFAULT_OUTPUT;
+    const seen = sessionId ? this.outputs.get(sessionId) ?? [] : [];
+    const typical = seen.length >= OUTPUT_SAMPLES_MIN ? percentile3(seen, 0.9) : COLD_OUTPUT_TOKENS;
+    const output = Math.min(limit2, Math.max(1, typical));
     return (bodyBytes / 4 * (entry.priceIn ?? 0) + output * (entry.priceOut ?? 0)) / 1e6;
+  }
+  /** The output tokens a finished call reported, for this card's next reservations. */
+  sawOutput(sessionId, tokens3) {
+    if (tokens3 === null || !Number.isFinite(tokens3) || tokens3 < 0) return;
+    const list = this.outputs.get(sessionId) ?? [];
+    list.push(tokens3);
+    if (list.length > OUTPUT_SAMPLES_MAX) list.splice(0, list.length - OUTPUT_SAMPLES_MAX);
+    this.outputs.set(sessionId, list);
   }
   costOf(entry, usage) {
     if (usage.cost !== null) return usage.cost;
@@ -12039,7 +12071,7 @@ var AutoRouter = class {
       const payload = Buffer.from(JSON.stringify({ ...body, model: candidate.model.id, ...effort }), "utf8");
       let reservation;
       try {
-        reservation = this.spend.reserve(grant.sessionId, this.estimate(entry, payload.length, body.max_tokens), { daily: settings.dailyUsdCap, perCard: settings.perCardUsdCap });
+        reservation = this.spend.reserve(grant.sessionId, this.estimate(entry, payload.length, body.max_tokens, grant.sessionId), { daily: settings.dailyUsdCap, perCard: settings.perCardUsdCap });
       } catch (error) {
         if (error instanceof HttpError && error.status === 402) {
           capped ??= error;
@@ -12172,6 +12204,7 @@ var AutoRouter = class {
         }
         record4.tokensIn = usage.usage.in;
         record4.tokensOut = usage.usage.out;
+        this.sawOutput(grant.sessionId, usage.usage.out);
         const cost = this.costOf(entry, usage.usage);
         record4.costUsd = cost;
         reservation.commit(cost);
@@ -12571,7 +12604,8 @@ var DEFAULT_ROUTE_SETTINGS = Object.freeze({
   newModels: "wait",
   exploreShare: 0.05,
   aliases: [],
-  notEquivalent: []
+  notEquivalent: [],
+  flat: []
 });
 var RouteSettingsError = class extends Error {
 };
@@ -12649,6 +12683,8 @@ function validateRouteSettings(value) {
     if (!ROUTE_CLIS.includes(e.cli) || typeof e.alias !== "string" || !MODEL2.test(e.alias) || typeof e.identity !== "string" || !IDENTITY.test(e.identity)) fail5("Invalid alias.");
     return { cli: e.cli, alias: e.alias, identity: e.identity };
   });
+  const flat = v.flat === void 0 ? [] : v.flat;
+  if (!Array.isArray(flat) || flat.length > MAX_PINS || flat.some((key) => typeof key !== "string" || !/^(?:host:[A-Za-z0-9.:[\]-]{1,120}|account:[A-Za-z0-9._-]{1,64})$/u.test(key))) fail5("Invalid flat-rate list.");
   if (!Array.isArray(v.notEquivalent) || v.notEquivalent.length > MAX_PINS || v.notEquivalent.some((key) => !plain(key, 300))) fail5("Invalid not-equivalent list.");
   const result = {
     version: 1,
@@ -12662,7 +12698,8 @@ function validateRouteSettings(value) {
     newModels: v.newModels,
     exploreShare: v.exploreShare,
     aliases,
-    notEquivalent: [...new Set(v.notEquivalent)]
+    notEquivalent: [...new Set(v.notEquivalent)],
+    flat: [...new Set(flat)]
   };
   if (JSON.stringify(result).length > MAX_SETTINGS_CHARS) fail5("The routing settings are too large: remove some plans, models or aliases.");
   return result;
@@ -13008,6 +13045,10 @@ function decide(ctx) {
         cost = own;
         costBasis = "api";
         estimate2 = usdEstimate(own);
+      } else if (raw.kind === "account" && flatRate(raw, ctx.settings)) {
+        cost = 0;
+        costBasis = "flat";
+        estimate2 = { kind: "flat" };
       }
     }
     const cooling = ctx.cooldown(raw.signIn);
@@ -13127,6 +13168,11 @@ function decide(ctx) {
     preferred
   };
 }
+var PLAN_NAME = /coding[\s_-]*plan|\bplan\b|план|подписк/iu;
+function flatRate(raw, settings) {
+  if (settings.flat.includes(`account:${raw.accountId}`) || settings.flat.includes(`host:${raw.endpoint}`)) return true;
+  return PLAN_NAME.test(`${raw.row?.account ?? ""} ${raw.accountId ?? ""}`);
+}
 function accountPrice(ctx, raw) {
   const own = raw.resolved.identity ? ctx.index.catalogModel(raw.model ?? "", raw.context) : null;
   if (own && !ctx.catalog.pricesStale && (own.inputPrice !== null || own.outputPrice !== null)) return taskUsd(ctx.view.level, { priceIn: own.inputPrice, priceOut: own.outputPrice });
@@ -13205,6 +13251,8 @@ function costText(c, now) {
       return c.estimate.kind === "launches" ? `coding plan: ${c.estimate.used} of ${c.estimate.allowance} launches in this ${c.estimate.windowHours} h window` : "coding plan: quota unknown";
     case "local":
       return "on this computer: no API cost";
+    case "flat":
+      return "flat-rate plan, unpriced: no cost per task within the plan's limits";
     case "api":
       return c.estimate.kind === "usd" ? `API \u2248 $${c.estimate.low}\u2013${c.estimate.high} per task` : "API";
     default:
@@ -13234,6 +13282,8 @@ function estimateText(estimate2) {
       return `\u2248 ${estimate2.share}% of the ${estimate2.window ?? "window"}${estimate2.usedPercent !== null ? ` (now ${Math.round(estimate2.usedPercent)}% used)` : ""}`;
     case "launches":
       return `1 launch (${estimate2.used} of ${estimate2.allowance} used in ${estimate2.windowHours} h)`;
+    case "flat":
+      return "flat-rate, unpriced";
     default:
       return estimate2.note;
   }
@@ -13277,11 +13327,11 @@ var RouteRecords = class {
     return [...this.list].reverse().find((record4) => record4.spawned?.session === session.slice(0, 8));
   }
   /** The newest record of this orchestrator, not yet matched to a child, that offered this CLI, within `withinMs`. */
-  unmatched(card, cli, now, withinMs) {
+  unmatched(card, cli, now, withinMs, accept = () => true) {
     for (let i = this.list.length - 1; i >= 0; i--) {
       const record4 = this.list[i];
       if (now - record4.at > withinMs) break;
-      if (record4.card !== card.slice(0, 8) || record4.spawned) continue;
+      if (record4.card !== card.slice(0, 8) || record4.spawned || !accept(record4)) continue;
       const option = record4.options.findIndex((entry) => entry.cli === cli);
       if (option >= 0) return { record: record4, option };
     }
@@ -13361,6 +13411,23 @@ var MATCH_MS = 3 * 6e4;
 var QUOTA_COOLDOWN_MS = 3e5;
 var MAX_COOLDOWN_MS = 24 * 36e5;
 var WRITE_DELAY_MS2 = 150;
+var KEEP_MS = 30 * 6e4;
+var trimSlash = (path) => path.length > 1 ? path.replace(/[\\/]+$/u, "") : path;
+function parseDigest(value) {
+  if (typeof value !== "string" || !value.trim()) return null;
+  const clis = [];
+  const accounts = [];
+  for (const token of value.slice(0, 2e3).split(/[\s,;]+/u).filter(Boolean).slice(0, 64)) {
+    const account = /^@([A-Za-z0-9._-]{1,64})$/u.exec(token);
+    if (account) {
+      accounts.push(account[1]);
+      continue;
+    }
+    const cli = /^([a-z0-9-]{1,40})(?::(ok|signed_out|expired|unknown))?$/u.exec(token);
+    if (cli && !clis.some((entry) => entry.id === cli[1])) clis.push({ id: cli[1], signIn: cli[2] ?? null });
+  }
+  return clis.length || accounts.length ? { clis, accounts } : null;
+}
 var clean3 = (value, max) => typeof value === "string" ? value.replace(/[\u0000-\u001f\u007f]+/gu, " ").trim().slice(0, max) : "";
 var isRecord10 = (value) => !!value && typeof value === "object" && !Array.isArray(value);
 var strings2 = (value, max, length = 200) => Array.isArray(value) ? value.filter((item) => typeof item === "string" && item.length > 0 && item.length <= length).slice(0, max) : [];
@@ -13444,6 +13511,10 @@ var RouteService = class {
   live = /* @__PURE__ */ new Map();
   childSignIn = /* @__PURE__ */ new Map();
   seen = /* @__PURE__ */ new Set();
+  /** Each orchestrator's last full list_providers and list_routes (memory only, KEEP_MS). */
+  /** The task text of each recent decision until its child appears (memory only, never in the decision file). */
+  tasks = /* @__PURE__ */ new Map();
+  kept = /* @__PURE__ */ new Map();
   dir;
   writeTimer = null;
   pending = null;
@@ -13479,7 +13550,10 @@ var RouteService = class {
     const ended = event.type === "closed" || event.type === "exited" || session.status === "exited" || typeof session.exitCode === "number";
     if (ended) {
       this.childEnded(session.id);
-      if (event.type === "closed") this.seen.delete(session.id);
+      if (event.type === "closed") {
+        this.seen.delete(session.id);
+        this.kept.delete(session.id);
+      }
       return;
     }
     if (this.seen.has(session.id) || session.role !== "subagent" || typeof session.parentSessionId !== "string") {
@@ -13488,8 +13562,15 @@ var RouteService = class {
     }
     this.seen.add(session.id);
     while (this.seen.size > 4096) this.seen.delete(this.seen.values().next().value);
-    const match = this.records.unmatched(session.parentSessionId, session.provider, this.now(), MATCH_MS);
+    const where = [session.cwd, session.workingDirectory].filter((path) => typeof path === "string").map(trimSlash);
+    const match = this.records.unmatched(session.parentSessionId, session.provider, this.now(), MATCH_MS, (record4) => {
+      const cwd = this.tasks.get(record4.id)?.cwd;
+      return !cwd || !where.length || where.includes(cwd);
+    });
     if (!match) return;
+    const task = this.tasks.get(match.record.id);
+    this.tasks.delete(match.record.id);
+    if (task) this.options.delegatedTask?.(session.id, task.text, session.parentSessionId);
     match.record.spawned = { session: session.id.slice(0, 8), option: match.option, at: this.now() };
     const signIn = match.record.options[match.option].signIn;
     this.childSignIn.set(session.id, signIn);
@@ -13519,7 +13600,7 @@ var RouteService = class {
   // -------------------------------------------------------------------------------------------------------------
   async tool(name, caller, input) {
     if (name === "route_outcome") return this.outcome(caller, input);
-    return this.route(caller, input);
+    return this.route(caller, input, name);
   }
   /** The decision for a task, without recording it (tests and the offline replay use it too). */
   async decideFor(caller, input) {
@@ -13533,8 +13614,7 @@ var RouteService = class {
     }
     const source = decision ? "jev" : "rules";
     const view = turnView(decision ?? { difficulty: ruleDifficulty(task), strong: false }, source, task, { role: "subagent" });
-    const providers = providersFrom(input.providers);
-    const accountRows = accountRowsFrom(input.accountRoutes);
+    const { providers, accountRows } = this.inputsFor(caller.id, input);
     if (accountRows.length) this.accountsSeen = { at: this.now(), rows: accountRows.map(({ launchOptions: _drop, ...row }) => row) };
     const cardClass = this.options.cardClass(caller.id);
     const { catalog, index } = this.options.catalog();
@@ -13575,7 +13655,40 @@ var RouteService = class {
     });
     return { decision: result, view, source };
   }
-  async route(caller, input) {
+  /**
+   * What the orchestrator passed, or what it passed earlier: the full list_providers and list_routes are large, so a
+   * card's last full lists are kept (memory, 30 min) and a later call may send only the task, or a `digest` such as
+   * "claude:ok codex:signed_out opencode @glm-53" (CLIs with their sign-in, `@` a ready account id from list_routes).
+   */
+  inputsFor(callerId, input) {
+    const now = this.now();
+    for (const [id, kept2] of this.kept) if (now - kept2.at > KEEP_MS) this.kept.delete(id);
+    const full = providersFrom(input.providers);
+    const rows = accountRowsFrom(input.accountRoutes);
+    const kept = this.kept.get(callerId) ?? { at: now, providers: null, rows: null };
+    if (full.given) kept.providers = full.list;
+    if (Array.isArray(input.accountRoutes) && rows.length) kept.rows = rows;
+    if (full.given || rows.length) {
+      kept.at = now;
+      this.kept.set(callerId, kept);
+    }
+    let providers = full.given ? full : kept.providers ? { list: kept.providers, given: true } : { list: [], given: false };
+    let accountRows = rows.length ? rows : kept.rows ?? [];
+    const digest = parseDigest(input.digest);
+    if (digest) {
+      if (digest.clis.length) {
+        const known = new Map(providers.list.map((entry) => [entry.id, entry]));
+        providers = { list: digest.clis.map(({ id, signIn }) => ({ ...known.get(id) ?? { id, installed: true, available: true, subagent: true }, ...signIn ? { signIn } : {} })), given: true };
+      }
+      if (digest.accounts.length) {
+        const pool = [...accountRows, ...this.accountsSeen && now - this.accountsSeen.at <= KEEP_MS ? this.accountsSeen.rows : []];
+        accountRows = pool.filter((row, i) => digest.accounts.includes(row.accountId) && pool.findIndex((other) => other.accountId === row.accountId && other.provider === row.provider) === i).map((row) => ({ ...row, state: "ready", launchOptions: row.launchOptions ?? { "canvastty-accounts": { account: row.accountId, effort: "default", trustFolder: false } } }));
+      }
+    }
+    if (accountRows.length) this.accountsSeen = { at: now, rows: accountRows.map(({ launchOptions: _drop, ...row }) => row) };
+    return { providers, accountRows };
+  }
+  async route(caller, input, name = "route") {
     if (!clean3(input.task, 4e3)) return { content: "Give the subagent's task in `task`.", isError: true };
     if (!this.options.enabled()) return { content: "Automatic routing is off in the Assistant settings: choose the provider and model yourself." };
     const decided = await this.decideFor(caller, input);
@@ -13604,7 +13717,24 @@ var RouteService = class {
       options: options.map((option) => optionRecord(option, decision, now))
     };
     this.records.add(record4);
-    const answer = (c, i) => ({ spawn: c.spawn, why: record4.options[i].why, estimate: record4.options[i].estimate, route: { kind: c.kind, label: c.label }, score: record4.options[i].score });
+    const now2 = this.now();
+    for (const [id, kept] of this.tasks) if (now2 - kept.at > MATCH_MS) this.tasks.delete(id);
+    const cwd = clean3(input.cwd, 4096);
+    this.tasks.set(record4.id, { text: clean3(input.task, 2e3), cwd: cwd ? trimSlash(cwd) : null, at: now2 });
+    while (this.tasks.size > 64) this.tasks.delete(this.tasks.keys().next().value);
+    const compact = input.compact === true || input.compact !== false && name === "pick_route";
+    if (compact) {
+      const short2 = (c, i) => `${modelText(c)}; ${record4.options[i].score === null ? "no score" : `score ${record4.options[i].score}`}; ${record4.options[i].estimate}`;
+      return {
+        content: [
+          `${short2(decision.top, 0)}${decision.explored ? " (exploring a new model)" : ""}.`,
+          ...decision.alternatives.map((c, i) => `Or ${i + 1}: ${short2(c, i + 1)}.`),
+          `Pass spawn to spawn_agent unchanged (add title, cwd, prompt). Then route_outcome {decisionId:"${record4.id}"}.`,
+          JSON.stringify({ decisionId: record4.id, spawn: decision.top.spawn, kind: decision.top.kind, alternatives: decision.alternatives.map((c) => ({ spawn: c.spawn, kind: c.kind })) })
+        ].join("\n")
+      };
+    }
+    const answer = (c, i) => ({ spawn: c.spawn, why: record4.options[i].why, estimate: record4.options[i].estimate, route: { kind: c.kind, label: c.label }, kind: c.kind, score: record4.options[i].score });
     const top = answer(decision.top, 0);
     const lines = [
       `Suggested: ${record4.options[0].why}.`,
@@ -13842,6 +13972,9 @@ var Assistant = class {
       preference: () => this.auto.settings.preference,
       autoExpectation: (view, cardClass) => this.auto.expectation(view, cardClass),
       cardClass: (sessionId) => this.classOf(sessionId),
+      // The orchestrator's task for a routed child is that child's own text for review: counted as the orchestrator's,
+      // as person-typed only when it quotes the person word for word (ReviewService.requestFor's rules).
+      delegatedTask: (childId, text6, parentId) => this.review.noteTurn(childId, text6, { role: "subagent", parentSessionId: parentId }),
       dataClassMode: () => this.settings.dataClassMode,
       ...options.now ? { now: options.now } : {}
     });

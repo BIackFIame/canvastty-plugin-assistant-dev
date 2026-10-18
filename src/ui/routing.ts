@@ -54,6 +54,7 @@ export const ROUTE_PAGE_STRINGS = {
     resolved: (model: string, identity: string | null, from: string, asOf: string) => identity === null ? `${model} → no score (unknown model or alias)` : from === 'id' ? `${model} → scored as ${identity}` : `${model} → ${identity} (${from === 'person' ? 'your alias' : `alias table ${asOf}`})`,
     add: 'Add', newPlan: 'Declare a subscription or plan', name: 'Name (Max, Pro, GLM plan…)', cli: 'CLI', planKind: 'Kind',
     accounts: 'Model accounts (CanvasTTY Accounts)', accountsSeen: (age: string) => `As the orchestrator last passed them, ${age}.`, accountsNone: 'Not passed by an orchestrator since the Assistant started.',
+    flatRate: 'flat-rate plan',
     other: 'Other routes', autoRoute: 'Model: Auto (Jev) as a subagent route', never: 'Never use this CLI on its own sign-in',
     neverList: 'Never:', choices: 'Choices', preferSubs: 'Prefer subscriptions with headroom over a cheaper API route, within the quality window',
     newModels: 'New models', policy: { wait: 'Wait for a measured score', provisional: 'Provisional score (mapped, −5)', explore: 'Provisional, and explore 5% of easy tasks' } as Record<string, string>,
@@ -69,9 +70,9 @@ export const ROUTE_PAGE_STRINGS = {
     type: { coding: 'coding', review: 'review', research: 'research', writing: 'writing', chat: 'chat' } as Record<string, string>,
     level: { small: 'small', medium: 'medium', large: 'large' } as Record<string, string>,
     routeKind: { subscription: 'subscription', 'coding-plan': 'coding plan', account: 'model account', auto: 'Auto (Jev)', 'cli-default': 'its own sign-in' } as Record<string, string>,
-    basis: { free: 'free within the window', burning: 'burning faster than its window', low: 'close to the reserve', unknown: 'quota unknown', plan: 'coding plan', local: 'on this computer', api: 'API price', unpriced: 'no price known', unavailable: 'unavailable' } as Record<string, string>,
+    basis: { free: 'free within the window', burning: 'burning faster than its window', low: 'close to the reserve', unknown: 'quota unknown', plan: 'coding plan', local: 'on this computer', flat: 'flat-rate, unpriced', api: 'API price', unpriced: 'no price known', unavailable: 'unavailable' } as Record<string, string>,
     score: (value: number | null, label: string | null, below: number | null) => value === null ? 'no score' : `score ${value.toFixed(1)}${label ? ` (${label})` : ''}${below ? `, ${below} below the best` : ''}`,
-    estimate: (e: Estimate | undefined, fallback: string) => !e ? fallback : e.kind === 'usd' ? (e.high === 0 ? '$0' : `$${e.low}–${e.high}`) : e.kind === 'window' ? `≈ ${e.share}% of the ${e.window ?? 'window'}` : e.kind === 'launches' ? `1 launch (${e.used} of ${e.allowance} in ${e.windowHours} h)` : 'quota unknown',
+    estimate: (e: Estimate | undefined, fallback: string) => !e ? fallback : e.kind === 'usd' ? (e.high === 0 ? '$0' : `$${e.low}–${e.high}`) : e.kind === 'window' ? `≈ ${e.share}% of the ${e.window ?? 'window'}` : e.kind === 'launches' ? `1 launch (${e.used} of ${e.allowance} in ${e.windowHours} h)` : e.kind === 'flat' ? 'flat-rate, unpriced' : 'quota unknown',
     explore: 'explored', unreadable: 'The saved routing settings could not be read yet; nothing can be changed until they are.',
     cooling: 'Resting after a usage limit:'
   },
@@ -94,6 +95,7 @@ export const ROUTE_PAGE_STRINGS = {
     resolved: (model: string, identity: string | null, from: string, asOf: string) => identity === null ? `${model} → без оценки (неизвестная модель или псевдоним)` : from === 'id' ? `${model} → оценивается как ${identity}` : `${model} → ${identity} (${from === 'person' ? 'ваш псевдоним' : `таблица псевдонимов ${asOf}`})`,
     add: 'Добавить', newPlan: 'Объявить подписку или план', name: 'Название (Max, Pro, план GLM…)', cli: 'CLI', planKind: 'Вид',
     accounts: 'Аккаунты моделей (CanvasTTY Accounts)', accountsSeen: (age: string) => `Как их последний раз передал оркестратор, ${age}.`, accountsNone: 'С запуска Ассистента оркестратор их не передавал.',
+    flatRate: 'фиксированный тариф',
     other: 'Другие пути', autoRoute: 'Модель «Авто (Jev)» как путь для субагента', never: 'Никогда не запускать этот CLI на его собственном входе',
     neverList: 'Никогда:', choices: 'Выбор', preferSubs: 'Предпочитать подписки с запасом более дешёвому API в пределах окна качества',
     newModels: 'Новые модели', policy: { wait: 'Ждать измеренной оценки', provisional: 'Предварительная оценка (пересчитанная, −5)', explore: 'Предварительная и проба на 5% простых задач' } as Record<string, string>,
@@ -109,9 +111,9 @@ export const ROUTE_PAGE_STRINGS = {
     type: { coding: 'код', review: 'ревью', research: 'исследование', writing: 'тексты', chat: 'общение' } as Record<string, string>,
     level: { small: 'маленькая', medium: 'средняя', large: 'большая' } as Record<string, string>,
     routeKind: { subscription: 'подписка', 'coding-plan': 'план для кода', account: 'аккаунт модели', auto: 'Авто (Jev)', 'cli-default': 'свой вход CLI' } as Record<string, string>,
-    basis: { free: 'бесплатно в пределах окна', burning: 'расходуется быстрее окна', low: 'близко к резерву', unknown: 'лимит неизвестен', plan: 'план для кода', local: 'на этом компьютере', api: 'цена API', unpriced: 'цена неизвестна', unavailable: 'недоступно' } as Record<string, string>,
+    basis: { free: 'бесплатно в пределах окна', burning: 'расходуется быстрее окна', low: 'близко к резерву', unknown: 'лимит неизвестен', plan: 'план для кода', local: 'на этом компьютере', flat: 'фиксированный тариф, без цены', api: 'цена API', unpriced: 'цена неизвестна', unavailable: 'недоступно' } as Record<string, string>,
     score: (value: number | null, label: string | null, below: number | null) => value === null ? 'без оценки' : `оценка ${value.toFixed(1).replace('.', ',')}${label ? ` (${label})` : ''}${below ? `, на ${String(below).replace('.', ',')} ниже лучшей` : ''}`,
-    estimate: (e: Estimate | undefined, fallback: string) => !e ? fallback : e.kind === 'usd' ? (e.high === 0 ? '$0' : `$${e.low}–${e.high}`) : e.kind === 'window' ? `≈ ${e.share}% окна ${e.window ?? ''}`.trim() : e.kind === 'launches' ? `1 запуск (${e.used} из ${e.allowance} за ${e.windowHours} ч)` : 'лимит неизвестен',
+    estimate: (e: Estimate | undefined, fallback: string) => !e ? fallback : e.kind === 'usd' ? (e.high === 0 ? '$0' : `$${e.low}–${e.high}`) : e.kind === 'window' ? `≈ ${e.share}% окна ${e.window ?? ''}`.trim() : e.kind === 'launches' ? `1 запуск (${e.used} из ${e.allowance} за ${e.windowHours} ч)` : e.kind === 'flat' ? 'фиксированный тариф, без цены' : 'лимит неизвестен',
     explore: 'проба', unreadable: 'Сохранённые настройки маршрутизации ещё не прочитаны; пока их нельзя менять.',
     cooling: 'Отдыхают после лимита:'
   }
@@ -170,7 +172,8 @@ export function renderRouting(state: RouteState, t: Strings, page: RoutePageHost
         el('code', { textContent: host }),
         el('span', { textContent: of.map(row => `${row.account ?? row.accountId} · ${row.model} · ${cliName(row.provider)} · ${row.state}`).join('; ') }),
         selectOf(`route-allow-${host}`, settings.allow[key] ?? 'allow', allowOptions, value => save(next => { if (value === 'allow') delete next.allow[key]; else next.allow[key] = value; })),
-        labelled(t.trust, selectOf(`route-trust-${host}`, settings.trust[key] ?? 'unset', trustOptions, value => save(next => { if (value === 'unset') delete next.trust[key]; else next.trust[key] = value; })))));
+        labelled(t.trust, selectOf(`route-trust-${host}`, settings.trust[key] ?? 'unset', trustOptions, value => save(next => { if (value === 'unset') delete next.trust[key]; else next.trust[key] = value; }))),
+        flatToggle(host, settings, t, save)));
     }
     section.append(rows);
   }
@@ -268,6 +271,14 @@ export function renderRouting(state: RouteState, t: Strings, page: RoutePageHost
   for (const record of state.recent.slice(0, 20)) recent.append(recentRow(record, t, page));
   section.append(recent);
   return section;
+}
+
+/** A model account's address on a flat-rate plan (no price per call). */
+function flatToggle(host: string, settings: RouteSettings, t: Strings, save: (change: (next: RouteSettings) => void) => void): HTMLLabelElement {
+  const key = `host:${host}`;
+  const input = el('input', { type: 'checkbox', checked: settings.flat.includes(key), name: `route-flat-${host}` });
+  input.addEventListener('change', () => save(next => { next.flat = input.checked ? [...new Set([...next.flat, key])] : next.flat.filter(entry => entry !== key); }));
+  return el('label', { className: 'check' }, input, ` ${t.flatRate}`);
 }
 
 function planRow(plan: PlanDecl, state: RouteState, t: Strings, save: (change: (next: RouteSettings) => void) => void, ago: (at: number | null) => string, trustOptions: Array<[TrustLevel, string]>, allowOptions: Array<[RouteAllow, string]>): HTMLLIElement {

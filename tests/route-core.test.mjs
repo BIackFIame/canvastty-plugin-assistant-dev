@@ -125,15 +125,17 @@ test('route answers pass CanvasTTY\'s real listProviderDirectory and spawn_agent
       });
       if (limits) route.receiveLimits(limits);
       const caller = { id: orchestrator.id, provider: orchestrator.provider, role: 'orchestrator' };
-      for (const [task] of TASKS) {
-        const answer = await route.tool('pick_route', caller, { task, providers: directory.providers, ...(scenario.accounts ? { accountRoutes: scenario.rows() } : {}) });
+      for (const [n, [task]] of TASKS.entries()) {
+        // The full lists once; later calls send only the task (the service keeps the lists), as a compact orchestrator does.
+        const lists = n === 0 ? { providers: directory.providers, ...(scenario.accounts ? { accountRoutes: scenario.rows() } : {}) } : {};
+        const answer = await route.tool('pick_route', caller, { task, ...lists });
         assert.notEqual(answer.isError, true, answer.content);
         if (/^No route is usable now/u.test(answer.content)) continue;
         const json = JSON.parse(answer.content.split('\n').at(-1));
         assert.doesNotMatch(answer.content, new RegExp(task.slice(0, 20).replace(/[.*+?^${}()|[\]\\]/gu, '\\$&'), 'u'), 'the answer never repeats the task');
         for (const option of [json, ...json.alternatives]) {
           total++;
-          kinds[option.route.kind] = (kinds[option.route.kind] ?? 0) + 1;
+          kinds[option.kind] = (kinds[option.kind] ?? 0) + 1;
           const args = { ...option.spawn, cwd: project, title: 'Worker' };
           const where = `${scenario.name} / ${orchestrator.id} / ${task.slice(0, 30)} → ${JSON.stringify(option.spawn)}`;
           const schema = validateOrchestrationArguments('spawn_agent', args);

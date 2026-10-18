@@ -136,6 +136,9 @@ export class Assistant {
       preference: () => this.auto.settings.preference,
       autoExpectation: (view, cardClass) => this.auto.expectation(view, cardClass),
       cardClass: sessionId => this.classOf(sessionId),
+      // The orchestrator's task for a routed child is that child's own text for review: counted as the orchestrator's,
+      // as person-typed only when it quotes the person word for word (ReviewService.requestFor's rules).
+      delegatedTask: (childId, text, parentId) => this.review.noteTurn(childId, text, { role: 'subagent', parentSessionId: parentId }),
       dataClassMode: () => this.settings.dataClassMode,
       ...(options.now ? { now: options.now } : {})
     });

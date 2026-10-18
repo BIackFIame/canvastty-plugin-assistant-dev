@@ -90,11 +90,11 @@ export class RouteRecords {
   bySession(session: string): RouteRecord | undefined { return [...this.list].reverse().find(record => record.spawned?.session === session.slice(0, 8)); }
 
   /** The newest record of this orchestrator, not yet matched to a child, that offered this CLI, within `withinMs`. */
-  unmatched(card: string, cli: string, now: number, withinMs: number): { record: RouteRecord; option: number } | null {
+  unmatched(card: string, cli: string, now: number, withinMs: number, accept: (record: RouteRecord) => boolean = () => true): { record: RouteRecord; option: number } | null {
     for (let i = this.list.length - 1; i >= 0; i--) {
       const record = this.list[i]!;
       if (now - record.at > withinMs) break;
-      if (record.card !== card.slice(0, 8) || record.spawned) continue;
+      if (record.card !== card.slice(0, 8) || record.spawned || !accept(record)) continue;
       const option = record.options.findIndex(entry => entry.cli === cli);
       if (option >= 0) return { record, option };
     }

@@ -71,6 +71,11 @@ export interface RouteSettings {
   aliases: AliasOverride[];
   /** Route keys the person marked "not equivalent": their own model with their own outcomes. */
   notEquivalent: string[];
+  /**
+   * Model accounts on a flat-rate plan (`host:<address>` or `account:<id>`): no price per task, so they cost nothing
+   * within the plan's limits. An account whose name says "coding plan" counts as one too.
+   */
+  flat: string[];
 }
 
 export const MAX_PLANS = 16;
@@ -84,7 +89,7 @@ export const MAX_SETTINGS_CHARS = 16_384;
 
 export const DEFAULT_ROUTE_SETTINGS: Readonly<RouteSettings> = Object.freeze({
   version: 1, plans: [], preferSubscriptions: true, expectedShare: { small: 3, medium: 8, large: 15 },
-  allow: {}, trust: {}, pins: {}, boosts: {}, newModels: 'wait', exploreShare: 0.05, aliases: [], notEquivalent: []
+  allow: {}, trust: {}, pins: {}, boosts: {}, newModels: 'wait', exploreShare: 0.05, aliases: [], notEquivalent: [], flat: []
 }) as Readonly<RouteSettings>;
 
 class RouteSettingsError extends Error {}
@@ -158,12 +163,15 @@ export function validateRouteSettings(value: unknown): RouteSettings {
     if (!(ROUTE_CLIS as readonly unknown[]).includes(e.cli) || typeof e.alias !== 'string' || !MODEL.test(e.alias) || typeof e.identity !== 'string' || !IDENTITY.test(e.identity)) fail('Invalid alias.');
     return { cli: e.cli as string, alias: e.alias as string, identity: e.identity as string };
   });
+  // Saved before flat-rate accounts existed: none.
+  const flat = v.flat === undefined ? [] : v.flat;
+  if (!Array.isArray(flat) || flat.length > MAX_PINS || flat.some(key => typeof key !== 'string' || !/^(?:host:[A-Za-z0-9.:[\]-]{1,120}|account:[A-Za-z0-9._-]{1,64})$/u.test(key))) fail('Invalid flat-rate list.');
   if (!Array.isArray(v.notEquivalent) || v.notEquivalent.length > MAX_PINS || v.notEquivalent.some(key => !plain(key, 300))) fail('Invalid not-equivalent list.');
   const result: RouteSettings = {
     version: 1, plans, preferSubscriptions: v.preferSubscriptions as boolean,
     expectedShare: { small: share.small as number, medium: share.medium as number, large: share.large as number },
     allow, trust, pins, boosts, newModels: v.newModels as NewModelPolicy, exploreShare: v.exploreShare as number, aliases,
-    notEquivalent: [...new Set(v.notEquivalent as string[])]
+    notEquivalent: [...new Set(v.notEquivalent as string[])], flat: [...new Set(flat as string[])]
   };
   // Plugin storage holds 64 KB for everything the Assistant keeps: this part stays small.
   if (JSON.stringify(result).length > MAX_SETTINGS_CHARS) fail('The routing settings are too large: remove some plans, models or aliases.');

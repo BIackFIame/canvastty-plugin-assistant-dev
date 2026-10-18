@@ -30,8 +30,8 @@
     },
     {
       "path": "services/assistant.mjs",
-      "bytes": 838203,
-      "sha256": "9c07b3b46489a4f8a167bab1efbab1b0a08fa9dba54fb5326753faff208d9813"
+      "bytes": 846538,
+      "sha256": "50278caf881b4e592e400a63c655a75c28072f63e39838410d6bdf324af2fd9b"
     },
     {
       "path": "settings/assistant.html",
@@ -40,8 +40,8 @@
     },
     {
       "path": "settings/assistant.js",
-      "bytes": 133102,
-      "sha256": "54fd7e7af8524be04d03a7f55b3ae84da64255301ba0724d5934f04691efd44b"
+      "bytes": 134228,
+      "sha256": "92c1aaa7988b776a90ae1ea56f2076321a9114b00ea976d845c5f9e2466323b2"
     },
     {
       "path": "settings/assistant.css",
@@ -190,7 +190,7 @@
         },
         {
           "name": "route",
-          "description": "Before spawn_agent: where a subagent should run, as CLI, sign-in (the person's subscription on that CLI, a coding plan, a model account, or Model: Auto (Jev)), model and effort, chosen from measured benchmark scores for the task type, price or subscription window share, availability and the person's rules. Pass list_providers().providers as `providers`, and canvastty-accounts__list_routes rows as `accountRoutes` when you have them. Pass the answer's spawn values to spawn_agent unchanged: they name every plugin that sets a model, so nothing is inherited by accident. Up to two alternatives come with it. Nothing is started here. When the subagent ends, report it with route_outcome.",
+          "description": "Before spawn_agent: where a subagent should run, as CLI, sign-in (the person's subscription on that CLI, a coding plan, a model account, or Model: Auto (Jev)), model and effort, chosen from measured benchmark scores for the task type, price or subscription window share, availability and the person's rules. Pass list_providers().providers as `providers`, and canvastty-accounts__list_routes rows as `accountRoutes` when you have them (once: later calls may omit them, or pass a compact `digest`). Pass the answer's spawn values to spawn_agent unchanged: they name every plugin that sets a model, so nothing is inherited by accident. Up to two alternatives come with it. Nothing is started here. When the subagent ends, report it with route_outcome.",
           "inputSchema": {
             "type": "object",
             "properties": {
@@ -200,7 +200,7 @@
               },
               "providers": {
                 "type": "array",
-                "description": "list_providers().providers, so the answer uses what is installed, signed in, its models and the plugin options each CLI takes.",
+                "description": "list_providers().providers, once per orchestrator: later calls may omit it (kept 30 min) or send `digest`.",
                 "items": {
                   "type": "object"
                 },
@@ -208,7 +208,7 @@
               },
               "accountRoutes": {
                 "type": "array",
-                "description": "Optional: the rows canvastty-accounts__list_routes returned (the person's model accounts), so they compete too.",
+                "description": "Optional: canvastty-accounts__list_routes rows, once; later calls may omit them or name ready accounts in `digest`.",
                 "items": {
                   "type": "object"
                 },
@@ -222,12 +222,24 @@
                 "type": "boolean",
                 "description": "Optional: the subagent must itself orchestrate (needs CanvasTTY's agent tools)."
               },
+              "digest": {
+                "type": "string",
+                "description": "Optional compact form instead of the lists: CLIs with sign-in and ready account ids, e.g. \"claude:ok codex:signed_out opencode @glm-53\"."
+              },
+              "cwd": {
+                "type": "string",
+                "description": "Optional: the folder you will give spawn_agent, so the answer is matched to that subagent."
+              },
+              "compact": {
+                "type": "boolean",
+                "description": "Optional: a short answer (default for pick_route)."
+              },
               "launchOptionTools": {
                 "type": "array",
                 "items": {
                   "type": "string"
                 },
-                "description": "Optional: list_providers().launchOptionTools."
+                "description": "Ignored (kept for older prompts)."
               }
             },
             "required": [
@@ -241,7 +253,7 @@
         },
         {
           "name": "pick_route",
-          "description": "The same as route (where a subagent should run: CLI, sign-in, model, effort, launch options for spawn_agent), under the name list_providers points to.",
+          "description": "Where a subagent should run (CLI, sign-in, model, effort, launch options), the same as route but with a short answer: the choice and up to two alternatives as spawn values for spawn_agent, a decisionId for route_outcome. Pass list_providers().providers (and canvastty-accounts__list_routes rows) on the first call only; afterwards just `task`, or a `digest` like \"claude:ok opencode @glm-53\" (CLIs with sign-in, @ ready accounts). Pass spawn unchanged.",
           "inputSchema": {
             "type": "object",
             "properties": {
@@ -251,7 +263,7 @@
               },
               "providers": {
                 "type": "array",
-                "description": "list_providers().providers, so the answer uses what is installed, signed in, its models and the plugin options each CLI takes.",
+                "description": "list_providers().providers, once per orchestrator: later calls may omit it (kept 30 min) or send `digest`.",
                 "items": {
                   "type": "object"
                 },
@@ -259,7 +271,7 @@
               },
               "accountRoutes": {
                 "type": "array",
-                "description": "Optional: the rows canvastty-accounts__list_routes returned (the person's model accounts), so they compete too.",
+                "description": "Optional: canvastty-accounts__list_routes rows, once; later calls may omit them or name ready accounts in `digest`.",
                 "items": {
                   "type": "object"
                 },
@@ -273,12 +285,24 @@
                 "type": "boolean",
                 "description": "Optional: the subagent must itself orchestrate (needs CanvasTTY's agent tools)."
               },
+              "digest": {
+                "type": "string",
+                "description": "Optional compact form instead of the lists: CLIs with sign-in and ready account ids, e.g. \"claude:ok codex:signed_out opencode @glm-53\"."
+              },
+              "cwd": {
+                "type": "string",
+                "description": "Optional: the folder you will give spawn_agent, so the answer is matched to that subagent."
+              },
+              "compact": {
+                "type": "boolean",
+                "description": "Optional: a short answer (default for pick_route)."
+              },
               "launchOptionTools": {
                 "type": "array",
                 "items": {
                   "type": "string"
                 },
-                "description": "Optional: list_providers().launchOptionTools."
+                "description": "Ignored (kept for older prompts)."
               }
             },
             "required": [

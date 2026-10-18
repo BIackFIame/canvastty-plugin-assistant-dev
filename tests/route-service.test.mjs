@@ -153,3 +153,87 @@ test('through the Assistant: the tools are routed to the route service; off in s
   assistant.harness.settings.routing = false;
   assert.match((await assistant.tool('pick_route', orchestrator, { task: 'x' })).content, /routing is off/u);
 });
+
+test('pick_route is compact: short lines and spawn values; later calls send only the task or a digest', async () => {
+  const { route } = service();
+  const full = await route.tool('route', orchestrator, input('Explain the cache layer'));
+  const first = await route.tool('pick_route', orchestrator, input('Explain the cache layer'));
+  assert.ok(first.content.length < full.content.length / 2, `${first.content.length} vs ${full.content.length} characters`);
+  assert.doesNotMatch(first.content, /Suggested:|read 3 min ago|Task read as/u, 'no why-lines');
+  const json = lastJson(first);
+  assert.deepEqual(Object.keys(json), ['decisionId', 'spawn', 'kind', 'alternatives']);
+  assert.equal(json.alternatives.length, 2);
+  // Only the task: the lists this orchestrator passed are kept.
+  const again = lastJson(await route.tool('pick_route', orchestrator, { task: 'Explain the cache layer' }));
+  assert.deepEqual(again.spawn, json.spawn);
+  // Another orchestrator has no kept lists: the declared plans only — no account rows of someone else's.
+  const other = lastJson(await route.tool('pick_route', { ...orchestrator, id: 'other-orch-0001' }, { task: 'Explain the cache layer' }));
+  assert.ok([other, ...other.alternatives].every(option => option.kind === 'subscription' || option.kind === 'auto'));
+  // A digest: the kept entries with the new sign-in; @ names a ready account from the rows seen.
+  const out = lastJson(await route.tool('pick_route', orchestrator, { task: 'Explain the cache layer', digest: 'claude:signed_out codex:ok' }));
+  assert.ok([out, ...out.alternatives].every(option => !(option.spawn.provider === 'claude' && option.kind === 'subscription')), 'Claude signed out: no Claude subscription (its model accounts do not use that sign-in)');
+  assert.ok([out, ...out.alternatives].every(option => ['claude', 'codex'].includes(option.spawn.provider)), 'only the CLIs in the digest');
+  const fresh = { ...orchestrator, id: 'digest-orch-01' };
+  await route.tool('pick_route', fresh, { task: 'x', accountRoutes: accountRows() });
+  const viaDigest = lastJson(await route.tool('pick_route', fresh, { task: 'Explain the cache layer', digest: 'claude:ok @or-opus', prefer: 'or-opus' }));
+  assert.equal(viaDigest.spawn.launchOptions['canvastty-accounts'].account, 'or-opus');
+  assert.equal(lastJson(await route.tool('route', orchestrator, { task: 'x', compact: true })).decisionId.length, 8);
+});
+
+test('coding-plan accounts without a price are flat-rate: free within the plan, flagged, and compared with priced routes', async () => {
+  const { decide, whyLine } = await import('../src/route/engine.ts');
+  const { parseLimits } = await import('../src/route/limits.ts');
+  const { accountRowsFrom, providersFrom } = await import('../src/route/service.ts');
+  const { view } = await import('./helpers/route-fixtures.mjs');
+  // Run 8's shape: two Z.AI coding-plan accounts on OpenCode, no plan declared, Auto with an API price.
+  const rows = accountRowsFrom([
+    { provider: 'opencode', accountId: 'glm-53', account: 'GLM 5.3 · Z.AI Coding Plan', model: 'glm-5.3', endpoint: 'api.z.ai', state: 'ready', launchOptions: { 'canvastty-accounts': { account: 'glm-53', effort: 'default', trustFolder: false } } },
+    { provider: 'opencode', accountId: 'glm-flash', account: 'GLM flash', model: 'glm-5.3-flash', endpoint: 'api.z.ai', state: 'ready', launchOptions: { 'canvastty-accounts': { account: 'glm-flash', effort: 'default', trustFolder: false } } },
+    { provider: 'opencode', accountId: 'paygo', account: 'Pay as you go', model: 'glm-5.3', endpoint: 'api.example.com', state: 'ready', launchOptions: { 'canvastty-accounts': { account: 'paygo', effort: 'default', trustFolder: false } } }
+  ]);
+  const p = providersFrom(providers({ installed: ['opencode'] }));
+  const ctx = settings => ({ view: view('coding', 'medium'), preference: 'cheap', settings, providers: p.list, providersGiven: true, accountRows: rows, callerProvider: 'opencode', cardClass: 'D1', mode: 'warn',
+    limits: parseLimits(limitsAnswer(), NOW), catalog: catalog(), index: index(), auto: { model: 'z-ai/glm-5.3', identity: 'glm-5-3', effort: 'max', priceIn: 0.6, priceOut: 2.2, trusted: true },
+    now: NOW, busy: () => 0, launches: () => 0, cooldown: () => null, stats: new Map(), prefer: null, orchestrate: false, explore: { roll: 0.9, retired: new Set(), highRisk: false } });
+  // The person trusts the address with D2 (an account has no trust of its own; trust ranks before cost in a tunnel).
+  const decision = decide(ctx({ ...structuredClone(DEFAULT_ROUTE_SETTINGS), trust: { 'host:api.z.ai': 'D2' } }));
+  const all = decision.groups.flat();
+  const plan = all.find(c => c.accountId === 'glm-53');
+  assert.deepEqual([plan.cost, plan.costBasis, plan.estimate.kind], [0, 'flat', 'flat']);
+  assert.match(whyLine(plan, decision, NOW), /flat-rate plan, unpriced: no cost per task/u);
+  assert.equal(all.find(c => c.accountId === 'glm-flash').costBasis, 'unpriced', 'its name does not say it is a plan');
+  assert.ok(!all.some(c => c.accountId === 'paygo' && c.costBasis === 'flat'), 'a pay-as-you-go account is never taken for a plan');
+  assert.equal(decision.top.accountId, 'glm-53', 'the flat plan beats the same model through Auto\'s API price');
+  // The person marks the flash account's address flat: both plans cost nothing, so within the window score decides,
+  // and an unpriced pay-as-you-go account no longer outranks a priced route.
+  const marked = decide(ctx({ ...structuredClone(DEFAULT_ROUTE_SETTINGS), trust: { 'host:api.z.ai': 'D2' }, flat: ['account:glm-flash'] }));
+  assert.equal(marked.groups.flat().find(c => c.accountId === 'glm-flash').costBasis, 'flat');
+  assert.throws(() => validateRouteSettings({ ...structuredClone(DEFAULT_ROUTE_SETTINGS), flat: ['nope'] }), /flat-rate/u);
+  assert.deepEqual(validateRouteSettings({ ...declared(), flat: undefined }).flat, [], 'saved before flat-rate accounts existed');
+});
+
+test('run 8: a routed child on an account route gets its orchestrator\'s task for command review (as the orchestrator\'s, not the person\'s)', async () => {
+  const host = fakeHost();
+  const assistant = new Assistant({ host, dataDir: mkdtempSync(join(base, 'data-')), git: null, now: () => NOW });
+  const project = mkdtempSync(join(base, 'project-'));
+  const orch = { id: 'orch-run8-0001', provider: 'opencode', role: 'orchestrator', title: 'Lead', status: 'working', cwd: project, workingDirectory: project };
+  assistant.sessionEvent({ type: 'created', session: orch });
+  const rows = [{ provider: 'opencode', accountId: 'glm-53', account: 'GLM 5.3 · Z.AI Coding Plan', model: 'glm-5.3', endpoint: 'api.z.ai', state: 'ready', launchOptions: { 'canvastty-accounts': { account: 'glm-53', effort: 'default', trustFolder: false } } }];
+  const task = 'Create code/textstats.mjs with countWords, topWords and readingMinutes, and code/textstats.test.mjs with node:test tests. Write only these two files.';
+  const answer = lastJson(await assistant.tool('pick_route', orch, { task, cwd: `${project}/`, providers: providers({ installed: ['opencode'] }), accountRoutes: rows }));
+  assert.equal(answer.spawn.launchOptions['canvastty-accounts'].account, 'glm-53');
+  assert.equal(assistant.review.requestFor('child-in-other-dir'), null);
+  // A subagent of another folder is not this decision's child.
+  assistant.sessionEvent({ type: 'created', session: { id: 'child-elsewhere', provider: 'opencode', role: 'subagent', parentSessionId: orch.id, status: 'starting', cwd: base, workingDirectory: base } });
+  assert.equal(assistant.review.requestFor('child-elsewhere'), null);
+  assistant.sessionEvent({ type: 'created', session: { id: 'child-run8-c', provider: 'opencode', role: 'subagent', parentSessionId: orch.id, status: 'starting', cwd: project, workingDirectory: project } });
+  assert.deepEqual(assistant.review.requestFor('child-run8-c'), { text: task, byPerson: false }, 'the orchestrator\'s text: R3 still never auto-allows edits for it');
+  // The launch that follows (no launcher task on an account route) keeps it.
+  await assistant.launch({ sessionId: 'child-run8-c', provider: 'opencode', profile: 'normal', role: 'subagent', cwd: project, restoring: false, resume: false, parentSessionId: orch.id, options: { model: 'off' } });
+  assert.equal(assistant.review.requestFor('child-run8-c').text, task);
+  // When the person typed it to the orchestrator word for word, it counts as theirs (the existing rule).
+  assistant.review.noteLaunch(orch.id, { task: `Please: ${task}`, dataClass: null, triage: false, role: 'orchestrator' });
+  assert.equal(assistant.review.requestFor('child-run8-c').byPerson, true);
+  await assistant.routing.flush();
+  assert.ok(!readFileSync(join(assistant.routing['dir'], 'decisions.json'), 'utf8').includes('textstats'), 'the task stays in memory only');
+});

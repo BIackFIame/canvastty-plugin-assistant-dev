@@ -150,6 +150,7 @@ export type Estimate =
   | { kind: 'usd'; low: number; high: number }
   | { kind: 'window'; share: number; window: string | null; usedPercent: number | null }
   | { kind: 'launches'; used: number; allowance: number; windowHours: number }
+  | { kind: 'flat' }
   | { kind: 'unknown'; note: string };
 
 export interface Candidate {
@@ -173,7 +174,7 @@ export interface Candidate {
   boost: number;
   /** USD-comparable cost of the task (subscriptions: scarcity price), or null when unknown. */
   cost: number | null;
-  costBasis: 'api' | 'local' | ShadowPrice['basis'] | 'plan' | 'unpriced';
+  costBasis: 'api' | 'local' | ShadowPrice['basis'] | 'plan' | 'flat' | 'unpriced';
   estimate: Estimate;
   quota: SubscriptionQuota | null;
   availability: { state: AvailabilityState; reason: string };
@@ -492,6 +493,8 @@ export function decide(ctx: RouteContext): RouteDecision {
     } else {
       const own = raw.kind === 'account' ? (raw.resolved.identity ? accountPrice(ctx, raw) : null) : ref;
       if (own !== null) { cost = own; costBasis = 'api'; estimate = usdEstimate(own); }
+      // A coding-plan account has no price per call: free within the plan's limits (a limit exit rests it).
+      else if (raw.kind === 'account' && flatRate(raw, ctx.settings)) { cost = 0; costBasis = 'flat'; estimate = { kind: 'flat' }; }
     }
     const cooling = ctx.cooldown(raw.signIn);
     if (cooling && cooling.until > ctx.now) availability = { state: 'cooldown', reason: cooling.reason };
@@ -598,6 +601,12 @@ export function decide(ctx: RouteContext): RouteDecision {
   };
 }
 
+const PLAN_NAME = /coding[\s_-]*plan|\bplan\b|план|подписк/iu;
+function flatRate(raw: Raw, settings: RouteSettings): boolean {
+  if (settings.flat.includes(`account:${raw.accountId}`) || settings.flat.includes(`host:${raw.endpoint}`)) return true;
+  return PLAN_NAME.test(`${raw.row?.account ?? ''} ${raw.accountId ?? ''}`);
+}
+
 function accountPrice(ctx: RouteContext, raw: Raw): number | null {
   const own = raw.resolved.identity ? ctx.index.catalogModel(raw.model ?? '', raw.context) : null;
   if (own && !ctx.catalog.pricesStale && (own.inputPrice !== null || own.outputPrice !== null)) return taskUsd(ctx.view.level, { priceIn: own.inputPrice, priceOut: own.outputPrice });
@@ -672,6 +681,7 @@ export function costText(c: Candidate, now: number): string {
     case 'unknown': return `subscription: quota unknown (${c.quota?.note ?? 'not read'})`;
     case 'plan': return c.estimate.kind === 'launches' ? `coding plan: ${c.estimate.used} of ${c.estimate.allowance} launches in this ${c.estimate.windowHours} h window` : 'coding plan: quota unknown';
     case 'local': return 'on this computer: no API cost';
+    case 'flat': return 'flat-rate plan, unpriced: no cost per task within the plan\'s limits';
     case 'api': return c.estimate.kind === 'usd' ? `API ≈ $${c.estimate.low}–${c.estimate.high} per task` : 'API';
     default: return 'no price known';
   }
@@ -700,6 +710,7 @@ export function estimateText(estimate: Estimate): string {
     case 'usd': return estimate.high === 0 ? '$0' : `$${estimate.low}–${estimate.high}`;
     case 'window': return `≈ ${estimate.share}% of the ${estimate.window ?? 'window'}${estimate.usedPercent !== null ? ` (now ${Math.round(estimate.usedPercent)}% used)` : ''}`;
     case 'launches': return `1 launch (${estimate.used} of ${estimate.allowance} used in ${estimate.windowHours} h)`;
+    case 'flat': return 'flat-rate, unpriced';
     default: return estimate.note;
   }
 }

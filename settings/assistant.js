@@ -746,7 +746,8 @@
     newModels: "wait",
     exploreShare: 0.05,
     aliases: [],
-    notEquivalent: []
+    notEquivalent: [],
+    flat: []
   });
 
   // src/ui/routing.ts
@@ -784,6 +785,7 @@
       accounts: "Model accounts (CanvasTTY Accounts)",
       accountsSeen: (age) => `As the orchestrator last passed them, ${age}.`,
       accountsNone: "Not passed by an orchestrator since the Assistant started.",
+      flatRate: "flat-rate plan",
       other: "Other routes",
       autoRoute: "Model: Auto (Jev) as a subagent route",
       never: "Never use this CLI on its own sign-in",
@@ -817,9 +819,9 @@
       type: { coding: "coding", review: "review", research: "research", writing: "writing", chat: "chat" },
       level: { small: "small", medium: "medium", large: "large" },
       routeKind: { subscription: "subscription", "coding-plan": "coding plan", account: "model account", auto: "Auto (Jev)", "cli-default": "its own sign-in" },
-      basis: { free: "free within the window", burning: "burning faster than its window", low: "close to the reserve", unknown: "quota unknown", plan: "coding plan", local: "on this computer", api: "API price", unpriced: "no price known", unavailable: "unavailable" },
+      basis: { free: "free within the window", burning: "burning faster than its window", low: "close to the reserve", unknown: "quota unknown", plan: "coding plan", local: "on this computer", flat: "flat-rate, unpriced", api: "API price", unpriced: "no price known", unavailable: "unavailable" },
       score: (value, label, below) => value === null ? "no score" : `score ${value.toFixed(1)}${label ? ` (${label})` : ""}${below ? `, ${below} below the best` : ""}`,
-      estimate: (e, fallback) => !e ? fallback : e.kind === "usd" ? e.high === 0 ? "$0" : `$${e.low}\u2013${e.high}` : e.kind === "window" ? `\u2248 ${e.share}% of the ${e.window ?? "window"}` : e.kind === "launches" ? `1 launch (${e.used} of ${e.allowance} in ${e.windowHours} h)` : "quota unknown",
+      estimate: (e, fallback) => !e ? fallback : e.kind === "usd" ? e.high === 0 ? "$0" : `$${e.low}\u2013${e.high}` : e.kind === "window" ? `\u2248 ${e.share}% of the ${e.window ?? "window"}` : e.kind === "launches" ? `1 launch (${e.used} of ${e.allowance} in ${e.windowHours} h)` : e.kind === "flat" ? "flat-rate, unpriced" : "quota unknown",
       explore: "explored",
       unreadable: "The saved routing settings could not be read yet; nothing can be changed until they are.",
       cooling: "Resting after a usage limit:"
@@ -855,6 +857,7 @@
       accounts: "\u0410\u043A\u043A\u0430\u0443\u043D\u0442\u044B \u043C\u043E\u0434\u0435\u043B\u0435\u0439 (CanvasTTY Accounts)",
       accountsSeen: (age) => `\u041A\u0430\u043A \u0438\u0445 \u043F\u043E\u0441\u043B\u0435\u0434\u043D\u0438\u0439 \u0440\u0430\u0437 \u043F\u0435\u0440\u0435\u0434\u0430\u043B \u043E\u0440\u043A\u0435\u0441\u0442\u0440\u0430\u0442\u043E\u0440, ${age}.`,
       accountsNone: "\u0421 \u0437\u0430\u043F\u0443\u0441\u043A\u0430 \u0410\u0441\u0441\u0438\u0441\u0442\u0435\u043D\u0442\u0430 \u043E\u0440\u043A\u0435\u0441\u0442\u0440\u0430\u0442\u043E\u0440 \u0438\u0445 \u043D\u0435 \u043F\u0435\u0440\u0435\u0434\u0430\u0432\u0430\u043B.",
+      flatRate: "\u0444\u0438\u043A\u0441\u0438\u0440\u043E\u0432\u0430\u043D\u043D\u044B\u0439 \u0442\u0430\u0440\u0438\u0444",
       other: "\u0414\u0440\u0443\u0433\u0438\u0435 \u043F\u0443\u0442\u0438",
       autoRoute: "\u041C\u043E\u0434\u0435\u043B\u044C \xAB\u0410\u0432\u0442\u043E (Jev)\xBB \u043A\u0430\u043A \u043F\u0443\u0442\u044C \u0434\u043B\u044F \u0441\u0443\u0431\u0430\u0433\u0435\u043D\u0442\u0430",
       never: "\u041D\u0438\u043A\u043E\u0433\u0434\u0430 \u043D\u0435 \u0437\u0430\u043F\u0443\u0441\u043A\u0430\u0442\u044C \u044D\u0442\u043E\u0442 CLI \u043D\u0430 \u0435\u0433\u043E \u0441\u043E\u0431\u0441\u0442\u0432\u0435\u043D\u043D\u043E\u043C \u0432\u0445\u043E\u0434\u0435",
@@ -888,9 +891,9 @@
       type: { coding: "\u043A\u043E\u0434", review: "\u0440\u0435\u0432\u044C\u044E", research: "\u0438\u0441\u0441\u043B\u0435\u0434\u043E\u0432\u0430\u043D\u0438\u0435", writing: "\u0442\u0435\u043A\u0441\u0442\u044B", chat: "\u043E\u0431\u0449\u0435\u043D\u0438\u0435" },
       level: { small: "\u043C\u0430\u043B\u0435\u043D\u044C\u043A\u0430\u044F", medium: "\u0441\u0440\u0435\u0434\u043D\u044F\u044F", large: "\u0431\u043E\u043B\u044C\u0448\u0430\u044F" },
       routeKind: { subscription: "\u043F\u043E\u0434\u043F\u0438\u0441\u043A\u0430", "coding-plan": "\u043F\u043B\u0430\u043D \u0434\u043B\u044F \u043A\u043E\u0434\u0430", account: "\u0430\u043A\u043A\u0430\u0443\u043D\u0442 \u043C\u043E\u0434\u0435\u043B\u0438", auto: "\u0410\u0432\u0442\u043E (Jev)", "cli-default": "\u0441\u0432\u043E\u0439 \u0432\u0445\u043E\u0434 CLI" },
-      basis: { free: "\u0431\u0435\u0441\u043F\u043B\u0430\u0442\u043D\u043E \u0432 \u043F\u0440\u0435\u0434\u0435\u043B\u0430\u0445 \u043E\u043A\u043D\u0430", burning: "\u0440\u0430\u0441\u0445\u043E\u0434\u0443\u0435\u0442\u0441\u044F \u0431\u044B\u0441\u0442\u0440\u0435\u0435 \u043E\u043A\u043D\u0430", low: "\u0431\u043B\u0438\u0437\u043A\u043E \u043A \u0440\u0435\u0437\u0435\u0440\u0432\u0443", unknown: "\u043B\u0438\u043C\u0438\u0442 \u043D\u0435\u0438\u0437\u0432\u0435\u0441\u0442\u0435\u043D", plan: "\u043F\u043B\u0430\u043D \u0434\u043B\u044F \u043A\u043E\u0434\u0430", local: "\u043D\u0430 \u044D\u0442\u043E\u043C \u043A\u043E\u043C\u043F\u044C\u044E\u0442\u0435\u0440\u0435", api: "\u0446\u0435\u043D\u0430 API", unpriced: "\u0446\u0435\u043D\u0430 \u043D\u0435\u0438\u0437\u0432\u0435\u0441\u0442\u043D\u0430", unavailable: "\u043D\u0435\u0434\u043E\u0441\u0442\u0443\u043F\u043D\u043E" },
+      basis: { free: "\u0431\u0435\u0441\u043F\u043B\u0430\u0442\u043D\u043E \u0432 \u043F\u0440\u0435\u0434\u0435\u043B\u0430\u0445 \u043E\u043A\u043D\u0430", burning: "\u0440\u0430\u0441\u0445\u043E\u0434\u0443\u0435\u0442\u0441\u044F \u0431\u044B\u0441\u0442\u0440\u0435\u0435 \u043E\u043A\u043D\u0430", low: "\u0431\u043B\u0438\u0437\u043A\u043E \u043A \u0440\u0435\u0437\u0435\u0440\u0432\u0443", unknown: "\u043B\u0438\u043C\u0438\u0442 \u043D\u0435\u0438\u0437\u0432\u0435\u0441\u0442\u0435\u043D", plan: "\u043F\u043B\u0430\u043D \u0434\u043B\u044F \u043A\u043E\u0434\u0430", local: "\u043D\u0430 \u044D\u0442\u043E\u043C \u043A\u043E\u043C\u043F\u044C\u044E\u0442\u0435\u0440\u0435", flat: "\u0444\u0438\u043A\u0441\u0438\u0440\u043E\u0432\u0430\u043D\u043D\u044B\u0439 \u0442\u0430\u0440\u0438\u0444, \u0431\u0435\u0437 \u0446\u0435\u043D\u044B", api: "\u0446\u0435\u043D\u0430 API", unpriced: "\u0446\u0435\u043D\u0430 \u043D\u0435\u0438\u0437\u0432\u0435\u0441\u0442\u043D\u0430", unavailable: "\u043D\u0435\u0434\u043E\u0441\u0442\u0443\u043F\u043D\u043E" },
       score: (value, label, below) => value === null ? "\u0431\u0435\u0437 \u043E\u0446\u0435\u043D\u043A\u0438" : `\u043E\u0446\u0435\u043D\u043A\u0430 ${value.toFixed(1).replace(".", ",")}${label ? ` (${label})` : ""}${below ? `, \u043D\u0430 ${String(below).replace(".", ",")} \u043D\u0438\u0436\u0435 \u043B\u0443\u0447\u0448\u0435\u0439` : ""}`,
-      estimate: (e, fallback) => !e ? fallback : e.kind === "usd" ? e.high === 0 ? "$0" : `$${e.low}\u2013${e.high}` : e.kind === "window" ? `\u2248 ${e.share}% \u043E\u043A\u043D\u0430 ${e.window ?? ""}`.trim() : e.kind === "launches" ? `1 \u0437\u0430\u043F\u0443\u0441\u043A (${e.used} \u0438\u0437 ${e.allowance} \u0437\u0430 ${e.windowHours} \u0447)` : "\u043B\u0438\u043C\u0438\u0442 \u043D\u0435\u0438\u0437\u0432\u0435\u0441\u0442\u0435\u043D",
+      estimate: (e, fallback) => !e ? fallback : e.kind === "usd" ? e.high === 0 ? "$0" : `$${e.low}\u2013${e.high}` : e.kind === "window" ? `\u2248 ${e.share}% \u043E\u043A\u043D\u0430 ${e.window ?? ""}`.trim() : e.kind === "launches" ? `1 \u0437\u0430\u043F\u0443\u0441\u043A (${e.used} \u0438\u0437 ${e.allowance} \u0437\u0430 ${e.windowHours} \u0447)` : e.kind === "flat" ? "\u0444\u0438\u043A\u0441\u0438\u0440\u043E\u0432\u0430\u043D\u043D\u044B\u0439 \u0442\u0430\u0440\u0438\u0444, \u0431\u0435\u0437 \u0446\u0435\u043D\u044B" : "\u043B\u0438\u043C\u0438\u0442 \u043D\u0435\u0438\u0437\u0432\u0435\u0441\u0442\u0435\u043D",
       explore: "\u043F\u0440\u043E\u0431\u0430",
       unreadable: "\u0421\u043E\u0445\u0440\u0430\u043D\u0451\u043D\u043D\u044B\u0435 \u043D\u0430\u0441\u0442\u0440\u043E\u0439\u043A\u0438 \u043C\u0430\u0440\u0448\u0440\u0443\u0442\u0438\u0437\u0430\u0446\u0438\u0438 \u0435\u0449\u0451 \u043D\u0435 \u043F\u0440\u043E\u0447\u0438\u0442\u0430\u043D\u044B; \u043F\u043E\u043A\u0430 \u0438\u0445 \u043D\u0435\u043B\u044C\u0437\u044F \u043C\u0435\u043D\u044F\u0442\u044C.",
       cooling: "\u041E\u0442\u0434\u044B\u0445\u0430\u044E\u0442 \u043F\u043E\u0441\u043B\u0435 \u043B\u0438\u043C\u0438\u0442\u0430:"
@@ -953,7 +956,8 @@
           labelled2(t2.trust, selectOf2(`route-trust-${host3}`, settings.trust[key] ?? "unset", trustOptions, (value) => save2((next) => {
             if (value === "unset") delete next.trust[key];
             else next.trust[key] = value;
-          })))
+          }))),
+          flatToggle(host3, settings, t2, save2)
         ));
       }
       section.append(rows);
@@ -1078,6 +1082,14 @@
     for (const record of state2.recent.slice(0, 20)) recent.append(recentRow2(record, t2, page));
     section.append(recent);
     return section;
+  }
+  function flatToggle(host3, settings, t2, save2) {
+    const key = `host:${host3}`;
+    const input = el("input", { type: "checkbox", checked: settings.flat.includes(key), name: `route-flat-${host3}` });
+    input.addEventListener("change", () => save2((next) => {
+      next.flat = input.checked ? [.../* @__PURE__ */ new Set([...next.flat, key])] : next.flat.filter((entry) => entry !== key);
+    }));
+    return el("label", { className: "check" }, input, ` ${t2.flatRate}`);
   }
   function planRow(plan, state2, t2, save2, ago, trustOptions, allowOptions) {
     const edit = (change) => save2((next) => {

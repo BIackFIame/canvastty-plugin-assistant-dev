@@ -18,7 +18,7 @@ import type { AutoPreference } from '../auto/settings.ts';
 import { ruleDifficulty } from '../harness/router.ts';
 import type { DataClass, DataClassMode } from '../shared/settings.ts';
 import { ALIAS_TABLE_AS_OF, BUNDLED_ALIASES, resolveModel } from './aliases.ts';
-import { decide, estimateText, whyLine, type AccountRow, type AutoExpectation, type Candidate, type ProviderInfo, type RouteDecision } from './engine.ts';
+import { decide, estimateText, modelText, whyLine, type AccountRow, type AutoExpectation, type Candidate, type ProviderInfo, type RouteDecision } from './engine.ts';
 import { parseLimits, quotaOf, STALE_MS, type LimitsCache } from './limits.ts';
 import { classifyOutcome, RouteRecords, type OptionRecord, type OutcomeResult, type RouteRecord } from './records.ts';
 import { normalizeRouteSettings, validateRouteSettings, type RouteSettings } from './settings.ts';
@@ -31,6 +31,24 @@ const MATCH_MS = 3 * 60_000;
 const QUOTA_COOLDOWN_MS = 300_000;
 const MAX_COOLDOWN_MS = 24 * 3_600_000;
 const WRITE_DELAY_MS = 150;
+/** How long an orchestrator's full provider and account lists are kept for later compact calls. */
+const KEEP_MS = 30 * 60_000;
+
+const trimSlash = (path: string): string => path.length > 1 ? path.replace(/[\\/]+$/u, '') : path;
+
+/** "claude:ok codex:signed_out opencode @glm-53": CLIs (with an optional sign-in) and ready account ids. */
+export function parseDigest(value: unknown): { clis: Array<{ id: string; signIn: string | null }>; accounts: string[] } | null {
+  if (typeof value !== 'string' || !value.trim()) return null;
+  const clis: Array<{ id: string; signIn: string | null }> = [];
+  const accounts: string[] = [];
+  for (const token of value.slice(0, 2_000).split(/[\s,;]+/u).filter(Boolean).slice(0, 64)) {
+    const account = /^@([A-Za-z0-9._-]{1,64})$/u.exec(token);
+    if (account) { accounts.push(account[1]!); continue; }
+    const cli = /^([a-z0-9-]{1,40})(?::(ok|signed_out|expired|unknown))?$/u.exec(token);
+    if (cli && !clis.some(entry => entry.id === cli[1])) clis.push({ id: cli[1]!, signIn: cli[2] ?? null });
+  }
+  return clis.length || accounts.length ? { clis, accounts } : null;
+}
 
 export interface CallerCard { id: string; provider: string; role: string; parentSessionId?: string; title?: string; status?: string; cwd?: string; workingDirectory?: string }
 
@@ -47,6 +65,11 @@ export interface RouteServiceOptions {
   preference(): AutoPreference;
   autoExpectation?(view: TurnView, cardClass: DataClass): Promise<AutoExpectation | null>;
   cardClass(sessionId: string): DataClass;
+  /**
+   * A routed child appeared: the task its orchestrator gave `route` for it, as the orchestrator's text (never the
+   * person's), for that card's command review. Memory only.
+   */
+  delegatedTask?(childId: string, text: string, parentId: string): void;
   dataClassMode(): DataClassMode;
   now?: () => number;
   random?: () => number;
@@ -132,6 +155,10 @@ export class RouteService {
   private readonly live = new Map<string, Set<string>>();
   private readonly childSignIn = new Map<string, string>();
   private readonly seen = new Set<string>();
+  /** Each orchestrator's last full list_providers and list_routes (memory only, KEEP_MS). */
+  /** The task text of each recent decision until its child appears (memory only, never in the decision file). */
+  private readonly tasks = new Map<string, { text: string; cwd: string | null; at: number }>();
+  private readonly kept = new Map<string, { at: number; providers: ProviderInfo[] | null; rows: AccountRow[] | null }>();
   private readonly dir: string;
   private writeTimer: ReturnType<typeof setTimeout> | null = null;
   private pending: RouteRecord[] | null = null;
@@ -161,12 +188,20 @@ export class RouteService {
     const session = event.session as CallerCard & { exitCode?: number | null } | undefined;
     if (!session || typeof session.id !== 'string') return;
     const ended = event.type === 'closed' || event.type === 'exited' || session.status === 'exited' || (typeof session.exitCode === 'number');
-    if (ended) { this.childEnded(session.id); if (event.type === 'closed') this.seen.delete(session.id); return; }
+    if (ended) { this.childEnded(session.id); if (event.type === 'closed') { this.seen.delete(session.id); this.kept.delete(session.id); } return; }
     if (this.seen.has(session.id) || session.role !== 'subagent' || typeof session.parentSessionId !== 'string') { this.seen.add(session.id); return; }
     this.seen.add(session.id);
     while (this.seen.size > 4_096) this.seen.delete(this.seen.values().next().value!);
-    const match = this.records.unmatched(session.parentSessionId, session.provider, this.now(), MATCH_MS);
+    const where = [session.cwd, session.workingDirectory].filter((path): path is string => typeof path === 'string').map(trimSlash);
+    // A decision for which the orchestrator said where the child works matches only a child there.
+    const match = this.records.unmatched(session.parentSessionId, session.provider, this.now(), MATCH_MS, record => {
+      const cwd = this.tasks.get(record.id)?.cwd;
+      return !cwd || !where.length || where.includes(cwd);
+    });
     if (!match) return;
+    const task = this.tasks.get(match.record.id);
+    this.tasks.delete(match.record.id);
+    if (task) this.options.delegatedTask?.(session.id, task.text, session.parentSessionId);
     match.record.spawned = { session: session.id.slice(0, 8), option: match.option, at: this.now() };
     const signIn = match.record.options[match.option]!.signIn;
     this.childSignIn.set(session.id, signIn);
@@ -196,7 +231,7 @@ export class RouteService {
 
   async tool(name: string, caller: CallerCard, input: Record<string, unknown>): Promise<ToolAnswer> {
     if (name === 'route_outcome') return this.outcome(caller, input);
-    return this.route(caller, input);
+    return this.route(caller, input, name);
   }
 
   /** The decision for a task, without recording it (tests and the offline replay use it too). */
@@ -208,8 +243,7 @@ export class RouteService {
     const source = decision ? 'jev' : 'rules';
     // The task is a subagent's: the caller being an orchestrator does not make it medium.
     const view = turnView(decision ?? { difficulty: ruleDifficulty(task), strong: false }, source, task, { role: 'subagent' });
-    const providers = providersFrom(input.providers);
-    const accountRows = accountRowsFrom(input.accountRoutes);
+    const { providers, accountRows } = this.inputsFor(caller.id, input);
     if (accountRows.length) this.accountsSeen = { at: this.now(), rows: accountRows.map(({ launchOptions: _drop, ...row }) => row) };
     const cardClass = this.options.cardClass(caller.id);
     const { catalog, index } = this.options.catalog();
@@ -229,7 +263,40 @@ export class RouteService {
     return { decision: result, view, source };
   }
 
-  private async route(caller: CallerCard, input: Record<string, unknown>): Promise<ToolAnswer> {
+  /**
+   * What the orchestrator passed, or what it passed earlier: the full list_providers and list_routes are large, so a
+   * card's last full lists are kept (memory, 30 min) and a later call may send only the task, or a `digest` such as
+   * "claude:ok codex:signed_out opencode @glm-53" (CLIs with their sign-in, `@` a ready account id from list_routes).
+   */
+  private inputsFor(callerId: string, input: Record<string, unknown>): { providers: { list: ProviderInfo[]; given: boolean }; accountRows: AccountRow[] } {
+    const now = this.now();
+    for (const [id, kept] of this.kept) if (now - kept.at > KEEP_MS) this.kept.delete(id);
+    const full = providersFrom(input.providers);
+    const rows = accountRowsFrom(input.accountRoutes);
+    const kept = this.kept.get(callerId) ?? { at: now, providers: null, rows: null };
+    if (full.given) kept.providers = full.list;
+    if (Array.isArray(input.accountRoutes) && rows.length) kept.rows = rows;
+    if (full.given || rows.length) { kept.at = now; this.kept.set(callerId, kept); }
+    let providers = full.given ? full : kept.providers ? { list: kept.providers, given: true } : { list: [], given: false };
+    let accountRows = rows.length ? rows : kept.rows ?? [];
+    const digest = parseDigest(input.digest);
+    if (digest) {
+      if (digest.clis.length) {
+        const known = new Map(providers.list.map(entry => [entry.id, entry]));
+        // A CLI in the digest: the kept entry with its new sign-in, or a bare entry (its plugins are then assumed).
+        providers = { list: digest.clis.map(({ id, signIn }) => ({ ...(known.get(id) ?? { id, installed: true, available: true, subagent: true }), ...(signIn ? { signIn } : {}) })), given: true };
+      }
+      if (digest.accounts.length) {
+        const pool = [...accountRows, ...(this.accountsSeen && now - this.accountsSeen.at <= KEEP_MS ? this.accountsSeen.rows : [])];
+        accountRows = pool.filter((row, i) => digest.accounts.includes(row.accountId) && pool.findIndex(other => other.accountId === row.accountId && other.provider === row.provider) === i)
+          .map(row => ({ ...row, state: 'ready', launchOptions: row.launchOptions ?? { 'canvastty-accounts': { account: row.accountId, effort: 'default', trustFolder: false } } }));
+      }
+    }
+    if (accountRows.length) this.accountsSeen = { at: now, rows: accountRows.map(({ launchOptions: _drop, ...row }) => row) };
+    return { providers, accountRows };
+  }
+
+  private async route(caller: CallerCard, input: Record<string, unknown>, name = 'route'): Promise<ToolAnswer> {
     if (!clean(input.task, 4_000)) return { content: 'Give the subagent\'s task in `task`.', isError: true };
     if (!this.options.enabled()) return { content: 'Automatic routing is off in the Assistant settings: choose the provider and model yourself.' };
     const decided = await this.decideFor(caller, input);
@@ -247,7 +314,24 @@ export class RouteService {
       explored: decision.explored, preferred: decision.preferred, options: options.map(option => optionRecord(option, decision, now))
     };
     this.records.add(record);
-    const answer = (c: Candidate, i: number) => ({ spawn: c.spawn, why: record.options[i]!.why, estimate: record.options[i]!.estimate, route: { kind: c.kind, label: c.label }, score: record.options[i]!.score });
+    const now2 = this.now();
+    for (const [id, kept] of this.tasks) if (now2 - kept.at > MATCH_MS) this.tasks.delete(id);
+    const cwd = clean(input.cwd, 4_096);
+    this.tasks.set(record.id, { text: clean(input.task, 2_000), cwd: cwd ? trimSlash(cwd) : null, at: now2 });
+    while (this.tasks.size > 64) this.tasks.delete(this.tasks.keys().next().value!);
+    const compact = input.compact === true || (input.compact !== false && name === 'pick_route');
+    if (compact) {
+      const short = (c: Candidate, i: number): string => `${modelText(c)}; ${record.options[i]!.score === null ? 'no score' : `score ${record.options[i]!.score}`}; ${record.options[i]!.estimate}`;
+      return {
+        content: [
+          `${short(decision.top, 0)}${decision.explored ? ' (exploring a new model)' : ''}.`,
+          ...decision.alternatives.map((c, i) => `Or ${i + 1}: ${short(c, i + 1)}.`),
+          `Pass spawn to spawn_agent unchanged (add title, cwd, prompt). Then route_outcome {decisionId:"${record.id}"}.`,
+          JSON.stringify({ decisionId: record.id, spawn: decision.top.spawn, kind: decision.top.kind, alternatives: decision.alternatives.map(c => ({ spawn: c.spawn, kind: c.kind })) })
+        ].join('\n')
+      };
+    }
+    const answer = (c: Candidate, i: number) => ({ spawn: c.spawn, why: record.options[i]!.why, estimate: record.options[i]!.estimate, route: { kind: c.kind, label: c.label }, kind: c.kind, score: record.options[i]!.score });
     const top = answer(decision.top, 0);
     const lines = [
       `Suggested: ${record.options[0]!.why}.`,
