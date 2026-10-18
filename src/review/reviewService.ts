@@ -491,8 +491,10 @@ export class ReviewService {
       if (!action.commandCwd && request.agentCwd) action.commandCwd = request.agentCwd;
       const git = this.options.git === null ? null : this.options.git ?? defaultGit;
       const home = this.options.home ?? homedir();
+      // Before the facts: a whole-content write is read whole (FIELD_BOUNDS.wholeContent), so it can count as seen.
+      const visible = wholeContentWrite(request.tool.name, request.input, request.truncated, action.commandCwd ?? request.cwd) && !action.inputTruncated;
       const facts = await computeCommandFacts({
-        action, root: request.cwd, sessionId: request.sessionId, requestTypedByPerson: personRequest?.byPerson === true,
+        action, root: request.cwd, sessionId: request.sessionId, requestTypedByPerson: personRequest?.byPerson === true, wholeContent: visible,
         tracker: this.tracker, git, home, agentRoots: [join(home, '.claude')],
         signal: AbortSignal.any([signal, AbortSignal.timeout(REVIEW_LIMITS.factsMs)])
       });
@@ -509,7 +511,6 @@ export class ReviewService {
         this.remember(request.sessionId, summary, mode, { outcome: 'deny', act: 'deny', tier: 'rule', reason: 'rule-deny', model: null, auditId: null });
         return { verdict: 'deny', reason };
       }
-      const visible = wholeContentWrite(request.tool.name, request.input, request.truncated, action.commandCwd ?? request.cwd) && !action.inputTruncated;
       const run = (): Promise<CommandReviewVerdict> => this.ladder(request, state, personRequest?.text ?? null, facts, rules, action.content, signal, visible);
       if (mode === 'shadow' || mode === 'suggest') {
         // Nothing is enforced (R10); the agent is not held. The review runs on its own, for the log and the badge.

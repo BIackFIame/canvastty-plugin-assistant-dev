@@ -111,7 +111,8 @@ export function reviewRequest(input: CommandReviewInput, map?: AssistantRequest[
   if (facts.command !== null) fields.push({ name: 'action.command', value: facts.command, dataClass: input.dataClass, disclosure: 'content', bound: FIELD_BOUNDS.command });
   else {
     if (facts.path !== null) fields.push({ name: 'action.path', value: facts.path, dataClass: input.dataClass, disclosure: 'content', bound: 500 });
-    if (input.content !== null) fields.push({ name: 'action.content', value: input.content, dataClass: input.dataClass, disclosure: 'content', bound: FIELD_BOUNDS.command });
+    // A whole-content write is read whole (up to the review's content limit), so that it can count as seen.
+    if (input.content !== null) fields.push({ name: 'action.content', value: input.content, dataClass: input.dataClass, disclosure: 'content', bound: input.contentVisible ? FIELD_BOUNDS.wholeContent : FIELD_BOUNDS.command });
   }
   fields.push({ name: 'action.shape', value: facts.shape, dataClass: 'D0', disclosure: 'metadata' });
   fields.push({ name: 'facts', value: factPhrases(facts), dataClass: 'D0', disclosure: 'metadata' });

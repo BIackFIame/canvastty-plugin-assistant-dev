@@ -353,8 +353,10 @@ test('live run 3: CanvasTTY 1.8.2\'s OpenCode bridge sends write as `edit` {file
   const existing = await review.decide(bridged('existing/slugify.mjs', code), 10_000);
   assert.equal(existing.verdict, 'deny');
   assert.match(existing.reason, /no second reviewer is set up/u);
-  // Over the 2,000-character bound the reviewer did not see it all: not allowed.
-  assert.notEqual((await review.decide(bridged('slugify.mjs', code + '// x\n'.repeat(500)), 10_000)).verdict, 'allow');
+  // A new file is read whole up to the review's content limit (16,384; run 11): 2,600 characters pass…
+  assert.equal((await review.decide(bridged('slugify.mjs', code + '// x\n'.repeat(500)), 10_000)).verdict, 'allow');
+  // …above it the reviewer would not see it all: not allowed.
+  assert.notEqual((await review.decide(bridged('slugify.mjs', code + '// x\n'.repeat(4_000)), 10_000)).verdict, 'allow');
   // An edit that carries oldString/newString (another bridge or CLI) is never taken for a whole file.
   assert.notEqual((await review.decide({ ...bridged('slugify.mjs', code), input: { file_path: join(project, 'slugify.mjs'), content: code, old_string: 'x' } }, 10_000)).verdict, 'allow');
   // With the core fix (fix/opencode-write-tool-name: write sent as `Write`), an overwrite is whole-content too.
@@ -658,4 +660,52 @@ test('live run 10: a file the trusted task names, in its folder, passes the trus
   assert.notEqual((await decide('other/textstats.mjs')).answer.verdict, 'allow');
   // Its own folder counts when the task names none: the child works in other/, and the file is there.
   assert.equal((await decide('other/textstats.mjs', { childCwd: join(project, 'other') })).answer.verdict, 'allow');
+});
+
+test('live run 11: two new files reviewed at once; the 2,026-character test file (serves 0.94, effect_hidden 0.30) passes the trust chain like the module', async () => {
+  const { computeCommandFacts } = await import('../src/review/commandFacts.ts');
+  const { FIELD_BOUNDS } = await import('../src/shared/catalog.ts');
+  const { REVIEW_LIMITS } = await import('../src/shared/commandReview.ts');
+  assert.equal(FIELD_BOUNDS.wholeContent, REVIEW_LIMITS.contentChars, 'a whole-content write is read up to the review\'s content limit');
+  const PERSON = 'Route two subagents: T explains Bloom filters in two sentences; C creates new files textstats.mjs and textstats.test.mjs (node:test, 6+ cases) in code/, no shell commands.';
+  const CHILD = 'Create code/textstats.mjs (wordCount, topWords, readingTimeMinutes) and code/textstats.test.mjs with node:test, at least 6 cases. Only these two new files, no shell.';
+  const dir = join(project, 'code11');
+  mkdirSync(dir, { recursive: true });
+  const module = `export function wordCount(text) { return text.split(/\\s+/u).filter(Boolean).length; }\n${'// helper\n'.repeat(60)}`.slice(0, 708);
+  const testFile = `import test from 'node:test';\nimport assert from 'node:assert/strict';\nimport { wordCount } from './textstats.mjs';\n${'test(\'counts words\', () => { assert.equal(wordCount(\'a b c\'), 3); });\n'.repeat(40)}`.slice(0, 2_026);
+  assert.equal(testFile.length, 2_026);
+  // The cause: the 2,000-character command bound counted this content as cut, so it was never "seen".
+  const action = { kind: 'edit', command: null, paths: [join(dir, 'textstats.test.mjs')], content: testFile, inputTruncated: false, commandCwd: dir, url: null };
+  assert.equal((await computeCommandFacts({ action, root: project, sessionId: 'x', requestTypedByPerson: true, git: null, home })).truncated, true, 'as before: the command bound');
+  assert.equal((await computeCommandFacts({ action, root: project, sessionId: 'x', requestTypedByPerson: true, git: null, home, wholeContent: true })).truncated, false, 'a whole-content write: its own bound');
+  // Run 11's answers, and an engine that cuts fields at their bound as the real one does (then nothing qualifies).
+  const engine = fakeEngine({ mode: 'auto', qualified: false, smart: null }); // as live: nothing qualified
+  engine.hasVerifier = () => false;
+  const sent = [];
+  const ask = engine.ask.bind(engine);
+  engine.ask = async (request, ctx) => {
+    const decision = await ask(request, ctx);
+    const content = request.fields.find(field => field.name === 'action.content');
+    const truncated = request.fields.some(field => typeof field.value === 'string' && field.bound !== undefined && field.value.length > field.bound);
+    sent.push({ chars: content?.value.length, bound: content?.bound, truncated });
+    const test = /textstats\.test\.mjs/u.test(request.fields.find(field => field.name === 'action.path')?.value ?? '');
+    const answers = test ? answersOf(0.94, 0.02, { effect_hidden: 0.3, destructive: 0.06, obfuscated: 0.05 }) : answersOf(0.9, 0.02, { effect_hidden: 0.18, destructive: 0.05 });
+    const mapped = request.map?.(answers, {}, { variant: 'full', truncated, family: 'jev', autoCapable: true });
+    return { ...decision, answers, truncated, outcome: mapped?.outcome ?? null, qualifiedOutcome: truncated ? null : mapped?.qualifiedOutcome ?? null };
+  };
+  const { review } = service(engine, {}, { trustChain: () => true });
+  review.noteLaunch('orch11', { task: PERSON, dataClass: null, triage: false, role: 'orchestrator' });
+  review.noteLaunch('c11', { task: null, dataClass: null, triage: false, role: 'subagent', parentSessionId: 'orch11' });
+  review.noteTurn('c11', CHILD, { role: 'subagent', parentSessionId: 'orch11' });
+  const call = (file, content) => ({ ...write('c11', `code11/${file}`), agentCwd: dir, input: { filePath: join(dir, file), content } });
+  // Both in the same moment, as live.
+  const [moduleAnswer, testAnswer] = await Promise.all([review.decide(call('textstats.mjs', module), 10_000), review.decide(call('textstats.test.mjs', testFile), 10_000)]);
+  assert.equal(moduleAnswer.verdict, 'allow', 'the module, at 0.90 and named');
+  assert.equal(testAnswer.verdict, 'allow', 'the test file, at 0.94 and named, with effect_hidden 0.30 excepted for a whole-content new file');
+  assert.match(moduleAnswer.reason, /trust chain/u);
+  assert.match(testAnswer.reason, /trust chain/u);
+  assert.deepEqual(sent.map(entry => [entry.bound, entry.truncated]), [[16_384, false], [16_384, false]], 'the reviewer read both files whole');
+  // Still refused: the same file above the review's content limit (cut for the reviewer), or not named and below 0.95.
+  const big = await review.decide(call('textstats.big.mjs', `// textstats.big.mjs\n${'x'.repeat(17_000)}`), 10_000);
+  assert.notEqual(big.verdict, 'allow');
 });

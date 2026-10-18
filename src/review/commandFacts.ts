@@ -1110,6 +1110,8 @@ export interface FactsInput {
   home?: string;
   agentRoots?: readonly string[];
   signal?: AbortSignal;
+  /** The call's whole new content is in its input (wholeContentWrite): its content bound is FIELD_BOUNDS.wholeContent. */
+  wholeContent?: boolean;
 }
 
 const TOOL_LABELS: Readonly<Record<string, string>> = { execute: 'Bash', edit: 'Edit', delete: 'Delete', move: 'Move', read: 'Read', search: 'Search', fetch: 'Fetch' };
@@ -1133,7 +1135,7 @@ export function analyzeAction(action: ReviewAction, root: string, options: { hom
   return analyzeInternal(action, root, options).facts;
 }
 
-function analyzeInternal(action: ReviewAction, root: string, options: { home?: string; agentRoots?: readonly string[]; requestTypedByPerson?: boolean }): { facts: CommandFacts; sourced: Target[]; scripts: Target[] } {
+function analyzeInternal(action: ReviewAction, root: string, options: { home?: string; agentRoots?: readonly string[]; requestTypedByPerson?: boolean; wholeContent?: boolean }): { facts: CommandFacts; sourced: Target[]; scripts: Target[] } {
   const ctx = pathContext(root, options.home, options.agentRoots);
   const acc = freshAcc(ctx);
   const commandCwd = action.commandCwd ? resolveTarget(action.commandCwd, ctx.rootReal, ctx) : null;
@@ -1150,7 +1152,7 @@ function analyzeInternal(action: ReviewAction, root: string, options: { home?: s
   } else {
     const targets = action.paths.map(item => resolveTarget(item, cwd, ctx, kind === 'delete'));
     path = targets.find(t => t.rel !== null)?.rel ?? null;
-    if (action.content !== null && action.content.length > FIELD_BOUNDS.command) truncated = true;
+    if (action.content !== null && action.content.length > (options.wholeContent ? FIELD_BOUNDS.wholeContent : FIELD_BOUNDS.command)) truncated = true;
     switch (kind) {
       case 'edit': case 'move':
         acc.writes.push(...targets); classify(acc, 'edit_in_project', TOOL_LABELS[kind]!.toLowerCase()); break;
@@ -1212,7 +1214,7 @@ function analyzeInternal(action: ReviewAction, root: string, options: { home?: s
  * Bounded by `REVIEW_LIMITS.factsMs` through the caller's signal; a fact git could not give is taken as risky.
  */
 export async function computeCommandFacts(input: FactsInput): Promise<CommandFacts> {
-  const { facts, sourced, scripts } = analyzeInternal(input.action, input.root, { ...(input.home ? { home: input.home } : {}), ...(input.agentRoots ? { agentRoots: input.agentRoots } : {}), requestTypedByPerson: input.requestTypedByPerson });
+  const { facts, sourced, scripts } = analyzeInternal(input.action, input.root, { ...(input.home ? { home: input.home } : {}), ...(input.agentRoots ? { agentRoots: input.agentRoots } : {}), requestTypedByPerson: input.requestTypedByPerson, ...(input.wholeContent ? { wholeContent: true } : {}) });
   const signal = input.signal ?? new AbortController().signal;
   const rootReal = realish(resolve(input.root));
 

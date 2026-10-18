@@ -530,7 +530,17 @@ var USE_CASE_PER_CARD_PER_MINUTE = { "task.route": 10 };
 var LOCAL_CONCURRENCY = Object.freeze({ inFlight: 1, queue: 4 });
 var SHADOW_RECORDER = Object.freeze({ maxEntries: 2e3, ttlMs: 24 * 36e5 });
 var LOG_POLICY = Object.freeze({ retentionDays: 90, maxTotalBytes: 50 * 1024 * 1024, summaryMaxChars: 80, decimals: 3 });
-var FIELD_BOUNDS = Object.freeze({ task: 2e3, personRequest: 1500, command: 2e3 });
+var FIELD_BOUNDS = Object.freeze({
+  task: 2e3,
+  personRequest: 1500,
+  command: 2e3,
+  /**
+   * The new content of a whole-content write (a new file, a whole-file write): the review must read all of it to
+   * count it as seen, so it gets the review's whole content limit (REVIEW_LIMITS.contentChars), not the command's
+   * 2,000. Live run 11: a 2,026-character test file was cut at 2,000 and so never counted as seen.
+   */
+  wholeContent: 16384
+});
 
 // src/shared/settings.ts
 var DATA_CLASSES = ["D0", "D1", "D2", "D3"];
@@ -7161,7 +7171,7 @@ function analyzeInternal(action, root, options) {
   } else {
     const targets = action.paths.map((item) => resolveTarget(item, cwd, ctx, kind === "delete"));
     path = targets.find((t) => t.rel !== null)?.rel ?? null;
-    if (action.content !== null && action.content.length > FIELD_BOUNDS.command) truncated = true;
+    if (action.content !== null && action.content.length > (options.wholeContent ? FIELD_BOUNDS.wholeContent : FIELD_BOUNDS.command)) truncated = true;
     switch (kind) {
       case "edit":
       case "move":
@@ -7251,7 +7261,7 @@ function analyzeInternal(action, root, options) {
   return { facts, sourced: acc.sourced, scripts: acc.scripts };
 }
 async function computeCommandFacts(input) {
-  const { facts, sourced, scripts } = analyzeInternal(input.action, input.root, { ...input.home ? { home: input.home } : {}, ...input.agentRoots ? { agentRoots: input.agentRoots } : {}, requestTypedByPerson: input.requestTypedByPerson });
+  const { facts, sourced, scripts } = analyzeInternal(input.action, input.root, { ...input.home ? { home: input.home } : {}, ...input.agentRoots ? { agentRoots: input.agentRoots } : {}, requestTypedByPerson: input.requestTypedByPerson, ...input.wholeContent ? { wholeContent: true } : {} });
   const signal = input.signal ?? new AbortController().signal;
   const rootReal = realish(resolve2(input.root));
   const npmFiles = facts.npmScripts.length ? npmScriptFiles(rootReal, facts.npmScripts) : [];
@@ -7311,7 +7321,7 @@ function reviewRequest(input, map2) {
   if (facts.command !== null) fields.push({ name: "action.command", value: facts.command, dataClass: input.dataClass, disclosure: "content", bound: FIELD_BOUNDS.command });
   else {
     if (facts.path !== null) fields.push({ name: "action.path", value: facts.path, dataClass: input.dataClass, disclosure: "content", bound: 500 });
-    if (input.content !== null) fields.push({ name: "action.content", value: input.content, dataClass: input.dataClass, disclosure: "content", bound: FIELD_BOUNDS.command });
+    if (input.content !== null) fields.push({ name: "action.content", value: input.content, dataClass: input.dataClass, disclosure: "content", bound: input.contentVisible ? FIELD_BOUNDS.wholeContent : FIELD_BOUNDS.command });
   }
   fields.push({ name: "action.shape", value: facts.shape, dataClass: "D0", disclosure: "metadata" });
   fields.push({ name: "facts", value: factPhrases(facts), dataClass: "D0", disclosure: "metadata" });
@@ -7927,11 +7937,13 @@ var ReviewService = class {
       if (!action.commandCwd && request.agentCwd) action.commandCwd = request.agentCwd;
       const git = this.options.git === null ? null : this.options.git ?? defaultGit;
       const home = this.options.home ?? homedir2();
+      const visible = wholeContentWrite(request.tool.name, request.input, request.truncated, action.commandCwd ?? request.cwd) && !action.inputTruncated;
       const facts = await computeCommandFacts({
         action,
         root: request.cwd,
         sessionId: request.sessionId,
         requestTypedByPerson: personRequest?.byPerson === true,
+        wholeContent: visible,
         tracker: this.tracker,
         git,
         home,
@@ -7948,7 +7960,6 @@ var ReviewService = class {
         this.remember(request.sessionId, summary, mode, { outcome: "deny", act: "deny", tier: "rule", reason: "rule-deny", model: null, auditId: null });
         return { verdict: "deny", reason };
       }
-      const visible = wholeContentWrite(request.tool.name, request.input, request.truncated, action.commandCwd ?? request.cwd) && !action.inputTruncated;
       const run = () => this.ladder(request, state, personRequest?.text ?? null, facts, rules, action.content, signal, visible);
       if (mode === "shadow" || mode === "suggest") {
         void run().then((verdict2) => {

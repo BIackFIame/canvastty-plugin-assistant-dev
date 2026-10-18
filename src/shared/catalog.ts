@@ -302,4 +302,10 @@ export const SHADOW_RECORDER = Object.freeze({ maxEntries: 2_000, ttlMs: 24 * 3_
 export const LOG_POLICY = Object.freeze({ retentionDays: 90, maxTotalBytes: 50 * 1024 * 1024, summaryMaxChars: 80, decimals: 3 });
 
 /** The bounds of the state fields each use case sends (§3.1), in characters. */
-export const FIELD_BOUNDS = Object.freeze({ task: 2_000, personRequest: 1_500, command: 2_000 });
+export const FIELD_BOUNDS = Object.freeze({ task: 2_000, personRequest: 1_500, command: 2_000,
+  /**
+   * The new content of a whole-content write (a new file, a whole-file write): the review must read all of it to
+   * count it as seen, so it gets the review's whole content limit (REVIEW_LIMITS.contentChars), not the command's
+   * 2,000. Live run 11: a 2,026-character test file was cut at 2,000 and so never counted as seen.
+   */
+  wholeContent: 16_384 });

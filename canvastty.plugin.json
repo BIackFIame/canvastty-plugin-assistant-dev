@@ -30,8 +30,8 @@
     },
     {
       "path": "services/assistant.mjs",
-      "bytes": 860191,
-      "sha256": "daf644e533a029371347016fe27ca38d74e2e7aa930a5cd8d7741594311067d1"
+      "bytes": 860749,
+      "sha256": "7a3c9671ed061cfaa0bcb1c375d76a8ea6bd2f06f20ee60a4b3bdbbacbc35327"
     },
     {
       "path": "settings/assistant.html",
@@ -40,8 +40,8 @@
     },
     {
       "path": "settings/assistant.js",
-      "bytes": 141407,
-      "sha256": "d764263543ac921f90d898f5ea0982b609d5af4fd12733aea4b1994c32f94fdd"
+      "bytes": 141797,
+      "sha256": "13d909c0bcc32aef7f08470ee1a6f39dc89db6d1160df5e620c046b049af069c"
     },
     {
       "path": "settings/assistant.css",

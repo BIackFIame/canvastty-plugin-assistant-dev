@@ -713,7 +713,17 @@
   var LOCAL_CONCURRENCY = Object.freeze({ inFlight: 1, queue: 4 });
   var SHADOW_RECORDER = Object.freeze({ maxEntries: 2e3, ttlMs: 24 * 36e5 });
   var LOG_POLICY = Object.freeze({ retentionDays: 90, maxTotalBytes: 50 * 1024 * 1024, summaryMaxChars: 80, decimals: 3 });
-  var FIELD_BOUNDS = Object.freeze({ task: 2e3, personRequest: 1500, command: 2e3 });
+  var FIELD_BOUNDS = Object.freeze({
+    task: 2e3,
+    personRequest: 1500,
+    command: 2e3,
+    /**
+     * The new content of a whole-content write (a new file, a whole-file write): the review must read all of it to
+     * count it as seen, so it gets the review's whole content limit (REVIEW_LIMITS.contentChars), not the command's
+     * 2,000. Live run 11: a 2,026-character test file was cut at 2,000 and so never counted as seen.
+     */
+    wholeContent: 16384
+  });
 
   // src/shared/settings.ts
   var RANK = Object.freeze({ D0: 0, D1: 1, D2: 2, D3: 3 });
