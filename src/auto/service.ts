@@ -4,8 +4,11 @@ import type { Locale } from '../harness/i18n.ts';
 import type { Badge } from '../harness/badges.ts';
 import type { DataClass, DataClassMode } from '../shared/settings.ts';
 import bundledCatalog from './catalog/bundled.json' with { type: 'json' };
-import { CatalogStore, type CatalogStatus } from './catalog/catalog.ts';
-import { BenchmarkIndex, TASK_TYPES, type TaskType } from './catalog/scoring.ts';
+import { CatalogStore, type CatalogStatus, type RoutingCatalog } from './catalog/catalog.ts';
+import { BenchmarkIndex, bareModelId, TASK_TYPES, type TaskType } from './catalog/scoring.ts';
+import { normalizeModelIdentity, type ReasoningEffort } from './catalog/identity.ts';
+import { upstreamAllowed } from './classify.ts';
+import { plan, type TurnView } from './select.ts';
 import { AUTO_STRINGS, badgeText } from './i18n.ts';
 import { buildInventory, type Inventory, type InventoryEntry } from './inventory.ts';
 import { autoRefusal, limitsFor, openCodeContribution } from './launch.ts';
@@ -161,6 +164,31 @@ export class AutoService {
       return { refuse: { reason: strings.router } };
     }
     return openCodeContribution({ port: granted.port, token: granted.token, limit: limitsFor(inventory) });
+  }
+
+  /** The catalog and its benchmark index, as Auto compares models (for agent-level routing). */
+  routingIndex(): { catalog: RoutingCatalog; index: BenchmarkIndex } {
+    this.inventory();
+    return { catalog: this.catalog.routing(), index: this.index!.index };
+  }
+
+  /**
+   * For agent-level routing: the model Auto's request router would pick for a task like this one (its expected
+   * value; the router still decides per turn), or null when Auto has no enabled upstream with a key.
+   */
+  async expectation(view: TurnView, cardClass: DataClass): Promise<{ model: string; identity: string | null; effort: ReasoningEffort | null; priceIn: number | null; priceOut: number | null; trusted: boolean } | null> {
+    const mode = this.options.dataClassMode();
+    const keyed: AutoUpstream[] = [];
+    for (const upstream of this.settings.upstreams) if (upstream.enabled && (upstream.key === 'none' || await this.keyFor(upstream).catch(() => null))) keyed.push(upstream);
+    if (!keyed.length || this.settings.dailyUsdCap <= 0) return null;
+    const ids = new Set(keyed.map(upstream => upstream.id));
+    const entries = this.inventory().entries.filter(entry => ids.has(entry.upstream.id) && !entry.excluded);
+    const trustedEntries = entries.filter(entry => upstreamAllowed(entry.upstream, cardClass, mode));
+    const usable = trustedEntries.length ? trustedEntries : entries;
+    const top = plan(usable, { kind: 'turn', view, preferred: null }, { preference: this.settings.preference, cheaperFallback: this.settings.cheaperFallback }).list[0];
+    if (!top) return null;
+    const bare = bareModelId(top.model);
+    return { model: top.model, identity: bare ? normalizeModelIdentity(bare) : null, effort: top.effort, priceIn: top.priceIn, priceOut: top.priceOut, trusted: trustedEntries.length > 0 };
   }
 
   /** For `route`: the launch options that give a subagent Auto too, when the caller itself runs on it. */

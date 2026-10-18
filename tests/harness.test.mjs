@@ -158,16 +158,19 @@ test('project flows: JSON and a YAML subset, shown as written; bad files are nam
   assert.equal(builtInFlows('en')[0].name, 'Executor and reviewer');
 });
 
-test('route tool: a suggestion to pass to spawn_agent; off in settings says so; a decision model\'s difficulty wins', async () => {
-  const { harness: h } = harness({ modelDifficulty: async () => 'simple' });
-  const answer = await h.tool('route', orchestrator, { task: 'Design a new protocol', providers: { providers } });
-  assert.match(answer.content, /Pass these to spawn_agent: \{"provider":"claude","model":"claude-haiku-4","effort":"low"\}/u);
-  assert.match(answer.content, /decision model/u);
-  const rules = harness();
-  assert.match((await rules.harness.tool('route', orchestrator, { task: 'Design a new protocol', providers })).content, /claude-opus-4/u);
-  assert.equal((await rules.harness.tool('route', orchestrator, {})).isError, true);
-  rules.harness.settings.routing = false;
-  assert.match((await rules.harness.tool('route', orchestrator, { task: 'x' })).content, /routing is off/u);
+test('route tool (v2): spawn values to pass on; off in settings says so; the decision model\'s view wins over word rules', async () => {
+  const assistant = new Assistant({ host: fakeHost(), dataDir: mkdtempSync(join(base, 'data-')), git: null });
+  assistant.routing.options.classify = async () => ({ difficulty: 'simple', strong: false, type: 'coding', confidence: 0.95 });
+  // Nothing declared and only Claude Code signed in: its own default model on its own sign-in, every model-setting plugin named.
+  const answer = await assistant.tool('route', orchestrator, { task: 'Design a new protocol', providers: { providers } });
+  assert.match(answer.content, /Pass these to spawn_agent .*: \{"provider":"claude","launchOptions":\{"canvastty-assistant":\{"model":"off"\}\}\}/u);
+  assert.match(answer.content, /Task read as coding, small \(by the decision model\)/u);
+  assert.doesNotMatch(answer.content, /claude-haiku-4|claude-opus-4/u, 'model names are never ranked by their words');
+  assistant.routing.options.classify = async () => null;
+  assert.match((await assistant.tool('route', orchestrator, { task: 'Design a new protocol', providers })).content, /Task read as \w+, large \(by word rules\)/u);
+  assert.equal((await assistant.tool('route', orchestrator, {})).isError, true);
+  assistant.harness.settings.routing = false;
+  assert.match((await assistant.tool('route', orchestrator, { task: 'x' })).content, /routing is off/u);
 });
 
 test('flows: plan → preview (badge, pending) → Start → flow_status hands spawn values; the roles land on the board', async () => {

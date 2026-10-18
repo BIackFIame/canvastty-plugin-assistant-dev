@@ -211,17 +211,19 @@ test('several Auto cards: Jev answers up to 10 turns a minute per card, then tha
   assert.equal(assistant.review.requestFor('card-quiet001').text, 'Investigate the flaky login test');
 });
 
-test('route: a caller on Auto (Jev) gets Auto launch options for an OpenCode subagent, and no fixed model', async t => {
+test('route: Model: Auto (Jev) is a route for an OpenCode subagent: Auto launch options and no fixed model; OpenCode\'s own default is never offered', async t => {
   const { assistant } = await assistantWith(t);
   const caller = { id: 'orch-on-auto', provider: 'opencode', role: 'orchestrator', title: 'o', status: 'idle', cwd: base, workingDirectory: base };
   const providers = [{ id: 'opencode', available: true, subagent: true, model: { supported: true, known: ['zai/glm-flash', 'zai/glm-pro'] }, efforts: [] }];
-  const before = await assistant.tool('route', caller, { task: 'Rename a variable', providers });
-  assert.doesNotMatch(before.content, /launchOptions/u, 'not on Auto yet');
   await assistant.launch(launch({ sessionId: 'orch-on-auto', role: 'orchestrator' }));
   const answer = await assistant.tool('route', caller, { task: 'Rename a variable', providers });
   const json = JSON.parse(answer.content.split('\n').at(-1));
   assert.deepEqual(json.spawn, { provider: 'opencode', launchOptions: { 'canvastty-assistant': { model: 'auto' } } });
   assert.match(answer.content, /Model: Auto \(Jev\)/u);
+  assert.equal(json.alternatives.length, 0, 'zai/glm-* were not declared, and OpenCode Zen is never used silently');
+  // Auto turned off: nothing usable on OpenCode, and route says so instead of falling back to OpenCode's default.
+  await assistant.auto.save({ ...assistant.auto.settings, upstreams: assistant.auto.settings.upstreams.map(upstream => ({ ...upstream, enabled: false })) });
+  assert.match((await assistant.tool('route', caller, { task: 'Rename a variable', providers })).content, /^No route is usable now/u);
 });
 
 test('the page: save validates and stores, state shows whether keys are saved (never a key), test lists missing models', async t => {

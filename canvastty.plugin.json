@@ -4,8 +4,8 @@
   "name": "CanvasTTY Assistant",
   "name.ru": "Ассистент CanvasTTY",
   "version": "0.2.0",
-  "description": "The Assistant: reviews agents' shell commands and file writes before they run, and helps orchestrators: a route tool that suggests provider and model for a subagent, flows (roles and tasks an orchestrator asks you to approve), a task board, loop alerts on cards a session report, and Model: Auto (Jev) for OpenCode (a local, key-protected router on 127.0.0.1 that picks an allowed model per turn). Decision models (Jev, Laya, Eikos, Ollama) are optional. Settings → Plugins → CanvasTTY Assistant → Settings.",
-  "description.ru": "Помощник: проверяет команды и записи файлов агентов до запуска и помогает оркестраторам: инструмент route предлагает провайдера и модель для субагента, сценарии (роли и задачи, которые оркестратор просит одобрить), доска задач, сигнал «цикл?» на окне отчёт о сессии и модель «Авто (Jev)» для OpenCode (локальный маршрутизатор на 127.0.0.1 с ключом, выбирает разрешённую модель на каждый ход). Модели решений (Jev, Laya, Eikos, Ollama) не обязательны. Настройки → Плагины → Ассистент CanvasTTY → Настройки.",
+  "description": "The Assistant: reviews agents' shell commands and file writes before they run, and helps orchestrators: a route tool that picks where a subagent runs (your subscriptions, coding plans, model accounts or Auto), flows (roles and tasks an orchestrator asks you to approve), a task board, loop alerts on cards a session report, and Model: Auto (Jev) for OpenCode (a local, key-protected router on 127.0.0.1 that picks an allowed model per turn). Decision models (Jev, Laya, Eikos, Ollama) are optional. Settings → Plugins → CanvasTTY Assistant → Settings.",
+  "description.ru": "Помощник: проверяет команды и записи файлов агентов до запуска и помогает оркестраторам: инструмент route выбирает, где запустить субагента (ваши подписки, планы для кода, аккаунты моделей или «Авто»), сценарии (роли и задачи, которые оркестратор просит одобрить), доска задач, сигнал «цикл?» на окне отчёт о сессии и модель «Авто (Jev)» для OpenCode (локальный маршрутизатор на 127.0.0.1 с ключом, выбирает разрешённую модель на каждый ход). Модели решений (Jev, Laya, Eikos, Ollama) не обязательны. Настройки → Плагины → Ассистент CanvasTTY → Настройки.",
   "author": "CanvasTTY contributors",
   "permissions": [
     "storage",
@@ -14,7 +14,8 @@
     "launch:contribute",
     "tools:agents",
     "sessions:events",
-    "cards:decorate"
+    "cards:decorate",
+    "limits:read"
   ],
   "coreFiles": [
     {
@@ -29,8 +30,8 @@
     },
     {
       "path": "services/assistant.mjs",
-      "bytes": 769180,
-      "sha256": "fecc0b0854bf48f1821216d4f2717f27fc942dd4a31e119b05a932d697db4435"
+      "bytes": 838203,
+      "sha256": "9c07b3b46489a4f8a167bab1efbab1b0a08fa9dba54fb5326753faff208d9813"
     },
     {
       "path": "settings/assistant.html",
@@ -189,7 +190,7 @@
         },
         {
           "name": "route",
-          "description": "Before spawn_agent: suggests provider, model and effort for a subagent's task (a small model for routine work, the strongest offered for hard work). Pass list_providers().providers as `providers` so it picks from what is available. Pass the answer's spawn values to spawn_agent; nothing is started here. Uses a decision model when one is set up, else simple rules.",
+          "description": "Before spawn_agent: where a subagent should run, as CLI, sign-in (the person's subscription on that CLI, a coding plan, a model account, or Model: Auto (Jev)), model and effort, chosen from measured benchmark scores for the task type, price or subscription window share, availability and the person's rules. Pass list_providers().providers as `providers`, and canvastty-accounts__list_routes rows as `accountRoutes` when you have them. Pass the answer's spawn values to spawn_agent unchanged: they name every plugin that sets a model, so nothing is inherited by accident. Up to two alternatives come with it. Nothing is started here. When the subagent ends, report it with route_outcome.",
           "inputSchema": {
             "type": "object",
             "properties": {
@@ -199,26 +200,139 @@
               },
               "providers": {
                 "type": "array",
-                "description": "Optional: the providers array from list_providers, so the suggestion uses what is installed, signed in and its known models.",
+                "description": "list_providers().providers, so the answer uses what is installed, signed in, its models and the plugin options each CLI takes.",
                 "items": {
                   "type": "object"
                 },
                 "maxItems": 16
               },
+              "accountRoutes": {
+                "type": "array",
+                "description": "Optional: the rows canvastty-accounts__list_routes returned (the person's model accounts), so they compete too.",
+                "items": {
+                  "type": "object"
+                },
+                "maxItems": 48
+              },
               "prefer": {
                 "type": "string",
-                "description": "Optional provider id to prefer when it is available."
+                "description": "Optional: a CLI id, a model, or a plan or account id the person asked for; it wins when it is usable."
+              },
+              "orchestrate": {
+                "type": "boolean",
+                "description": "Optional: the subagent must itself orchestrate (needs CanvasTTY's agent tools)."
               },
               "launchOptionTools": {
                 "type": "array",
                 "items": {
                   "type": "string"
                 },
-                "description": "Optional: list_providers().launchOptionTools, to name the account tool to call."
+                "description": "Optional: list_providers().launchOptionTools."
               }
             },
             "required": [
               "task"
+            ],
+            "additionalProperties": false
+          },
+          "roles": [
+            "orchestrator"
+          ]
+        },
+        {
+          "name": "pick_route",
+          "description": "The same as route (where a subagent should run: CLI, sign-in, model, effort, launch options for spawn_agent), under the name list_providers points to.",
+          "inputSchema": {
+            "type": "object",
+            "properties": {
+              "task": {
+                "type": "string",
+                "description": "The task text you would give the subagent."
+              },
+              "providers": {
+                "type": "array",
+                "description": "list_providers().providers, so the answer uses what is installed, signed in, its models and the plugin options each CLI takes.",
+                "items": {
+                  "type": "object"
+                },
+                "maxItems": 16
+              },
+              "accountRoutes": {
+                "type": "array",
+                "description": "Optional: the rows canvastty-accounts__list_routes returned (the person's model accounts), so they compete too.",
+                "items": {
+                  "type": "object"
+                },
+                "maxItems": 48
+              },
+              "prefer": {
+                "type": "string",
+                "description": "Optional: a CLI id, a model, or a plan or account id the person asked for; it wins when it is usable."
+              },
+              "orchestrate": {
+                "type": "boolean",
+                "description": "Optional: the subagent must itself orchestrate (needs CanvasTTY's agent tools)."
+              },
+              "launchOptionTools": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                },
+                "description": "Optional: list_providers().launchOptionTools."
+              }
+            },
+            "required": [
+              "task"
+            ],
+            "additionalProperties": false
+          },
+          "roles": [
+            "orchestrator"
+          ]
+        },
+        {
+          "name": "route_outcome",
+          "description": "After a subagent started from a route answer has ended: what came of it, so routes that fail or hit usage limits are used less. Pass the decisionId from route, or the subagent's sessionId, and the status and exitLines wait_for_agent or get_agent_result gave you.",
+          "inputSchema": {
+            "type": "object",
+            "properties": {
+              "decisionId": {
+                "type": "string",
+                "description": "The decisionId from the route answer."
+              },
+              "sessionId": {
+                "type": "string",
+                "description": "Or the subagent's session id."
+              },
+              "status": {
+                "type": "string",
+                "enum": [
+                  "done",
+                  "failed",
+                  "error",
+                  "cancelled",
+                  "canceled",
+                  "timeout",
+                  "idle",
+                  "exited"
+                ],
+                "description": "How it ended (wait_for_agent's reason or get_agent_result's state)."
+              },
+              "exitLines": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                },
+                "maxItems": 40,
+                "description": "Optional: its exitLines; only read to see whether it hit a usage limit, not kept."
+              },
+              "ok": {
+                "type": "boolean",
+                "description": "Optional: false when it ended but did not do the task."
+              }
+            },
+            "required": [
+              "status"
             ],
             "additionalProperties": false
           },

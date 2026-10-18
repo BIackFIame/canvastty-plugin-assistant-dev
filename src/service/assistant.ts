@@ -19,6 +19,7 @@ import { AUTO_STRINGS } from '../auto/i18n.ts';
 import { clampClass } from '../auto/launch.ts';
 import type { RouterDeps } from '../auto/router.ts';
 import { decisionFromTriage, type TurnDecision } from '../auto/select.ts';
+import { RouteService } from '../route/service.ts';
 
 /**
  * The Assistant service: one process that answers CanvasTTY's decision hook (command review), its launch pipeline
@@ -70,10 +71,12 @@ export class Assistant {
   readonly harness: Harness;
   /** Model: Auto (Jev): the router, its settings and the launch contribution. */
   readonly auto: AutoService;
+  /** Route v2: where a subagent runs (subscriptions, coding plans, model accounts, Auto). */
+  readonly routing: RouteService;
   /** Each card's effective data class, so a subagent's can be clamped to its parent's. */
   private readonly classes = new Map<string, DataClass>();
 
-  constructor(options: { host: Host; dataDir: string; settings?: unknown; settingsUnavailable?: boolean; harness?: unknown; harnessUnavailable?: boolean; autoRouting?: unknown; autoRoutingUnavailable?: boolean; locale?: unknown; transport?: typeof fetch; catalogTransport?: typeof fetch; git?: null; now?: () => number; autoTimeouts?: RouterDeps['timeouts'] }) {
+  constructor(options: { host: Host; dataDir: string; settings?: unknown; settingsUnavailable?: boolean; harness?: unknown; harnessUnavailable?: boolean; autoRouting?: unknown; autoRoutingUnavailable?: boolean; routing?: unknown; routingUnavailable?: boolean; locale?: unknown; transport?: typeof fetch; catalogTransport?: typeof fetch; git?: null; now?: () => number; autoTimeouts?: RouterDeps['timeouts'] }) {
     this.host = options.host;
     // Nothing saved (a fresh install, or an update from a version that saved nothing) or nothing readable: the
     // defaults, with command review Off. The person turns it on; the plugin never decides trust for them.
@@ -85,12 +88,7 @@ export class Assistant {
     this.harness = new Harness({
       host: options.host, dataDir: options.dataDir, locale, ...(options.now ? { now: options.now } : {}),
       reviewOn: () => commandReviewLevel(this.settings) !== 'off',
-      publishBadge: (sessionId, badge) => this.host.callHost('cards.setBadge', { sessionId, badge }).then(() => undefined, () => undefined),
-      modelDifficulty: async (task, caller, deadlineMs) => {
-        const answer = await this.advice(task, null, caller.workingDirectory || caller.cwd || process.cwd(), caller.id, deadlineMs, requesterOf(caller.role));
-        return answer.kind === 'advice' ? answer.advice.difficulty : null;
-      },
-      autoLaunchOptions: caller => this.auto.launchOptionsFor(caller.id)
+      publishBadge: (sessionId, badge) => this.host.callHost('cards.setBadge', { sessionId, badge }).then(() => undefined, () => undefined)
     });
     this.harness.loadSettings(options.harness);
     const secrets: DecisionSecretsLike = {
@@ -124,12 +122,34 @@ export class Assistant {
       ...(options.now ? { now: options.now } : {}),
       ...(options.autoTimeouts ? { timeouts: options.autoTimeouts } : {})
     });
+    this.routing = new RouteService({
+      host: options.host, dataDir: options.dataDir, saved: options.routing, savedUnavailable: options.routingUnavailable === true,
+      enabled: () => this.harness.settings.routing,
+      // Jev reads the subagent's task under the caller's data class, within the caller's own per-card budget.
+      classify: async (task, caller, deadlineMs) => {
+        const controller = new AbortController();
+        const timer = setTimeout(() => controller.abort(), deadlineMs);
+        try { return await this.turnDifficulty(task, this.classOf(caller.id), caller.id, caller.role === 'orchestrator' ? 'subagent' : caller.role, controller.signal); }
+        finally { clearTimeout(timer); }
+      },
+      catalog: () => this.auto.routingIndex(),
+      preference: () => this.auto.settings.preference,
+      autoExpectation: (view, cardClass) => this.auto.expectation(view, cardClass),
+      cardClass: sessionId => this.classOf(sessionId),
+      dataClassMode: () => this.settings.dataClassMode,
+      ...(options.now ? { now: options.now } : {})
+    });
     this.review = new ReviewService({
       engine: this.engine, settings: () => this.settings, locale,
       ...(options.git === null ? { git: null } : {}),
       suggest: (sessionId, verdict, summary) => { void this.harness.setBadge(sessionId, 'review', suggestionBadge(verdict, summary, this.harness.strings)); }
     });
   }
+
+  get pageLocale(): Locale { return this.locale; }
+
+  /** A card's effective data class (its launch's, else the default). */
+  classOf(sessionId: string): DataClass { return this.classes.get(sessionId) ?? this.settings.defaultDataClass; }
 
   /** A key the settings page wrote: `{ origin, value }` as JSON under the backend's secret name. */
   async readKey(owner: string): Promise<{ origin: string; value: string } | null> {
@@ -167,6 +187,7 @@ export class Assistant {
     const session = event.session as SessionSummary | undefined;
     if (!session || typeof session.id !== 'string') return;
     this.harness.sessionEvent(event);
+    this.routing.sessionEvent(event);
     if (event.type === 'closed') { this.sessions.delete(session.id); this.review.forget(session.id); this.classes.delete(session.id); this.auto.sessionClosed(session.id); return; }
     this.sessions.set(session.id, session);
   }
@@ -263,6 +284,10 @@ export class Assistant {
 
   async tool(name: string, caller: SessionSummary | undefined, input: Record<string, unknown>): Promise<{ content: unknown; isError?: boolean }> {
     if (this.harness.handles(name)) return this.harness.tool(name, caller, input);
+    if (this.routing.handles(name)) {
+      if (!caller || typeof caller.id !== 'string') return { content: 'CanvasTTY did not say which card is calling.', isError: true };
+      return this.routing.tool(name, caller, input);
+    }
     if (name === 'recommend') {
       const task = text(input.task, 2_000);
       if (!task) return { content: 'Give the task text in `task`.', isError: true };
@@ -349,7 +374,7 @@ export class Assistant {
   }
 
   /** A later read of the stored settings succeeded (after a storage error at start): they apply now. */
-  storageRecovered(stored: { settings?: unknown; harness?: unknown; autoRouting?: unknown }): void {
+  storageRecovered(stored: { settings?: unknown; harness?: unknown; autoRouting?: unknown; routing?: unknown }): void {
     if ('settings' in stored) {
       this.settings = normalizeAssistantSettings(stored.settings);
       this.settingsReadable = true;
@@ -357,6 +382,7 @@ export class Assistant {
     }
     if ('harness' in stored) { this.harness.loadSettings(stored.harness); this.harnessReadable = true; }
     if ('autoRouting' in stored) this.auto.loaded(stored.autoRouting);
+    if ('routing' in stored) this.routing.loaded(stored.routing);
     this.host.emit('settings', null);
   }
 

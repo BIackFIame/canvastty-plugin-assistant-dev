@@ -73,9 +73,9 @@ test('F1: a fresh install and an update from a version that saved nothing both s
 });
 
 test('F1: a storage read error is not a first run: Off, nothing saved over the stored value, read again later', async () => {
-  const host = fakeHost({ failReads: 3, storage: { settings: withCommandReview(DEFAULT_ASSISTANT_SETTINGS, 'strict'), harness: { routing: false, loopAlerts: true, flows: true } } });
+  const host = fakeHost({ failReads: 4, storage: { settings: withCommandReview(DEFAULT_ASSISTANT_SETTINGS, 'strict'), harness: { routing: false, loopAlerts: true, flows: true } } });
   const { values, failed } = await readStored(host);
-  assert.deepEqual(failed, ['settings', 'harness', 'autoRouting']);
+  assert.deepEqual(failed, ['settings', 'harness', 'autoRouting', 'routing']);
   assert.deepEqual(values, {});
   assert.ok(host.logs.some(entry => entry.level === 'warn' && /storage\.get settings failed/u.test(entry.message)));
   const assistant = new Assistant({ host, dataDir: mkdtempSync(join(base, 'data-')), git: null, locale: 'ru', settings: values.settings, settingsUnavailable: true, harness: values.harness, harnessUnavailable: true });
@@ -304,9 +304,10 @@ test('F8: route and flow_plan take malformed provider entries without failing', 
   const { harness: h } = harness();
   h.sessionEvent({ type: 'created', session: orchestrator });
   const odd = [{ id: 'claude', efforts: 'high', model: { known: 'x' } }, { id: 'codex', model: 'gpt', efforts: [1, 'low'] }, 'junk', null, { id: 42 }];
-  const routed = await h.tool('route', orchestrator, { task: 'Design the auth protocol', providers: odd, launchOptionTools: 'x__pick_account' });
+  const assistant = new Assistant({ host: fakeHost(), dataDir: mkdtempSync(join(base, 'data-')), git: null });
+  const routed = await assistant.tool('route', orchestrator, { task: 'Design the auth protocol', providers: odd, accountRoutes: [{ provider: 'claude' }, 'junk', { provider: 'claude', accountId: '../x', model: 'm', endpoint: 'h', state: 'ready' }], launchOptionTools: 'x__pick_account' });
   assert.notEqual(routed.isError, true);
-  assert.match(routed.content, /Suggested: claude/u);
+  assert.match(routed.content, /Suggested: claude · its default model on its own sign-in/u);
   assert.notEqual((await h.tool('flow_plan', orchestrator, { flow: 'test-fix', goal: 'g', providers: odd })).isError, true);
   assert.equal(suggestRoute({ difficulty: 'hard', source: 'rules', callerProvider: 'claude', providers: [{ id: 'claude', efforts: 'high', model: { known: 'x' } }] }).provider, 'claude');
 });

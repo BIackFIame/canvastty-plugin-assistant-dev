@@ -152,7 +152,8 @@ test('the built plugin installs into CanvasTTY\'s PluginManager and its tools, h
   const providers = [{ id: 'claude', available: true, signIn: 'ok', subagent: true, model: { supported: true, known: ['claude-haiku-4', 'claude-opus-4'] } }];
   const routed = await tools.call(orchestrator.id, 'orchestrator', name('route'), { task: 'Fix a typo in the README', providers });
   assert.equal(routed.isError, false);
-  assert.match(routed.content, /"provider":"claude","model":"claude-haiku-4"/u);
+  assert.match(routed.content, /"spawn":\{"provider":"claude","launchOptions":\{"canvastty-assistant":\{"model":"off"\}\}\}/u, 'nothing declared: the CLI\'s own default, the Assistant named');
+  assert.ok(tools.names('orchestrator').includes(name('pick_route')) && tools.names('orchestrator').includes(name('route_outcome')));
   await assert.rejects(tools.call(orchestrator.id, 'orchestrator', name('route'), { task: 'x', unknownKey: 1 }), /Unexpected argument/u, 'CanvasTTY checks the input schema first');
 
   // A flow: proposed by the orchestrator, started by the person in the Flow preview card (a surface request).

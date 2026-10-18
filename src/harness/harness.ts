@@ -8,7 +8,7 @@ import { RESERVED_KEYS, visibleText, type FlowDefinition } from './flowFile.ts';
 import { HarnessError, STRINGS, type ErrorCode, type Locale, type ServiceStrings } from './i18n.ts';
 import { LoopWatch } from './loops.ts';
 import { Journals, reportText } from './report.ts';
-import { routeAnswer, ruleDifficulty, suggestRoute, type Difficulty, type ProviderEntry } from './router.ts';
+import type { ProviderEntry } from './router.ts';
 import { DEFAULT_HARNESS_SETTINGS, normalizeHarnessSettings, validateHarnessSettings, type HarnessSettings } from './settings.ts';
 import { boardText, TaskBoards, type Board } from './tasks.ts';
 
@@ -28,10 +28,10 @@ export interface CardSummary {
 
 export type ToolAnswer = { content: unknown; isError?: boolean };
 
-export const HARNESS_TOOLS = ['route', 'flows_list', 'flow_plan', 'flow_status', 'task_add', 'task_update', 'task_list'] as const;
+/** `route`, `pick_route` and `route_outcome` are the route service's (src/route). */
+export const HARNESS_TOOLS = ['flows_list', 'flow_plan', 'flow_status', 'task_add', 'task_update', 'task_list'] as const;
 export const HARNESS_ACTIONS = ['flow-preview', 'task-board', 'report'] as const;
 const SETTINGS_KEY = 'harness';
-const ROUTE_DEADLINE_MS = 9_000;
 /** flow_status may wait for the person this long; CanvasTTY gives a tool 15 s. */
 const STATUS_WAIT_MAX_MS = 10_000;
 /** flow_plan per orchestrator: at most this many plans per window (a plan replaces the one the person is reading). */
@@ -50,13 +50,6 @@ export interface HarnessOptions {
   host: Host;
   dataDir: string;
   locale: Locale;
-  /** Difficulty from the Assistant's decision model (`task.route`), or null to use the word rules. */
-  modelDifficulty?: (task: string, caller: CardSummary, deadlineMs: number) => Promise<Difficulty | null>;
-  /**
-   * Launch options that put a subagent on Model: Auto (Jev), when the caller runs on it (OpenCode only for now);
-   * null otherwise. `route` then hands them out instead of a model.
-   */
-  autoLaunchOptions?: (caller: CardSummary) => Record<string, Record<string, string>> | null;
   /** Publishes the plugin's one badge on a card. */
   publishBadge: (sessionId: string, badge: Badge | null) => Promise<void>;
   /** Whether command review is on (the Report says "reviewed" only then). */
@@ -75,9 +68,7 @@ export class Harness {
   private readonly dir: string;
   private readonly locale: Locale;
   private readonly now: () => number;
-  private readonly modelDifficulty: HarnessOptions['modelDifficulty'];
   private readonly reviewOn: () => boolean;
-  private readonly autoLaunchOptions: HarnessOptions['autoLaunchOptions'];
   private readonly sessions = new Map<string, CardSummary>();
   /** When a card last stopped working (turn boundaries; a short flicker is not a new turn). */
   private readonly stoppedAt = new Map<string, number>();
@@ -94,9 +85,7 @@ export class Harness {
     this.host = options.host;
     this.locale = options.locale;
     this.now = options.now ?? Date.now;
-    this.modelDifficulty = options.modelDifficulty;
     this.reviewOn = options.reviewOn ?? (() => false);
-    this.autoLaunchOptions = options.autoLaunchOptions;
     this.dir = join(options.dataDir, 'harness');
     this.badges = new BadgeBoard(options.publishBadge);
     this.journals = new Journals(this.now);
@@ -245,7 +234,6 @@ export class Harness {
     if (!caller || typeof caller.id !== 'string') return { content: 'CanvasTTY did not say which card is calling.', isError: true };
     if (!this.sessions.has(caller.id)) this.sessions.set(caller.id, caller);
     switch (name) {
-      case 'route': return this.route(caller, input);
       case 'flows_list': return this.flowsList(caller, input);
       case 'flow_plan': return this.flowPlan(caller, input);
       case 'flow_status': return this.flowStatus(caller, input);
@@ -276,23 +264,6 @@ export class Harness {
       });
     }
     return out;
-  }
-
-  private async route(caller: CardSummary, input: Record<string, unknown>): Promise<ToolAnswer> {
-    const task = text(input.task, 4_000);
-    if (!task) return { content: 'Give the subagent\'s task in `task`.', isError: true };
-    if (!this.settings.routing) return { content: 'Automatic routing is off in the Assistant settings: choose the provider and model yourself.' };
-    let difficulty: Difficulty | null = null;
-    try { difficulty = await this.modelDifficulty?.(task, caller, ROUTE_DEADLINE_MS) ?? null; } catch { difficulty = null; }
-    const source = difficulty ? 'model' : 'rules';
-    const suggestion = suggestRoute({
-      difficulty: difficulty ?? ruleDifficulty(task), source, callerProvider: caller.provider ?? null, providers: this.providersOf(input),
-      prefer: text(input.prefer, 40) || null,
-      launchOptionTools: strings(input.launchOptionTools, 8),
-      autoLaunchOptions: this.autoLaunchOptions?.(caller) ?? null
-    });
-    if (!suggestion) return { content: 'No listed provider is available for a subagent. Call list_providers and pick one yourself.' };
-    return { content: routeAnswer(suggestion) };
   }
 
   /** Built-in and project flows for this card's project (project flows are read from its own folder only). */

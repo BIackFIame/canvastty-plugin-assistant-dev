@@ -17,7 +17,7 @@ serve({
     const done = (): never => process.exit(code);
     setTimeout(done, 500).unref();
     // The router stops listening and aborts calls in flight; the OS frees the port in any case.
-    void Promise.allSettled([assistant?.harness.flushWrites(), assistant?.auto.stop()]).finally(done);
+    void Promise.allSettled([assistant?.harness.flushWrites(), assistant?.routing.flush(), assistant?.auto.stop()]).finally(done);
   },
   onInitialize: async (params, host: Host) => {
     const dataDir = typeof params.dataDir === 'string' ? params.dataDir : process.cwd();
@@ -27,7 +27,7 @@ serve({
     await dropRetiredKeys(host);
     assistant = new Assistant({
       host, dataDir, settings: values.settings, settingsUnavailable: failed.includes('settings'), harness: values.harness, harnessUnavailable: failed.includes('harness'),
-      autoRouting: values.autoRouting, autoRoutingUnavailable: failed.includes('autoRouting'), locale: params.locale
+      autoRouting: values.autoRouting, autoRoutingUnavailable: failed.includes('autoRouting'), routing: values.routing, routingUnavailable: failed.includes('routing'), locale: params.locale
     });
     // Cards that run on Auto (Jev) keep working after a service restart: same port, same keys (hashes on disk).
     await assistant.auto.resume();
@@ -64,6 +64,11 @@ serve({
     'auto.keySlot': async params => (await ready).auto.keySlot(str(params.upstreamId)),
     'auto.test': async params => (await ready).auto.test(str(params.upstreamId)),
     'auto.refreshCatalog': async () => (await ready).auto.refreshCatalog(),
+    // "Where agents run" on the decision models page (route v2).
+    'route.state': async () => (await ready).routing.state(),
+    'route.save': async params => { const a = await ready; return a.routing.save(params.settings, a.pageLocale); },
+    'route.limits': async params => (await ready).routing.receiveLimits(params.snapshot),
+    'route.feedback': async params => (await ready).routing.feedback(str(params.id), params.ok === true),
     // The Flow preview and Task board cards.
     'harness.view': async () => (await ready).harness.view(),
     'flows.choices': async params => (await ready).harness.flowChoices(str(params.orchestratorId)),
