@@ -331,6 +331,48 @@ test('live run 2: a requested new-file write is not held by effect_hidden 0.21 w
   assert.notEqual(verified.review.recent()[0].reason, 'no-verifier');
 });
 
+test('live run 3: CanvasTTY 1.8.2\'s OpenCode bridge sends write as `edit` {file_path, content}; a new file in that shape is whole-content, an existing one is not', async () => {
+  const { engine } = taskAwareEngine({ effectHidden: 0.21 });
+  const { review } = service(engine);
+  review.noteLaunch('orch', { task: null, dataClass: null, triage: false, role: 'orchestrator' });
+  review.noteLaunch('c', { task: null, dataClass: null, triage: false, role: 'subagent', parentSessionId: 'orch' });
+  review.noteTurn('orch', ORCH_PROMPT, { role: 'orchestrator', parentSessionId: null });
+  review.noteTurn('c', C_PROMPT, { role: 'subagent', parentSessionId: 'orch' });
+  // Exactly what the plugin receives from core v1.8.2-test.2 (opencode-decisions.mjs guardedCall + DecisionHooks).
+  const bridged = (file, content) => ({
+    event: 'pre-tool', sessionId: 'c', provider: 'opencode', role: 'subagent', cwd: project, agentCwd: project, profile: 'auto', canAsk: false,
+    tool: { name: 'edit', kind: 'edit', command: null, paths: [join(project, file)] }, input: { file_path: join(project, file), content }, truncated: false
+  });
+  const code = "export function slugify(text) {\n  return text.toLowerCase().trim().replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '');\n}\n";
+  const testCode = "import test from 'node:test';\nimport assert from 'node:assert';\nimport { slugify } from './slugify.mjs';\ntest('slugify', () => assert.equal(slugify(' Hi There '), 'hi-there'));\n";
+  assert.equal((await review.decide(bridged('slugify.mjs', code), 10_000)).verdict, 'allow', 'a new file: content is all of it');
+  assert.equal((await review.decide(bridged('slugify.test.mjs', testCode), 10_000)).verdict, 'allow');
+  // The same shape on a file that exists may be a partial edit: not exempt, the accurate reason.
+  mkdirSync(join(project, 'existing'), { recursive: true });
+  writeFileSync(join(project, 'existing', 'slugify.mjs'), 'export const old = 1;\n');
+  const existing = await review.decide(bridged('existing/slugify.mjs', code), 10_000);
+  assert.equal(existing.verdict, 'deny');
+  assert.match(existing.reason, /no second reviewer is set up/u);
+  // Over the 2,000-character bound the reviewer did not see it all: not allowed.
+  assert.notEqual((await review.decide(bridged('slugify.mjs', code + '// x\n'.repeat(500)), 10_000)).verdict, 'allow');
+  // An edit that carries oldString/newString (another bridge or CLI) is never taken for a whole file.
+  assert.notEqual((await review.decide({ ...bridged('slugify.mjs', code), input: { file_path: join(project, 'slugify.mjs'), content: code, old_string: 'x' } }, 10_000)).verdict, 'allow');
+  // With the core fix (fix/opencode-write-tool-name: write sent as `Write`), an overwrite is whole-content too.
+  assert.equal((await review.decide({ ...bridged('existing/slugify.mjs', code), tool: { name: 'Write', kind: 'edit', command: null, paths: [join(project, 'existing', 'slugify.mjs')] } }, 10_000)).verdict, 'allow');
+  // Through the core under test's own bridge (CANVASTTY_REPO): OpenCode's write args → its guardedCall → this request.
+  if (process.env.CANVASTTY_REPO) {
+    const { guardedCall } = await import(join(process.env.CANVASTTY_REPO, 'src/agent-runtime/opencode-decisions.mjs'));
+    const file = join(project, 'via-core', 'slugify.mjs');
+    const call = guardedCall('write', { filePath: file, content: code });
+    assert.ok(['edit', 'Write'].includes(call.toolName), call.toolName);
+    const fromCore = { ...bridged('x', ''), tool: { name: call.toolName, kind: 'edit', command: null, paths: [file] }, input: call.toolInput };
+    assert.equal((await review.decide(fromCore, 10_000)).verdict, 'allow', `core sends ${call.toolName}`);
+  }
+  // Unchanged: outside the project and the hard rules.
+  assert.equal((await review.decide(bridged('../outside.mjs', code), 10_000)).verdict, 'deny');
+  assert.equal((await review.decide({ ...bridged('x', ''), tool: { name: 'bash', kind: 'shell', command: 'sudo node --test', paths: [] }, input: { command: 'sudo node --test' } }, 10_000)).verdict, 'deny');
+});
+
 test('Auto: a strict session (triage or the global setting) allows only read-only; a suspect session nothing; three model denials make it person-only', async () => {
   const strict = service(fakeEngine({ mode: 'auto', qualified: true }), { reviewStrictness: 'strict' });
   strict.review.noteLaunch('s1', { task: 'Run the unit tests', dataClass: null, triage: false });

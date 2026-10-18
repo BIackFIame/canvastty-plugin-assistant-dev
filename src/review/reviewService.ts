@@ -1,4 +1,5 @@
 import { createHash } from 'node:crypto';
+import { lstatSync } from 'node:fs';
 import { homedir, tmpdir } from 'node:os';
 import { isAbsolute, join, relative } from 'node:path';
 import { REVIEW_LIMITS, type AcpPermissionDetail, type AcpToolKind, type ReviewReason } from '../shared/commandReview.ts';
@@ -157,14 +158,26 @@ const NO_VERIFIER: Readonly<Record<'en' | 'ru', { ask: string; deny: string }>> 
 /** Write tools whose input is the file's whole new content. */
 const WHOLE_FILE_WRITES: ReadonlySet<string> = new Set(['Write', 'write', 'write_file', 'create_file']);
 
+/** Nothing at all is at this path yet (not even a dangling link); any other answer is "something may be there". */
+function nothingAt(path: string): boolean {
+  try { lstatSync(path); return false; } catch (error) { return (error as NodeJS.ErrnoException)?.code === 'ENOENT'; }
+}
+
 /**
- * The call writes files whose whole new content is in its input: a whole-file Write, or a patch that only adds files.
- * Then the review sees exactly what it does (ReviewFacts.contentVisible). Cut input never counts.
+ * The call writes files whose whole new content is in its input: a whole-file Write, a patch that only adds files,
+ * or — the shape CanvasTTY's OpenCode bridge sends for write, edit and multiedit alike (`edit` with only `file_path`
+ * and `content`) — a call whose target does not exist yet, so `content` is all the new file holds. Then the review sees
+ * exactly what it does (ReviewFacts.contentVisible). Cut input never counts; an existing target under the bridge
+ * shape is a partial edit as far as anyone can tell, and is not exempt.
  */
-export function wholeContentWrite(toolName: string, toolInput: unknown, truncated: boolean): boolean {
+export function wholeContentWrite(toolName: string, toolInput: unknown, truncated: boolean, cwd: string | null = null): boolean {
   const raw = record(toolInput);
   if (truncated || !raw) return false;
   if (WHOLE_FILE_WRITES.has(toolName)) return typeof raw.content === 'string' && [raw.file_path, raw.filePath, raw.path].some(value => typeof value === 'string' && value.length > 0);
+  if (toolName === 'edit' && Object.keys(raw).every(key => key === 'file_path' || key === 'content') && typeof raw.content === 'string' && typeof raw.file_path === 'string' && raw.file_path.length > 0) {
+    const path = isAbsolute(raw.file_path) ? raw.file_path : cwd ? join(cwd, raw.file_path) : null;
+    return path !== null && nothingAt(path);
+  }
   if (toolName === 'apply_patch' || toolName === 'patch') {
     const patch = typeof raw.command === 'string' ? raw.command : typeof raw.patch === 'string' ? raw.patch : typeof raw.patchText === 'string' ? raw.patchText : typeof raw.input === 'string' ? raw.input : '';
     const operations = [...patch.matchAll(/^\*\*\* (Add|Update|Delete) File: |^\*\*\* Move to: /gmu)].map(match => match[1] ?? 'Move');
@@ -449,7 +462,7 @@ export class ReviewService {
         this.remember(request.sessionId, summary, mode, { outcome: 'deny', act: 'deny', tier: 'rule', reason: 'rule-deny', model: null, auditId: null });
         return { verdict: 'deny', reason };
       }
-      const visible = wholeContentWrite(request.tool.name, request.input, request.truncated) && !action.inputTruncated;
+      const visible = wholeContentWrite(request.tool.name, request.input, request.truncated, action.commandCwd ?? request.cwd) && !action.inputTruncated;
       const run = (): Promise<CommandReviewVerdict> => this.ladder(request, state, personRequest?.text ?? null, facts, rules, action.content, signal, visible);
       if (mode === 'shadow' || mode === 'suggest') {
         // Nothing is enforced (R10); the agent is not held. The review runs on its own, for the log and the badge.

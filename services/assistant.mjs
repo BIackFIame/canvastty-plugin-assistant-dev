@@ -5173,6 +5173,7 @@ var AssistantEngine = class _AssistantEngine {
 
 // src/review/reviewService.ts
 import { createHash as createHash3 } from "node:crypto";
+import { lstatSync } from "node:fs";
 import { homedir as homedir2, tmpdir as tmpdir2 } from "node:os";
 import { isAbsolute as isAbsolute3, join as join4, relative as relative3 } from "node:path";
 
@@ -7578,10 +7579,22 @@ var NO_VERIFIER = {
   }
 };
 var WHOLE_FILE_WRITES = /* @__PURE__ */ new Set(["Write", "write", "write_file", "create_file"]);
-function wholeContentWrite(toolName, toolInput, truncated) {
+function nothingAt(path) {
+  try {
+    lstatSync(path);
+    return false;
+  } catch (error) {
+    return error?.code === "ENOENT";
+  }
+}
+function wholeContentWrite(toolName, toolInput, truncated, cwd = null) {
   const raw = record(toolInput);
   if (truncated || !raw) return false;
   if (WHOLE_FILE_WRITES.has(toolName)) return typeof raw.content === "string" && [raw.file_path, raw.filePath, raw.path].some((value) => typeof value === "string" && value.length > 0);
+  if (toolName === "edit" && Object.keys(raw).every((key) => key === "file_path" || key === "content") && typeof raw.content === "string" && typeof raw.file_path === "string" && raw.file_path.length > 0) {
+    const path = isAbsolute3(raw.file_path) ? raw.file_path : cwd ? join4(cwd, raw.file_path) : null;
+    return path !== null && nothingAt(path);
+  }
   if (toolName === "apply_patch" || toolName === "patch") {
     const patch = typeof raw.command === "string" ? raw.command : typeof raw.patch === "string" ? raw.patch : typeof raw.patchText === "string" ? raw.patchText : typeof raw.input === "string" ? raw.input : "";
     const operations = [...patch.matchAll(/^\*\*\* (Add|Update|Delete) File: |^\*\*\* Move to: /gmu)].map((match) => match[1] ?? "Move");
@@ -7906,7 +7919,7 @@ var ReviewService = class {
         this.remember(request.sessionId, summary, mode, { outcome: "deny", act: "deny", tier: "rule", reason: "rule-deny", model: null, auditId: null });
         return { verdict: "deny", reason };
       }
-      const visible = wholeContentWrite(request.tool.name, request.input, request.truncated) && !action.inputTruncated;
+      const visible = wholeContentWrite(request.tool.name, request.input, request.truncated, action.commandCwd ?? request.cwd) && !action.inputTruncated;
       const run = () => this.ladder(request, state, personRequest?.text ?? null, facts, rules, action.content, signal, visible);
       if (mode === "shadow" || mode === "suggest") {
         void run().then((verdict2) => {
