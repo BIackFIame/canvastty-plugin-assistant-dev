@@ -4,11 +4,12 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import { rulesDifficulty } from '../src/auto/classify.ts';
-import { levelOf, turnView, SMALL_CONFIDENCE } from '../src/auto/select.ts';
+import { levelOf, smallThreshold, turnView, SMALL_CONFIDENCE, SMALL_CONFIDENCE_EXPLAINING } from '../src/auto/select.ts';
 import { scoreLabelled } from '../scripts/jev-labels.mjs';
 
 const fixture = JSON.parse(readFileSync(new URL('./fixtures/auto/jev-labelled-tasks.json', import.meta.url), 'utf8'));
 const live = JSON.parse(readFileSync(new URL('./fixtures/auto/jev-live-2026-10-18.json', import.meta.url), 'utf8'));
+const live2 = JSON.parse(readFileSync(new URL('./fixtures/auto/jev-live-2026-10-18-run2.json', import.meta.url), 'utf8'));
 
 test('the labelled set: at least 30 tasks, Russian and English, every level and type, unique ids, no private data', () => {
   assert.ok(fixture.tasks.length >= 30);
@@ -78,4 +79,27 @@ test('the "small" threshold from the live run: best level accuracy with no mediu
   assert.ok(notSmall < SMALL_CONFIDENCE - 0.05 && small > SMALL_CONFIDENCE + 0.05, `${notSmall} < ${SMALL_CONFIDENCE} < ${small}`);
   // Through turnView, as the router uses it.
   assert.equal(jev.filter(task => turnView(decisionOf(task), 'jev', '').level === task.label.level).length, 30);
+});
+
+test('under-routing guards: research and review need p(small) >= 0.7, an orchestrator card is never small; both live runs keep their accuracy', () => {
+  assert.deepEqual([SMALL_CONFIDENCE_EXPLAINING, smallThreshold('research'), smallThreshold('review'), smallThreshold('coding'), smallThreshold('chat'), smallThreshold('writing')], [0.7, 0.7, 0.7, 0.5, 0.5, 0.5]);
+  const at = (type, confidence, role) => turnView({ difficulty: 'normal', strong: false, type, confidence }, 'jev', '', role ? { role } : {});
+  assert.equal(at('research', 0.65).level, 'medium');
+  assert.deepEqual([at('research', 0.75).level, at('research', 0.75).confident], ['small', true]);
+  assert.equal(at('coding', 0.65).level, 'small');
+  // Live run 2: the orchestrator's turn (a Raft/Paxos explanation, then two spawn_agent calls) came back coding at
+  // p(small) 0.73 and went to a small model; as an orchestrator card it is medium now. Its subagents are unchanged.
+  assert.deepEqual([at('coding', 0.73, 'orchestrator').level, at('coding', 0.73, 'orchestrator').confident], ['medium', false]);
+  assert.equal(at('chat', 1, 'subagent').level, 'small');
+  assert.equal(turnView({ difficulty: 'simple', strong: false }, 'rules', 'fix a typo', { role: 'orchestrator' }).level, 'medium', 'the rules too');
+  // Both live runs, as the router decides now: 30 of 38 Jev answers each, still no medium or large task made small.
+  for (const run of [live, live2]) {
+    const jev = run.tasks.filter(task => task.jev?.source === 'jev' && typeof task.jev.confidence === 'number');
+    const level = task => turnView({ difficulty: task.jev.level === 'large' ? 'hard' : 'normal', strong: false, type: task.jev.type, confidence: task.jev.confidence }, 'jev', '').level;
+    assert.equal(jev.length, 38, run.run);
+    assert.equal(jev.filter(task => level(task) === task.label.level).length, 30, run.run);
+    assert.equal(jev.filter(task => level(task) === 'small' && task.label.level !== 'small').length, 0, run.run);
+    // No labelled research or review task sat between 0.5 and 0.7: the guard costs nothing here.
+    assert.equal(jev.filter(task => ['research', 'review'].includes(task.jev.type) && task.jev.confidence >= 0.5 && task.jev.confidence < 0.7).length, 0, run.run);
+  }
 });

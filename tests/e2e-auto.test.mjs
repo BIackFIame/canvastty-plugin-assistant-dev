@@ -175,9 +175,10 @@ test('Model: Auto (Jev) through CanvasTTY: install, launch an OpenCode card, rou
   const answer = await ask(token, 'Fix a typo in the readme');
   assert.equal(answer.status, 200);
   assert.match(await answer.text(), /data: \[DONE\]/u);
-  assert.equal(upstream.posts().at(-1).model, 'vendor/small');
+  // A small task, but this card is an orchestrator: its turns are never below medium.
+  assert.equal(upstream.posts().at(-1).model, 'vendor/medium');
   assert.equal(upstream.posts().at(-1).auth, 'Bearer up-key');
-  await waitFor(() => badges.at(-1)?.[card.id]?.[0]?.text === 'small');
+  await waitFor(() => badges.at(-1)?.[card.id]?.[0]?.text === 'medium');
   assert.equal((await ask('sk-ctty-' + 'A'.repeat(43), 'x')).status, 401);
 
   // route hands out Auto for an OpenCode subagent of this orchestrator; the subagent launched with it inherits the class.

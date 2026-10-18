@@ -30,6 +30,10 @@
   turns, the trade-off shown per decision; Jev's task triage is limited per card (10 a minute) under a ceiling of 60;
   storage keys earlier versions left (`model-route-history`, `model-discovery`) are dropped at start; a partial
   Artificial Analysis page no longer drops known scores.
+- **After live run 2**: a write whose whole new content is in the call (whole-file Write, add-only patch) is not held
+  by `effect_hidden`; with no second reviewer set up, the reason says so (en/ru) instead of "could not review it in
+  time"; a partial Artificial Analysis page also restores the bundled snapshot's rows; research and review turns
+  need p(small) ≥ 0.7 and an orchestrator card's turns are never small.
 
 ## 0.2.0
 

@@ -206,6 +206,16 @@ test('each new user turn of the card\'s first conversation is reported once (for
   assert.deepEqual(turns, [['card-0001-aaaa', 'agent', 'Create slugify.mjs and its test'], ['card-0001-aaaa', 'agent', 'Now add a README line']]);
 });
 
+test('an orchestrator card is never routed below medium: the same "small" turn goes to a small model on an agent card only', async t => {
+  const { upstream, router, token, port } = await setup(t);
+  assert.equal((await call(port, { token, body: userTurn('Fix a typo in the readme') })).status, 200);
+  assert.equal(upstream.posts().at(-1).model, 'vendor/small-a');
+  const lead = await router.grant({ sessionId: 'card-0002-lead', provider: 'opencode', role: 'orchestrator', parentSessionId: null, dataClass: 'D1' });
+  assert.equal((await call(lead.port, { token: lead.token, body: userTurn('Fix a typo in the readme') })).status, 200);
+  assert.equal(upstream.posts().at(-1).model, 'vendor/medium-a');
+  assert.deepEqual([router.recent()[0].difficulty, router.recent()[0].source], ['medium', 'jev']);
+});
+
 test('Jev too slow, failing or off: word rules decide, the call still succeeds and says why', async t => {
   const slow = await setup(t, { decide: () => new Promise(resolve => setTimeout(() => resolve({ difficulty: 'hard', strong: true }), 1_000)) });
   const started = Date.now();

@@ -119,7 +119,8 @@ model account (an account and Auto on one launch are refused: both configure Ope
 - **Decision, from data**: for each new user turn, Jev (task triage, while it is Suggest or Auto on the Decision models
   page) reads the latest user text within 2.5 s and returns the **task type** (coding, review, research, writing,
   chat) and the **difficulty** (small, medium, large); "small" needs ≥ 0.5 probability on the two easiest levels
-  (chosen on 40 labelled tasks of a live run: no medium or large task became small), otherwise it is medium. Without
+  (chosen on 40 labelled tasks of a live run: no medium or large task became small; 0.7 for research and review,
+  and an orchestrator card's turns are never small), otherwise it is medium. Without
   Jev, word rules give both (never "sure"). Among the models you allow that are healthy now (not cooling down,
   trusted with the card's data class, large enough for the request, within the caps), the **cheapest model whose
   catalog score for that task type is within a few points of the best** answers: **Balanced** 8 / 5 / 3 points on

@@ -34,6 +34,15 @@ export type Level = 'small' | 'medium' | 'large';
  */
 export const SMALL_CONFIDENCE = 0.5;
 /**
+ * Research and review turns (explanations, comparisons, audits) need more: a cheap model's thin answer there looks
+ * fine and is wrong. No labelled small task of these types fell between 0.5 and 0.7 in either live run, so the
+ * labelled accuracy is unchanged.
+ */
+export const SMALL_CONFIDENCE_EXPLAINING = 0.7;
+const EXPLAINING: ReadonlySet<TaskType> = new Set<TaskType>(['research', 'review']);
+/** The p(small) a turn of this type needs. */
+export const smallThreshold = (type: TaskType): number => EXPLAINING.has(type) ? SMALL_CONFIDENCE_EXPLAINING : SMALL_CONFIDENCE;
+/**
  * Points (0–100) of score the preference may give up for a lower price, by the turn's level: the cheapest model
  * within this many points of the best one for the turn's task type answers. Large turns stay close to the best, and
  * there a lower effort is never chosen for its own sake (quality first). A small turn from the word rules (not Jev)
@@ -116,13 +125,18 @@ export function levelOf(decision: TurnDecision, from: 'jev' | 'rules', smallAt =
   return (confidenceOf(decision, from) ?? 0) >= smallAt ? 'small' : 'medium';
 }
 
-export function turnView(decision: TurnDecision, from: 'jev' | 'rules', text: string): TurnView {
+/**
+ * The turn as routing sees it. An orchestrator card (it plans and delegates; its turn is the whole job) is never
+ * below medium: live, an orchestrator's turn at p(small) 0.73 went to a small model.
+ */
+export function turnView(decision: TurnDecision, from: 'jev' | 'rules', text: string, card: { role?: string } = {}): TurnView {
   const confidence = confidenceOf(decision, from);
-  const level = levelOf(decision, from);
   const type = from === 'jev' && decision.type ? decision.type : ruleTaskType(text);
+  let level = levelOf(decision, from, smallThreshold(type));
+  if (level === 'small' && card.role === 'orchestrator') level = 'medium';
   return {
     type, typeFrom: from === 'jev' && decision.type ? 'jev' : 'rules', level,
-    confident: from === 'jev' && level === 'small' && (confidence ?? 0) >= SMALL_CONFIDENCE,
+    confident: from === 'jev' && level === 'small' && (confidence ?? 0) >= smallThreshold(type),
     confidence, difficulty: level === 'small' ? 'simple' : level === 'large' ? 'hard' : 'normal', strong: decision.strong
   };
 }

@@ -394,7 +394,7 @@ export class AutoRouter {
   /** Jev within its budget, else rules; never fails the request. */
   private async decideTurn(text: string, grant: LaunchGrant, toolCount: number): Promise<{ view: TurnView; source: 'jev' | 'rules'; reason: string }> {
     const settings = this.deps.settings();
-    const rules = (reason: string): { view: TurnView; source: 'rules'; reason: string } => ({ view: turnView({ difficulty: rulesDifficulty(text, toolCount), strong: false }, 'rules', text), source: 'rules', reason });
+    const rules = (reason: string): { view: TurnView; source: 'rules'; reason: string } => ({ view: turnView({ difficulty: rulesDifficulty(text, toolCount), strong: false }, 'rules', text, { role: grant.role }), source: 'rules', reason });
     if (settings.decider === 'jev' && this.deps.decide && text) {
       this.stats.jevAsked++;
       const controller = new AbortController();
@@ -404,7 +404,7 @@ export class AutoRouter {
           this.deps.decide(text, grant, controller.signal),
           new Promise<null>(resolve => { timer = setTimeout(() => { controller.abort(); resolve(null); }, this.timeouts.jevMs); })
         ]);
-        if (answer) { this.stats.jevAnswered++; return { view: turnView(answer, 'jev', text), source: 'jev', reason: 'jev' }; }
+        if (answer) { this.stats.jevAnswered++; return { view: turnView(answer, 'jev', text, { role: grant.role }), source: 'jev', reason: 'jev' }; }
         return rules(controller.signal.aborted ? 'jev_slow' : 'jev_unavailable');
       } catch {
         return rules('jev_error');

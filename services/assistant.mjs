@@ -11089,6 +11089,9 @@ var JEV_OPENROUTER_SECRET = "assistant-openrouter";
 
 // src/auto/select.ts
 var SMALL_CONFIDENCE = 0.5;
+var SMALL_CONFIDENCE_EXPLAINING = 0.7;
+var EXPLAINING = /* @__PURE__ */ new Set(["research", "review"]);
+var smallThreshold = (type) => EXPLAINING.has(type) ? SMALL_CONFIDENCE_EXPLAINING : SMALL_CONFIDENCE;
 var QUALITY_WINDOW = {
   best: { small: 0, medium: 0, large: 0 },
   balanced: { small: 8, medium: 5, large: 3 },
@@ -11135,15 +11138,16 @@ function levelOf(decision, from, smallAt = SMALL_CONFIDENCE) {
   if (from === "rules") return decision.difficulty === "simple" ? "small" : "medium";
   return (confidenceOf(decision, from) ?? 0) >= smallAt ? "small" : "medium";
 }
-function turnView(decision, from, text6) {
+function turnView(decision, from, text6, card = {}) {
   const confidence = confidenceOf(decision, from);
-  const level = levelOf(decision, from);
   const type = from === "jev" && decision.type ? decision.type : ruleTaskType(text6);
+  let level = levelOf(decision, from, smallThreshold(type));
+  if (level === "small" && card.role === "orchestrator") level = "medium";
   return {
     type,
     typeFrom: from === "jev" && decision.type ? "jev" : "rules",
     level,
-    confident: from === "jev" && level === "small" && (confidence ?? 0) >= SMALL_CONFIDENCE,
+    confident: from === "jev" && level === "small" && (confidence ?? 0) >= smallThreshold(type),
     confidence,
     difficulty: level === "small" ? "simple" : level === "large" ? "hard" : "normal",
     strong: decision.strong
@@ -11863,7 +11867,7 @@ var AutoRouter = class {
   /** Jev within its budget, else rules; never fails the request. */
   async decideTurn(text6, grant, toolCount) {
     const settings = this.deps.settings();
-    const rules = (reason) => ({ view: turnView({ difficulty: rulesDifficulty(text6, toolCount), strong: false }, "rules", text6), source: "rules", reason });
+    const rules = (reason) => ({ view: turnView({ difficulty: rulesDifficulty(text6, toolCount), strong: false }, "rules", text6, { role: grant.role }), source: "rules", reason });
     if (settings.decider === "jev" && this.deps.decide && text6) {
       this.stats.jevAsked++;
       const controller = new AbortController();
@@ -11880,7 +11884,7 @@ var AutoRouter = class {
         ]);
         if (answer) {
           this.stats.jevAnswered++;
-          return { view: turnView(answer, "jev", text6), source: "jev", reason: "jev" };
+          return { view: turnView(answer, "jev", text6, { role: grant.role }), source: "jev", reason: "jev" };
         }
         return rules(controller.signal.aborted ? "jev_slow" : "jev_unavailable");
       } catch {
