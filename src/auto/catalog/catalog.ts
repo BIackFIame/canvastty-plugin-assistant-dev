@@ -347,6 +347,13 @@ export const PARTIAL_REFRESH_SHARE = 0.5;
 
 const variantOf = (row: CatalogBenchmark): string => JSON.stringify([row.modelId, row.reasoningEffort, row.thinking, row.source.indexVersion ?? row.source.releaseDate]);
 
+/** `first`, then the rows of `second` it does not cover (by row id or variant). */
+export function unionRows(first: readonly CatalogBenchmark[], second: readonly CatalogBenchmark[]): CatalogBenchmark[] {
+  const ids = new Set(first.map(row => row.id));
+  const variants = new Set(first.map(variantOf));
+  return [...first, ...second.filter(row => !ids.has(row.id) && !variants.has(variantOf(row)))];
+}
+
 /**
  * A source's fresh rows, plus — when they are suspiciously few (under PARTIAL_REFRESH_SHARE of the known ones) — the
  * earlier rows they do not cover (same row id, or the same model, effort, setup and index version or release),
@@ -582,8 +589,11 @@ export class CatalogStore {
     // carries full rows only for the ~27 models of its default chart; the rest load in the browser) adds its rows and
     // keeps the earlier ones it lacks, with their original age: a known score is never dropped for a partial page.
     // (LiveBench publishes whole tables per release; a new release replaces the old one.)
+    // Known = the cached rows, plus the bundled snapshot's rows the cache lacks (a cache that already lost rows to a
+    // partial page before this rule existed gets them back, with the snapshot's age).
     const mergedAA = (fresh: CatalogBenchmark[]): CatalogBenchmark[] => {
-      const { rows, kept: keptRows } = mergePartialRefresh(fresh, kept('artificial-analysis'));
+      const bundledAA = this.bundledSnapshot && previous !== this.bundledSnapshot ? this.bundledSnapshot.benchmarks.filter(row => row.source.kind === 'artificial-analysis') : [];
+      const { rows, kept: keptRows } = mergePartialRefresh(fresh, unionRows(kept('artificial-analysis'), bundledAA));
       if (keptRows) sourceErrors['artificial-analysis'] = `Artificial Analysis returned ${fresh.length} rows (${fresh.length + keptRows} known); the other ${keptRows} earlier scores are kept with their age.`;
       return rows;
     };

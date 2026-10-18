@@ -190,6 +190,28 @@ test('a partial refresh never drops known scores: Artificial Analysis\'s page no
   assert.equal(catalog.ratings().sourceErrors.livebench, undefined);
 });
 
+test('a cache that already lost rows to a partial page gets the bundled snapshot\'s rows back on the next refresh, with the snapshot\'s age', async t => {
+  const transport = catalogTransport();
+  // Before the merge rule: the cache was written from the partial page alone (7 Artificial Analysis rows).
+  const { catalog, directory } = await store(t, { transport });
+  await catalog.load();
+  await catalog.refresh({ force: true });
+  assert.equal(catalog.ratings().benchmarks.filter(row => row.source.kind === 'artificial-analysis').length, 7);
+  const later = new CatalogStore({ directory, now: () => epoch + DAY, startDelayMs: 0, transport, bundled });
+  later.configure({ autoRefresh: false, refreshHours: 168, openRouter: true });
+  t.after(() => later.dispose());
+  await later.load();
+  assert.equal(later.status().bundled, false, 'the cache is in use');
+  await later.refresh({ force: true });
+  const rows = later.ratings().benchmarks.filter(row => row.source.kind === 'artificial-analysis');
+  const bundledAA = bundled.benchmarks.filter(row => row.source.kind === 'artificial-analysis');
+  assert.equal(rows.length, 7 + bundledAA.length - 1, 'the fresh 7 and the bundled rows they do not cover (GLM-5.3 @max is in both)');
+  const snapshotAge = new Set(bundledAA.map(row => row.source.fetchedAt));
+  assert.equal(rows.filter(row => snapshotAge.has(row.source.fetchedAt)).length, bundledAA.length - 1, 'restored with the snapshot\'s own age');
+  assert.match(later.status().sources.find(source => source.id === 'artificial-analysis').error, /returned 7 rows \(227 known\)/u);
+  assert.ok(later.routing().benchmarks.filter(row => snapshotAge.has(row.source.fetchedAt)).every(row => row.historical), 'shown as old');
+});
+
 test('partial refresh rule: under half of the known rows keeps the uncovered earlier ones; a normal-sized refresh replaces', () => {
   assert.equal(PARTIAL_REFRESH_SHARE, 0.5);
   const earlier = normalizeArtificialAnalysis(aaHtml(), epoch - DAY);

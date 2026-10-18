@@ -10324,6 +10324,11 @@ function freeze(value) {
 }
 var PARTIAL_REFRESH_SHARE = 0.5;
 var variantOf = (row) => JSON.stringify([row.modelId, row.reasoningEffort, row.thinking, row.source.indexVersion ?? row.source.releaseDate]);
+function unionRows(first, second) {
+  const ids = new Set(first.map((row) => row.id));
+  const variants = new Set(first.map(variantOf));
+  return [...first, ...second.filter((row) => !ids.has(row.id) && !variants.has(variantOf(row)))];
+}
 function mergePartialRefresh(fresh, earlier) {
   if (!earlier.length || fresh.length >= earlier.length * PARTIAL_REFRESH_SHARE) return { rows: [...fresh], kept: 0 };
   const ids = new Set(fresh.map((row) => row.id));
@@ -10606,7 +10611,8 @@ var CatalogStore = class {
     if (lb.status === "rejected") sourceErrors.livebench = "LiveBench unavailable; earlier scores keep their age.";
     if (aa.status === "rejected") sourceErrors["artificial-analysis"] = "Artificial Analysis unavailable; earlier scores keep their age.";
     const mergedAA = (fresh) => {
-      const { rows, kept: keptRows } = mergePartialRefresh(fresh, kept("artificial-analysis"));
+      const bundledAA = this.bundledSnapshot && previous !== this.bundledSnapshot ? this.bundledSnapshot.benchmarks.filter((row) => row.source.kind === "artificial-analysis") : [];
+      const { rows, kept: keptRows } = mergePartialRefresh(fresh, unionRows(kept("artificial-analysis"), bundledAA));
       if (keptRows) sourceErrors["artificial-analysis"] = `Artificial Analysis returned ${fresh.length} rows (${fresh.length + keptRows} known); the other ${keptRows} earlier scores are kept with their age.`;
       return rows;
     };
