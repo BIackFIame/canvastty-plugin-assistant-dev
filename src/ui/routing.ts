@@ -55,6 +55,7 @@ export const ROUTE_PAGE_STRINGS = {
     add: 'Add', newPlan: 'Declare a subscription or plan', name: 'Name (Max, Pro, GLM plan…)', cli: 'CLI', planKind: 'Kind',
     accounts: 'Model accounts (CanvasTTY Accounts)', accountsSeen: (age: string) => `As the orchestrator last passed them, ${age}.`, accountsNone: 'Not passed by an orchestrator since the Assistant started.',
     flatRate: 'flat-rate plan',
+    plansSmall: 'Prefer plans and subscriptions for small tasks', plansWindow: 'within, points of the best',
     quotaBy: 'Quota counted by', quotaKind: { tokens: 'tokens', prompts: 'prompts', unknown: 'not known' } as Record<string, string>,
     weights: 'Quota weights (model=weight, …; 1 = like the plan\'s top model)', speeds: 'Output speeds (model=tokens/s, …)',
     valueSpeed: 'On plans, value speed', speed: { low: 'little', moderate: 'moderately', high: 'a lot' } as Record<string, string>,
@@ -100,6 +101,7 @@ export const ROUTE_PAGE_STRINGS = {
     add: 'Добавить', newPlan: 'Объявить подписку или план', name: 'Название (Max, Pro, план GLM…)', cli: 'CLI', planKind: 'Вид',
     accounts: 'Аккаунты моделей (CanvasTTY Accounts)', accountsSeen: (age: string) => `Как их последний раз передал оркестратор, ${age}.`, accountsNone: 'С запуска Ассистента оркестратор их не передавал.',
     flatRate: 'фиксированный тариф',
+    plansSmall: 'Для маленьких задач предпочитать планы и подписки', plansWindow: 'в пределах, баллов от лучшей',
     quotaBy: 'Квота считается по', quotaKind: { tokens: 'токенам', prompts: 'запросам', unknown: 'неизвестно' } as Record<string, string>,
     weights: 'Веса квоты (модель=вес, …; 1 — как у старшей модели плана)', speeds: 'Скорость вывода (модель=токенов/с, …)',
     valueSpeed: 'На планах ценить скорость', speed: { low: 'немного', moderate: 'умеренно', high: 'сильно' } as Record<string, string>,
@@ -208,7 +210,12 @@ export function renderRouting(state: RouteState, t: Strings, page: RoutePageHost
   // Choices.
   const prefer = el('input', { type: 'checkbox', checked: settings.preferSubscriptions, name: 'route-prefer-subs' });
   prefer.addEventListener('change', () => save(next => { next.preferSubscriptions = prefer.checked; }));
+  const plansSmall = el('input', { type: 'checkbox', checked: settings.preferPlansSmall, name: 'route-plans-small' });
+  plansSmall.addEventListener('change', () => save(next => { next.preferPlansSmall = plansSmall.checked; }));
+  const plansWindow = numberInput('route-plans-window', settings.planWindowSmall, 0, 60);
+  plansWindow.addEventListener('change', () => { const value = Math.round(Number(plansWindow.value)); if (value >= 0 && value <= 60) save(next => { next.planWindowSmall = value; }); });
   section.append(el('h2', { textContent: t.choices }), el('label', { className: 'check' }, prefer, ` ${t.preferSubs}`),
+    el('div', { className: 'row' }, el('label', { className: 'check' }, plansSmall, ` ${t.plansSmall}`), el('span', { textContent: t.plansWindow }), plansWindow),
     el('div', { className: 'row' }, el('span', { className: 'label', textContent: t.newModels }),
       selectOf<NewModelPolicy>('route-new-model-policy', settings.newModels, (['wait', 'provisional', 'explore'] as const).map(value => [value, t.policy[value]!] as [NewModelPolicy, string]), value => save(next => { next.newModels = value; }))),
     el('p', { className: 'muted', textContent: t.policyHelp }),

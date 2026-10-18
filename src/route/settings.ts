@@ -93,6 +93,9 @@ export interface RouteSettings {
   speeds: Record<string, number>;
   /** Quota weight per model identity for flat-rate accounts and plans without their own. */
   quotaWeights: Record<string, number>;
+  /** Confidently small tasks go to a plan or subscription whose score is within `planWindowSmall` points of the best. */
+  preferPlansSmall: boolean;
+  planWindowSmall: number;
 }
 
 export const MAX_PLANS = 16;
@@ -106,7 +109,7 @@ export const MAX_SETTINGS_CHARS = 16_384;
 
 export const DEFAULT_ROUTE_SETTINGS: Readonly<RouteSettings> = Object.freeze({
   version: 1, plans: [], preferSubscriptions: true, expectedShare: { small: 3, medium: 8, large: 15 },
-  allow: {}, trust: {}, pins: {}, boosts: {}, newModels: 'wait', exploreShare: 0.05, aliases: [], notEquivalent: [], flat: [], valueSpeed: 'moderate', speeds: {}, quotaWeights: {}
+  allow: {}, trust: {}, pins: {}, boosts: {}, newModels: 'wait', exploreShare: 0.05, aliases: [], notEquivalent: [], flat: [], valueSpeed: 'moderate', speeds: {}, quotaWeights: {}, preferPlansSmall: true, planWindowSmall: 30
 }) as Readonly<RouteSettings>;
 
 class RouteSettingsError extends Error {}
@@ -195,13 +198,18 @@ export function validateRouteSettings(value: unknown): RouteSettings {
     expectedShare: { small: share.small as number, medium: share.medium as number, large: share.large as number },
     allow, trust, pins, boosts, newModels: v.newModels as NewModelPolicy, exploreShare: v.exploreShare as number, aliases,
     notEquivalent: [...new Set(v.notEquivalent as string[])], flat: [...new Set(flat as string[])],
-    valueSpeed: 'moderate', speeds: {}, quotaWeights: {}
+    valueSpeed: 'moderate', speeds: {}, quotaWeights: {}, preferPlansSmall: true, planWindowSmall: 30
   };
   // Saved before plan cost by quota and speed existed: moderate, none.
   if (v.valueSpeed !== undefined && !VALUE_SPEEDS.includes(v.valueSpeed as ValueSpeed)) fail('Invalid speed preference.');
   result.valueSpeed = (v.valueSpeed as ValueSpeed | undefined) ?? 'moderate';
   result.speeds = v.speeds === undefined ? {} : map<number>(v.speeds, MAX_PINS, k => IDENTITY.test(k), (x): x is number => typeof x === 'number' && Number.isFinite(x) && x >= 1 && x <= 10_000, 'speeds');
   result.quotaWeights = v.quotaWeights === undefined ? {} : weights(v.quotaWeights, 'quota weights');
+  // Saved before this choice existed: on, 30 points.
+  if (v.preferPlansSmall !== undefined && typeof v.preferPlansSmall !== 'boolean') fail('Invalid prefer plans.');
+  if (v.planWindowSmall !== undefined && !intIn(v.planWindowSmall, 0, 60)) fail('Invalid plan window.');
+  result.preferPlansSmall = (v.preferPlansSmall as boolean | undefined) ?? true;
+  result.planWindowSmall = (v.planWindowSmall as number | undefined) ?? 30;
   // Plugin storage holds 64 KB for everything the Assistant keeps: this part stays small.
   if (JSON.stringify(result).length > MAX_SETTINGS_CHARS) fail('The routing settings are too large: remove some plans, models or aliases.');
   return result;

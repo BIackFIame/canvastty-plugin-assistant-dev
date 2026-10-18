@@ -750,7 +750,9 @@
     flat: [],
     valueSpeed: "moderate",
     speeds: {},
-    quotaWeights: {}
+    quotaWeights: {},
+    preferPlansSmall: true,
+    planWindowSmall: 30
   });
 
   // src/ui/routing.ts
@@ -789,6 +791,8 @@
       accountsSeen: (age) => `As the orchestrator last passed them, ${age}.`,
       accountsNone: "Not passed by an orchestrator since the Assistant started.",
       flatRate: "flat-rate plan",
+      plansSmall: "Prefer plans and subscriptions for small tasks",
+      plansWindow: "within, points of the best",
       quotaBy: "Quota counted by",
       quotaKind: { tokens: "tokens", prompts: "prompts", unknown: "not known" },
       weights: "Quota weights (model=weight, \u2026; 1 = like the plan's top model)",
@@ -868,6 +872,8 @@
       accountsSeen: (age) => `\u041A\u0430\u043A \u0438\u0445 \u043F\u043E\u0441\u043B\u0435\u0434\u043D\u0438\u0439 \u0440\u0430\u0437 \u043F\u0435\u0440\u0435\u0434\u0430\u043B \u043E\u0440\u043A\u0435\u0441\u0442\u0440\u0430\u0442\u043E\u0440, ${age}.`,
       accountsNone: "\u0421 \u0437\u0430\u043F\u0443\u0441\u043A\u0430 \u0410\u0441\u0441\u0438\u0441\u0442\u0435\u043D\u0442\u0430 \u043E\u0440\u043A\u0435\u0441\u0442\u0440\u0430\u0442\u043E\u0440 \u0438\u0445 \u043D\u0435 \u043F\u0435\u0440\u0435\u0434\u0430\u0432\u0430\u043B.",
       flatRate: "\u0444\u0438\u043A\u0441\u0438\u0440\u043E\u0432\u0430\u043D\u043D\u044B\u0439 \u0442\u0430\u0440\u0438\u0444",
+      plansSmall: "\u0414\u043B\u044F \u043C\u0430\u043B\u0435\u043D\u044C\u043A\u0438\u0445 \u0437\u0430\u0434\u0430\u0447 \u043F\u0440\u0435\u0434\u043F\u043E\u0447\u0438\u0442\u0430\u0442\u044C \u043F\u043B\u0430\u043D\u044B \u0438 \u043F\u043E\u0434\u043F\u0438\u0441\u043A\u0438",
+      plansWindow: "\u0432 \u043F\u0440\u0435\u0434\u0435\u043B\u0430\u0445, \u0431\u0430\u043B\u043B\u043E\u0432 \u043E\u0442 \u043B\u0443\u0447\u0448\u0435\u0439",
       quotaBy: "\u041A\u0432\u043E\u0442\u0430 \u0441\u0447\u0438\u0442\u0430\u0435\u0442\u0441\u044F \u043F\u043E",
       quotaKind: { tokens: "\u0442\u043E\u043A\u0435\u043D\u0430\u043C", prompts: "\u0437\u0430\u043F\u0440\u043E\u0441\u0430\u043C", unknown: "\u043D\u0435\u0438\u0437\u0432\u0435\u0441\u0442\u043D\u043E" },
       weights: "\u0412\u0435\u0441\u0430 \u043A\u0432\u043E\u0442\u044B (\u043C\u043E\u0434\u0435\u043B\u044C=\u0432\u0435\u0441, \u2026; 1 \u2014 \u043A\u0430\u043A \u0443 \u0441\u0442\u0430\u0440\u0448\u0435\u0439 \u043C\u043E\u0434\u0435\u043B\u0438 \u043F\u043B\u0430\u043D\u0430)",
@@ -1013,9 +1019,21 @@
     prefer.addEventListener("change", () => save2((next) => {
       next.preferSubscriptions = prefer.checked;
     }));
+    const plansSmall = el("input", { type: "checkbox", checked: settings.preferPlansSmall, name: "route-plans-small" });
+    plansSmall.addEventListener("change", () => save2((next) => {
+      next.preferPlansSmall = plansSmall.checked;
+    }));
+    const plansWindow = numberInput("route-plans-window", settings.planWindowSmall, 0, 60);
+    plansWindow.addEventListener("change", () => {
+      const value = Math.round(Number(plansWindow.value));
+      if (value >= 0 && value <= 60) save2((next) => {
+        next.planWindowSmall = value;
+      });
+    });
     section.append(
       el("h2", { textContent: t2.choices }),
       el("label", { className: "check" }, prefer, ` ${t2.preferSubs}`),
+      el("div", { className: "row" }, el("label", { className: "check" }, plansSmall, ` ${t2.plansSmall}`), el("span", { textContent: t2.plansWindow }), plansWindow),
       el(
         "div",
         { className: "row" },

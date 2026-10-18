@@ -409,3 +409,30 @@ test('a declared plan counting prompts: every model costs one prompt, so score d
   assert.equal(records.tokenFactor('glm-5-3-flash', () => 65_000), 2);
   assert.equal(records.tokenFactor('glm-5-3', () => 65_000), null);
 });
+
+test('live run 10: "prefer plans for small tasks" (on by default) sends a confidently small writing task to the flat-rate GLM plan instead of paid Auto; medium, unsure or off: unchanged', async () => {
+  const { turnView } = await import('../src/auto/select.ts');
+  const cat = catalog({ prices: { ...{ 'z-ai/glm-5.3': [0.6, 2.2], 'z-ai/glm-5.3-flash': [0.1, 0.4], 'google/gemini-3.5-flash': [1.5, 9] } } });
+  const idx = new BenchmarkIndex(cat);
+  const rows = accountRowsFrom([
+    { provider: 'opencode', accountId: 'glm-53', account: 'GLM 5.3 · Z.AI Coding Plan', model: 'glm-5.3', endpoint: 'api.z.ai', state: 'ready', launchOptions: { 'canvastty-accounts': { account: 'glm-53', effort: 'default', trustFolder: false } } },
+    { provider: 'opencode', accountId: 'glm-flash', account: 'GLM flash', model: 'glm-5.3-flash', endpoint: 'api.z.ai', state: 'ready', launchOptions: { 'canvastty-accounts': { account: 'glm-flash', effort: 'default', trustFolder: false } } }
+  ]);
+  const p = providersFrom(providers({ installed: ['opencode'] }));
+  // Run 10's T: Jev read "Bloom filter in two sentences" as writing/small; Auto's expected model was gemini-3.5-flash@high (80.1).
+  const auto = { model: 'google/gemini-3.5-flash', identity: 'gemini-3-5-flash', effort: 'high', priceIn: 1.5, priceOut: 9, trusted: true };
+  const run = (v, extra = {}) => decide(ctx({ catalog: cat, index: idx, providers: p.list, providersGiven: true, accountRows: rows, callerProvider: 'opencode', auto, view: v,
+    settings: declared({ plans: [], flat: ['host:api.z.ai'], trust: { 'host:api.z.ai': 'D2' }, ...extra }) }));
+  const small = run(view('writing', 'small'));
+  assert.equal(small.top.accountId, 'glm-flash', 'the plan, and on it the model that uses less quota');
+  assert.equal(small.top.score, null, 'no writing score: judged by its overall score');
+  assert.match(whyLine(small.top, small, NOW), /a plan is good enough for a small task: within 30 points of the best \(overall score 41\.8\), so it goes before paid routes \(your setting\)/u);
+  assert.equal(small.alternatives.some(c => c.kind === 'auto'), true, 'Auto stays an alternative');
+  assert.equal(run(view('writing', 'small'), { preferPlansSmall: false }).top.kind, 'auto', 'off: as in run 10');
+  const narrow = run(view('writing', 'small'), { planWindowSmall: 0 });
+  assert.deepEqual([narrow.top.accountId, narrow.top.planPreferred], ['glm-53', 0], 'a window of 0 points: only the best overall score among the plans, GLM-5.3 (44.8)');
+  assert.equal(run(view('writing', 'medium')).top.kind, 'auto', 'medium tasks unchanged');
+  assert.equal(run(turnView({ difficulty: 'simple', strong: false }, 'rules', 'fix a typo in the readme', { role: 'subagent' })).top.kind, 'auto', 'a small task from word rules is not "confidently" small');
+  assert.equal(validateRouteSettings({ ...declared(), preferPlansSmall: undefined }).preferPlansSmall, true, 'older saves: on');
+  assert.throws(() => validateRouteSettings({ ...declared(), planWindowSmall: 99 }), /plan window/u);
+});

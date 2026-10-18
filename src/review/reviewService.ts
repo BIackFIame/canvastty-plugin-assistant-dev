@@ -78,6 +78,26 @@ export interface ReviewServiceOptions {
 
 /** The trust chain allows a subagent's new file only when the light review is at least this sure it serves the task. */
 export const TRUST_CHAIN_MIN_SERVES = 0.95;
+/**
+ * …or this sure when the file's name stands literally in the trusted task (the person's request above, or the task
+ * this card was given) and the file lands in this card's folder or a folder that task names, with every other risk
+ * answer low. Live run 10: Jev put the module the task named at 0.83, its test file at 0.95.
+ */
+export const TRUST_CHAIN_NAMED_MIN_SERVES = 0.75;
+export const TRUST_CHAIN_LOW_RISK = 0.1;
+
+/** The file's name stands in the text as a word of its own (not inside a longer name). */
+export function namesFile(text: string, path: string): boolean {
+  const name = path.split(/[\\/]/u).at(-1) ?? '';
+  if (name.length < 3) return false;
+  const escaped = name.replace(/[.*+?^${}()|[\]\\]/gu, '\\$&');
+  return new RegExp(`(?:^|[^\\w.-])${escaped}(?=$|[^\\w.-]|\\.(?:$|[^\\w-]))`, 'u').test(text);
+}
+
+/** Folders a task names (`code/`, `src/lib`), relative to the project. */
+function namedFolders(text: string): string[] {
+  return [...text.matchAll(/(?:^|[\s(`'"])((?:\.?[\w-]+\/)+)(?=[\s)`'",.;:]|$|[\w.-])/gu)].map(match => match[1]!.replace(/\/+$/u, '')).filter(Boolean).slice(0, 16);
+}
 
 /**
  * The absolute paths a call creates, when it only creates files whose whole content is in its input (a whole-file
@@ -543,14 +563,25 @@ export class ReviewService {
     const above = this.sessions.get(state.parent);
     if (!above || above.subagent || !this.ownTexts(above).length) return false;
     if (rules.verdict || facts.actionClass !== 'edit_in_project' || facts.kind !== 'edit' || facts.writesOutside || facts.credentialAccess || facts.protectedWrite || facts.truncated) return false;
-    if (verdict.outcome === 'deny' || verdict.modelDenied || typeof verdict.probability !== 'number' || verdict.probability < TRUST_CHAIN_MIN_SERVES) return false;
+    if (verdict.outcome === 'deny' || verdict.modelDenied || typeof verdict.probability !== 'number' || verdict.probability < TRUST_CHAIN_NAMED_MIN_SERVES) return false;
     const action = actionFromDetail(detailFromHook(request.tool.name, request.input, request.truncated));
     if (action.inputTruncated || (action.content?.length ?? 0) > REVIEW_LIMITS.contentChars) return false;
     const cwd = action.commandCwd ?? request.agentCwd ?? request.cwd;
     const targets = newFileTargets(request.tool.name, request.input, request.truncated, cwd);
     if (!targets) return false;
     const root = realish(resolve(request.cwd));
-    return targets.every(path => { const abs = realish(resolve(path)); return abs.startsWith(`${root}${sep}`) && !isCredentialPath(abs) && !isProtectedRel(relative(root, abs).split(sep).join('/')); });
+    const inside = (dir: string, abs: string): boolean => abs.startsWith(`${dir}${sep}`);
+    if (!targets.every(path => { const abs = realish(resolve(path)); return inside(root, abs) && !isCredentialPath(abs) && !isProtectedRel(relative(root, abs).split(sep).join('/')); })) return false;
+    if (verdict.probability >= TRUST_CHAIN_MIN_SERVES) return true;
+    // Below 0.95: only a file the trusted task names, in this card's folder or one the task names, with low risks.
+    const risks = Object.entries(verdict.risks ?? {}).filter(([id]) => id !== 'effect_hidden');
+    if (!risks.length || risks.some(([, p]) => typeof p !== 'number' || p > TRUST_CHAIN_LOW_RISK)) return false;
+    const texts = [...this.ownTexts(above), ...this.ownTexts(state)];
+    const folders = [realish(resolve(request.agentCwd ?? request.cwd)), ...texts.flatMap(namedFolders).map(folder => realish(resolve(root, folder)))].filter(dir => dir === root || inside(root, dir));
+    return targets.every(path => {
+      const abs = realish(resolve(path));
+      return texts.some(text => namesFile(text, abs)) && folders.some(dir => inside(dir, abs));
+    });
   }
 
   private async ladder(request: DecideRequest, state: SessionState, personRequest: string | null, facts: CommandFacts, rules: ReturnType<typeof tier1>, content: string | null, signal: AbortSignal, contentVisible = false): Promise<CommandReviewVerdict> {

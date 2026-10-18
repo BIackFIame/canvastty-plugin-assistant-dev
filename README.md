@@ -12,16 +12,29 @@ start, review stays Off, nothing is saved over them, and the Assistant reads the
 
 ## Settings
 
-Settings → Plugins → CanvasTTY Assistant → **Settings** has four controls:
+Settings → Plugins → CanvasTTY Assistant → **Settings** has five controls:
 
 | Control | Values | Default |
 |:--|:--|:--|
 | Command review | Strict (anything but read-only commands waits for you) · Basic rules (blocks what the hard rules forbid: elevation, piping downloads into a shell, deleting or writing outside the project; the rest runs with a hint on the card) · Off. Settings that are none of these exactly (for example an older version's Learning mode) show as **Custom**, read-only, until you pick a level. | Off |
+| Trust the orchestrator's task for its subagents' new files | on/off: the **trust chain** (below) | off |
 | Automatic routing | on/off: the `route` tool suggests provider, model and effort | on |
 | Loop alerts | on/off: a `loop?` badge when a card repeats the same command in one turn with no file edits seen | on |
 | Flows | on/off: the flow tools and the Flow preview card | on |
 
 Decision models are optional and have their own page (**Decision models…** at the bottom).
+
+**Trust chain.** With it on, a subagent may create a new file inside the project without asking you when:
+- the task of the orchestrator above it is yours;
+- the file is new and its whole content is visible;
+- it is not a secret, not a protected path and not a command;
+- the review is sure enough the file serves the task: at least 95%, or 75% when the trusted task names the file and it lands in the subagent's folder (or a folder the task names) with every risk low.
+
+The Assistant only knows the orchestrator's task as **yours** from what reaches it:
+- the launcher's **Task** field (Advanced → CanvasTTY Assistant). CanvasTTY limits it to 200 characters;
+- or the turns of an orchestrator on Model: Auto (Jev).
+
+For a longer task, put its first line in the Task field (with the file names the subagents will create) and the details in your first message to the orchestrator. Without the Task field, an orchestrator on a model account or its own sign-in gets no trust chain, and its subagents' writes go to you as before.
 
 ## For orchestrators
 

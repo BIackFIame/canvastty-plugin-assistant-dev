@@ -607,11 +607,55 @@ test('trust chain never applies to overwrites, partial edits, outside paths, sec
   await notAllowed({ ...write('c9', 'x'), tool: { name: 'bash', kind: 'shell', command: 'echo hi > code/textstats.mjs', paths: [] }, input: { command: 'echo hi > code/textstats.mjs' } }, {}, 'a shell command');
   await notAllowed({ ...newFile('code/cut.mjs'), truncated: true }, {}, 'cut input');
   await notAllowed(newFile('code/big.mjs', { input: { content: `// textstats\n${'x'.repeat(20_000)}` } }), {}, 'content above the review size');
-  await notAllowed(newFile('code/textstats.mjs'), { engine: run9Engine(() => 0.94) }, 'serves_request below 0.95');
+  await notAllowed(newFile('code/unnamed.mjs'), { engine: run9Engine(() => 0.94) }, 'serves_request below 0.95 for a file the task does not name');
+  await notAllowed(newFile('code/textstats.mjs'), { engine: run9Engine(() => 0.7) }, 'below 0.75 even when named');
   await notAllowed(newFile('code/textstats.mjs'), { personTask: null }, 'the orchestrator\'s task is not known to be the person\'s (run 9 as it ran: no launcher task, not on Auto)');
   // A card the person started is not a subagent: the chain does not apply (the usual rules do).
   const { review } = service(run9Engine(), {}, { trustChain: () => true });
   review.noteLaunch('top9', { task: null, dataClass: null, triage: false, role: 'agent' });
   assert.notEqual((await review.decide({ ...newFile('code/top.mjs'), sessionId: 'top9', role: 'agent' }, 10_000))?.reason ?? '', 'trust chain');
   assert.ok(!review.recent().some(entry => entry.reason === 'trust-chain'));
+});
+
+test('live run 10: a file the trusted task names, in its folder, passes the trust chain at serves 0.83 with low risks; an unnamed one does not', async () => {
+  const PERSON = 'Route two subagents: T explains Bloom filters in two sentences; C creates new files textstats.mjs and textstats.test.mjs (node:test, 6+ cases) in code/, no shell commands.';
+  const CHILD = 'Create code/textstats.mjs exporting countWords, topWords and readingMinutes, and its tests. Only new files, no shell.';
+  const engineWith = (serves, patch = {}) => {
+    const engine = fakeEngine({ mode: 'auto', qualified: false, smart: null });
+    engine.hasVerifier = () => false;
+    const ask = engine.ask.bind(engine);
+    engine.ask = async (request, ctx) => {
+      const decision = await ask(request, ctx);
+      const answers = answersOf(serves, 0.01, { effect_hidden: 0.17, ...patch });
+      const mapped = request.map?.(answers, {}, { variant: 'full', truncated: false, family: 'jev', autoCapable: true });
+      return { ...decision, answers, outcome: mapped?.outcome ?? null, qualifiedOutcome: mapped?.qualifiedOutcome ?? null };
+    };
+    return engine;
+  };
+  const code = join(project, 'code');
+  mkdirSync(code, { recursive: true });
+  const decide = async (file, { serves = 0.83, patch = {}, on = true, childCwd = code } = {}) => {
+    const { review } = service(engineWith(serves, patch), {}, { trustChain: () => on });
+    review.noteLaunch('orch10', { task: PERSON, dataClass: null, triage: false, role: 'orchestrator' });
+    review.noteLaunch('c10', { task: null, dataClass: null, triage: false, role: 'subagent', parentSessionId: 'orch10' });
+    review.noteTurn('c10', CHILD, { role: 'subagent', parentSessionId: 'orch10' });
+    const call = { ...write('c10', file), agentCwd: childCwd, input: { filePath: join(project, file), content: 'export function countWords(text) { return 0; }\n' } };
+    const answer = await review.decide(call, 10_000);
+    return { answer, reason: review.recent()[0]?.reason };
+  };
+  // As live: textstats.mjs at 0.83, named in the person's task, in code/ (the child's folder and the one the task names).
+  const named = await decide('code/textstats.mjs');
+  assert.deepEqual([named.answer.verdict, named.reason], ['allow', 'trust-chain']);
+  assert.equal((await decide('code/textstats.test.mjs', { serves: 0.95 })).answer.verdict, 'allow', 'at 0.95 as before');
+  // Not named in any trusted text: to the person (this subagent cannot ask, so a deny).
+  assert.notEqual((await decide('code/helpers.mjs')).answer.verdict, 'allow');
+  // Named, but a risk answer is not low; or below 0.75; or the switch is off.
+  assert.notEqual((await decide('code/textstats.mjs', { patch: { exfiltration: 0.2 } })).answer.verdict, 'allow');
+  assert.notEqual((await decide('code/textstats.mjs', { serves: 0.74 })).answer.verdict, 'allow');
+  assert.notEqual((await decide('code/textstats.mjs', { on: false })).answer.verdict, 'allow');
+  // Named, but outside the child's folder and outside the folder the task names.
+  mkdirSync(join(project, 'other'), { recursive: true });
+  assert.notEqual((await decide('other/textstats.mjs')).answer.verdict, 'allow');
+  // Its own folder counts when the task names none: the child works in other/, and the file is there.
+  assert.equal((await decide('other/textstats.mjs', { childCwd: join(project, 'other') })).answer.verdict, 'allow');
 });

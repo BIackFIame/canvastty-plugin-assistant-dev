@@ -169,6 +169,10 @@ export interface Candidate {
   identity: string | null;
   resolvedFrom: Resolved['from'] | 'auto' | 'account';
   effort: string | null;
+  /** Its overall ("chat") score in the decision's chat cohort, for "good enough" on small tasks; null: none. */
+  overall: number | null;
+  /** Chosen because a plan is good enough for a small task: the window it was within. */
+  planPreferred: number | null;
   /** The effort its score describes (a vendor's documented default when none is sent): tunnels group on it. */
   scoredEffort: string | null;
   score: CandidateScore | null;
@@ -421,6 +425,7 @@ export function decide(ctx: RouteContext): RouteDecision {
   const mapOf = (raw: Raw, type: TaskType): Map<string, Score> | undefined => raw.resolved.identity ? maps.get(variantKey(raw.resolved.identity, raw.effort, raw.context))?.get(type) : undefined;
   const scoredAs: TaskType = raws.some(raw => (mapOf(raw, view.type)?.size ?? 0) > 0) ? view.type : 'chat';
   const cohort = chooseCohort(raws.filter(raw => raw.resolved.identity).map(raw => ({ model: raw.resolved.identity!, scores: mapOf(raw, scoredAs) ?? new Map() })));
+  const chatCohort = chooseCohort(raws.filter(raw => raw.resolved.identity).map(raw => ({ model: raw.resolved.identity!, scores: mapOf(raw, 'chat') ?? new Map() })));
   const policy = ctx.settings.newModels;
   const fits = new Map<string, ReturnType<typeof anchorFit>>();
   const level: Level = view.level;
@@ -527,6 +532,7 @@ export function decide(ctx: RouteContext): RouteDecision {
       ...(raw.planId ? { planId: raw.planId } : {}), ...(raw.accountId ? { accountId: raw.accountId } : {}), ...(raw.endpoint ? { endpoint: raw.endpoint } : {}),
       model: raw.kind === 'auto' ? ctx.auto!.model : raw.model, identity: raw.resolved.identity, resolvedFrom: raw.resolved.from, effort: raw.effort,
       scoredEffort: measured?.effort ?? raw.effort,
+      overall: chatCohort ? (mapOf(raw, 'chat')?.get(chatCohort)?.value ?? null) : null, planPreferred: null,
       score, pin, boost, cost, costBasis, estimate, quota, availability, trust: { level: raw.trust, warn: trust.warn }, allow: raw.allow, demoted: null, planCost: null, spawn,
       newModel: !!raw.model && raw.kind !== 'auto' && (score === null || score.source === 'provisional')
     });
@@ -585,6 +591,21 @@ export function decide(ctx: RouteContext): RouteDecision {
     Number(rep(b).cli === ctx.callerProvider) - Number(rep(a).cli === ctx.callerProvider) || Number(quotaKnown(rep(b))) - Number(quotaKnown(rep(a))) || compareCost(rep(a), rep(b)) || rep(a).key.localeCompare(rep(b).key));
   const unused = unscored.filter(group => !boosted.includes(group) && !defaults.includes(group));
   let ordered = [...pinned, ...eligible, ...others, ...boosted, ...defaults];
+
+  // Plans first on confidently small tasks: a plan or subscription within the person's wider window of the best (by
+  // the task type's score, or by the overall score when the plan has none for the type) wins over paid routes.
+  if (ctx.settings.preferPlansSmall && view.level === 'small' && view.confident && !view.strong && !ctx.explore.highRisk && !ctx.orchestrate) {
+    const W = ctx.settings.planWindowSmall;
+    const isPlan = (c: Candidate): boolean => c.kind === 'subscription' || c.kind === 'coding-plan' || c.costBasis === 'flat' || c.costBasis === 'local';
+    const bestOverall = Math.max(-Infinity, ...[...scored, ...unused, ...defaults].map(group => rep(group).overall ?? -Infinity));
+    const good = (c: Candidate): boolean => c.score ? best !== null && c.score.value >= best - W - 1e-9 : c.overall !== null && c.overall >= bestOverall - W - 1e-9;
+    const plansOk = [...scored, ...unused].filter(group => isPlan(rep(group)) && good(rep(group)));
+    if (plansOk.length && !isPlan(rep(ordered[0] ?? plansOk[0]!))) {
+      const sorted = [...plansOk].sort((a, b) => comparePlan(rep(a), rep(b)) || (rep(b).score?.value ?? rep(b).overall ?? 0) - (rep(a).score?.value ?? rep(a).overall ?? 0) || rep(a).key.localeCompare(rep(b).key));
+      for (const group of sorted) rep(group).planPreferred = W;
+      ordered = [...sorted, ...ordered.filter(group => !sorted.includes(group))];
+    }
+  }
 
   // The orchestrator's explicit choice (a model the person named, a CLI, a plan or account) wins over data.
   let preferred = false;
@@ -775,6 +796,7 @@ export function whyLine(c: Candidate, decision: Pick<RouteDecision, 'scoredAs' |
   parts.push(c.availability.state === 'ready' ? `ready (${c.availability.reason})` : c.availability.reason);
   if (c.trust.warn) parts.push(`trust ${c.trust.level === 'auto' ? 'of its upstreams' : c.trust.level} is below this card's class (Warn)`);
   if (c.demoted) parts.push(`demoted: ${c.demoted}`);
+  if (c.planPreferred !== null) parts.push(`a plan is good enough for a small task: within ${c.planPreferred} points of the best${c.score ? '' : ` (overall score ${c.overall?.toFixed(1)})`}, so it goes before paid routes (your setting)`);
   return parts.join(' · ');
 }
 

@@ -5,7 +5,10 @@
 - **Trust chain** (command review, off by default, the person's switch on the settings page): a subagent may create
   new files in the project without asking when its orchestrator's task was typed by the person and the review is at
   least 95% sure the file serves it. Never for overwrites, partial edits, paths outside the project, secrets,
-  protected paths, commands, cut or oversized content.
+  protected paths, commands, cut or oversized content. A file the trusted task names, in the subagent's folder or a
+  folder the task names, needs 75% with every other risk low (live run 10: 0.83 for the named module).
+- **Prefer plans for small tasks** (on, 30 points): a confidently small task goes to a plan or subscription within 30
+  points of the best (by its overall score when it has none for the task type) before paid routes.
 - **Plan cost by quota and speed**: on subscriptions, coding plans and flat-rate accounts a model costs the quota it
   uses (expected tokens, ×1.2 for small models until outcomes say otherwise, times a quota weight: the API price
   ratio to the plan's top model, or the person's) and, with known speeds, its time ("value speed"). Within the

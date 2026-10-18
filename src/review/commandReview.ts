@@ -1,4 +1,4 @@
-import { FIELD_BOUNDS, PERSON_ONLY_CLASSES, REVIEW_TABLE_B, type ActionClass, type AssistantMode, type AssistantUseCase, type QualifiedOutcome } from '../shared/catalog.ts';
+import { FIELD_BOUNDS, PERSON_ONLY_CLASSES, REVIEW_RISK_NOULS, REVIEW_TABLE_B, type ActionClass, type AssistantMode, type AssistantUseCase, type QualifiedOutcome } from '../shared/catalog.ts';
 import type { AssistantBackendRef, AssistantDecision } from '../shared/settings.ts';
 import type { ReviewReason } from '../shared/commandReview.ts';
 import type { DataClass } from '../shared/settings.ts';
@@ -77,6 +77,8 @@ export interface CommandReviewVerdict {
   /** The light tier's model and its `serves_request` probability, for the card strip; null when no model answered. */
   model?: string | null;
   probability?: number | null;
+  /** The light tier's risk answers (and addresses_reviewer), for the trust chain; absent when no model answered. */
+  risks?: Record<string, number | null>;
 }
 
 const RELAXING_OUTCOMES: readonly QualifiedOutcome[] = ['auto-allow', 'verify-allow', 'auto-deny'];
@@ -184,6 +186,7 @@ export async function askCommandReview(engine: CommandReviewEngine, input: Comma
     base.auditId = decision.auditId;
     base.model = decision.backend?.modelLabel ?? null;
     base.probability = decision.answers ? pOf(decision.answers, 'serves_request') ?? null : null;
+    if (decision.answers) base.risks = Object.fromEntries(['addresses_reviewer', ...REVIEW_RISK_NOULS].map(id => [id, pOf(decision.answers, id) ?? null]));
     if (decision.branch === 'shadow-recorded') return { ...base, show: false, reason: 'learning' };
     if (decision.branch !== 'suggest' && decision.branch !== 'auto' || !decision.answers || !decision.backend) return base;
 

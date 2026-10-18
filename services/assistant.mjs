@@ -7396,6 +7396,7 @@ async function askCommandReview(engine, input, ctx) {
     base.auditId = decision.auditId;
     base.model = decision.backend?.modelLabel ?? null;
     base.probability = decision.answers ? pOf(decision.answers, "serves_request") ?? null : null;
+    if (decision.answers) base.risks = Object.fromEntries(["addresses_reviewer", ...REVIEW_RISK_NOULS].map((id) => [id, pOf(decision.answers, id) ?? null]));
     if (decision.branch === "shadow-recorded") return { ...base, show: false, reason: "learning" };
     if (decision.branch !== "suggest" && decision.branch !== "auto" || !decision.answers || !decision.backend) return base;
     const qualified = /* @__PURE__ */ new Map();
@@ -7517,6 +7518,17 @@ function exactAllow(facts) {
 // src/review/reviewService.ts
 var ASKING_PROFILES = /* @__PURE__ */ new Set(["normal", "plan"]);
 var TRUST_CHAIN_MIN_SERVES = 0.95;
+var TRUST_CHAIN_NAMED_MIN_SERVES = 0.75;
+var TRUST_CHAIN_LOW_RISK = 0.1;
+function namesFile(text6, path) {
+  const name = path.split(/[\\/]/u).at(-1) ?? "";
+  if (name.length < 3) return false;
+  const escaped = name.replace(/[.*+?^${}()|[\]\\]/gu, "\\$&");
+  return new RegExp(`(?:^|[^\\w.-])${escaped}(?=$|[^\\w.-]|\\.(?:$|[^\\w-]))`, "u").test(text6);
+}
+function namedFolders(text6) {
+  return [...text6.matchAll(/(?:^|[\s(`'"])((?:\.?[\w-]+\/)+)(?=[\s)`'",.;:]|$|[\w.-])/gu)].map((match) => match[1].replace(/\/+$/u, "")).filter(Boolean).slice(0, 16);
+}
 function newFileTargets(toolName, toolInput, truncated, cwd) {
   const raw = record(toolInput);
   if (truncated || !raw || !wholeContentWrite(toolName, toolInput, truncated, cwd)) return null;
@@ -7986,16 +7998,26 @@ var ReviewService = class {
     const above = this.sessions.get(state.parent);
     if (!above || above.subagent || !this.ownTexts(above).length) return false;
     if (rules.verdict || facts.actionClass !== "edit_in_project" || facts.kind !== "edit" || facts.writesOutside || facts.credentialAccess || facts.protectedWrite || facts.truncated) return false;
-    if (verdict.outcome === "deny" || verdict.modelDenied || typeof verdict.probability !== "number" || verdict.probability < TRUST_CHAIN_MIN_SERVES) return false;
+    if (verdict.outcome === "deny" || verdict.modelDenied || typeof verdict.probability !== "number" || verdict.probability < TRUST_CHAIN_NAMED_MIN_SERVES) return false;
     const action = actionFromDetail(detailFromHook(request.tool.name, request.input, request.truncated));
     if (action.inputTruncated || (action.content?.length ?? 0) > REVIEW_LIMITS.contentChars) return false;
     const cwd = action.commandCwd ?? request.agentCwd ?? request.cwd;
     const targets = newFileTargets(request.tool.name, request.input, request.truncated, cwd);
     if (!targets) return false;
     const root = realish(resolve3(request.cwd));
+    const inside = (dir, abs) => abs.startsWith(`${dir}${sep3}`);
+    if (!targets.every((path) => {
+      const abs = realish(resolve3(path));
+      return inside(root, abs) && !isCredentialPath(abs) && !isProtectedRel(relative3(root, abs).split(sep3).join("/"));
+    })) return false;
+    if (verdict.probability >= TRUST_CHAIN_MIN_SERVES) return true;
+    const risks = Object.entries(verdict.risks ?? {}).filter(([id]) => id !== "effect_hidden");
+    if (!risks.length || risks.some(([, p2]) => typeof p2 !== "number" || p2 > TRUST_CHAIN_LOW_RISK)) return false;
+    const texts = [...this.ownTexts(above), ...this.ownTexts(state)];
+    const folders = [realish(resolve3(request.agentCwd ?? request.cwd)), ...texts.flatMap(namedFolders).map((folder) => realish(resolve3(root, folder)))].filter((dir) => dir === root || inside(root, dir));
     return targets.every((path) => {
       const abs = realish(resolve3(path));
-      return abs.startsWith(`${root}${sep3}`) && !isCredentialPath(abs) && !isProtectedRel(relative3(root, abs).split(sep3).join("/"));
+      return texts.some((text6) => namesFile(text6, abs)) && folders.some((dir) => inside(dir, abs));
     });
   }
   async ladder(request, state, personRequest, facts, rules, content, signal, contentVisible = false) {
@@ -12660,7 +12682,9 @@ var DEFAULT_ROUTE_SETTINGS = Object.freeze({
   flat: [],
   valueSpeed: "moderate",
   speeds: {},
-  quotaWeights: {}
+  quotaWeights: {},
+  preferPlansSmall: true,
+  planWindowSmall: 30
 });
 var RouteSettingsError = class extends Error {
 };
@@ -12762,12 +12786,18 @@ function validateRouteSettings(value) {
     flat: [...new Set(flat)],
     valueSpeed: "moderate",
     speeds: {},
-    quotaWeights: {}
+    quotaWeights: {},
+    preferPlansSmall: true,
+    planWindowSmall: 30
   };
   if (v.valueSpeed !== void 0 && !VALUE_SPEEDS.includes(v.valueSpeed)) fail5("Invalid speed preference.");
   result.valueSpeed = v.valueSpeed ?? "moderate";
   result.speeds = v.speeds === void 0 ? {} : map(v.speeds, MAX_PINS, (k) => IDENTITY.test(k), (x) => typeof x === "number" && Number.isFinite(x) && x >= 1 && x <= 1e4, "speeds");
   result.quotaWeights = v.quotaWeights === void 0 ? {} : weights(v.quotaWeights, "quota weights");
+  if (v.preferPlansSmall !== void 0 && typeof v.preferPlansSmall !== "boolean") fail5("Invalid prefer plans.");
+  if (v.planWindowSmall !== void 0 && !intIn(v.planWindowSmall, 0, 60)) fail5("Invalid plan window.");
+  result.preferPlansSmall = v.preferPlansSmall ?? true;
+  result.planWindowSmall = v.planWindowSmall ?? 30;
   if (JSON.stringify(result).length > MAX_SETTINGS_CHARS) fail5("The routing settings are too large: remove some plans, models or aliases.");
   return result;
 }
@@ -12994,6 +13024,7 @@ function decide(ctx) {
   const mapOf = (raw, type) => raw.resolved.identity ? maps.get(variantKey(raw.resolved.identity, raw.effort, raw.context))?.get(type) : void 0;
   const scoredAs = raws.some((raw) => (mapOf(raw, view.type)?.size ?? 0) > 0) ? view.type : "chat";
   const cohort = chooseCohort(raws.filter((raw) => raw.resolved.identity).map((raw) => ({ model: raw.resolved.identity, scores: mapOf(raw, scoredAs) ?? /* @__PURE__ */ new Map() })));
+  const chatCohort = chooseCohort(raws.filter((raw) => raw.resolved.identity).map((raw) => ({ model: raw.resolved.identity, scores: mapOf(raw, "chat") ?? /* @__PURE__ */ new Map() })));
   const policy = ctx.settings.newModels;
   const fits = /* @__PURE__ */ new Map();
   const level = view.level;
@@ -13150,6 +13181,8 @@ function decide(ctx) {
       resolvedFrom: raw.resolved.from,
       effort: raw.effort,
       scoredEffort: measured?.effort ?? raw.effort,
+      overall: chatCohort ? mapOf(raw, "chat")?.get(chatCohort)?.value ?? null : null,
+      planPreferred: null,
       score: score2,
       pin,
       boost,
@@ -13200,6 +13233,18 @@ function decide(ctx) {
   const defaults = unscored.filter((group) => !rep(group).model || rep(group).kind === "auto").sort((a, b) => Number(rep(b).cli === ctx.callerProvider) - Number(rep(a).cli === ctx.callerProvider) || Number(quotaKnown(rep(b))) - Number(quotaKnown(rep(a))) || compareCost(rep(a), rep(b)) || rep(a).key.localeCompare(rep(b).key));
   const unused = unscored.filter((group) => !boosted.includes(group) && !defaults.includes(group));
   let ordered = [...pinned, ...eligible, ...others, ...boosted, ...defaults];
+  if (ctx.settings.preferPlansSmall && view.level === "small" && view.confident && !view.strong && !ctx.explore.highRisk && !ctx.orchestrate) {
+    const W = ctx.settings.planWindowSmall;
+    const isPlan = (c) => c.kind === "subscription" || c.kind === "coding-plan" || c.costBasis === "flat" || c.costBasis === "local";
+    const bestOverall = Math.max(-Infinity, ...[...scored, ...unused, ...defaults].map((group) => rep(group).overall ?? -Infinity));
+    const good = (c) => c.score ? best !== null && c.score.value >= best - W - 1e-9 : c.overall !== null && c.overall >= bestOverall - W - 1e-9;
+    const plansOk = [...scored, ...unused].filter((group) => isPlan(rep(group)) && good(rep(group)));
+    if (plansOk.length && !isPlan(rep(ordered[0] ?? plansOk[0]))) {
+      const sorted = [...plansOk].sort((a, b) => comparePlan(rep(a), rep(b)) || (rep(b).score?.value ?? rep(b).overall ?? 0) - (rep(a).score?.value ?? rep(a).overall ?? 0) || rep(a).key.localeCompare(rep(b).key));
+      for (const group of sorted) rep(group).planPreferred = W;
+      ordered = [...sorted, ...ordered.filter((group) => !sorted.includes(group))];
+    }
+  }
   let preferred = false;
   if (ctx.prefer) {
     const p2 = lower(ctx.prefer);
@@ -13403,6 +13448,7 @@ function whyLine(c, decision, now) {
   parts.push(c.availability.state === "ready" ? `ready (${c.availability.reason})` : c.availability.reason);
   if (c.trust.warn) parts.push(`trust ${c.trust.level === "auto" ? "of its upstreams" : c.trust.level} is below this card's class (Warn)`);
   if (c.demoted) parts.push(`demoted: ${c.demoted}`);
+  if (c.planPreferred !== null) parts.push(`a plan is good enough for a small task: within ${c.planPreferred} points of the best${c.score ? "" : ` (overall score ${c.overall?.toFixed(1)})`}, so it goes before paid routes (your setting)`);
   return parts.join(" \xB7 ");
 }
 function estimateText(estimate2) {
