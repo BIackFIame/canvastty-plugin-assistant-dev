@@ -355,3 +355,57 @@ test('settings: validated as a whole; defaults on anything invalid; bounded; out
   assert.equal(classifyOutcome('failed', ['TypeError: x']), 'failed');
   assert.equal(classifyOutcome('done', []), 'done');
 });
+
+// ---------------------------------------------------------------------------------------------------------------
+// Plan cost: quota share and speed, not "free" (owner's policy, runs 8 and 9)
+// ---------------------------------------------------------------------------------------------------------------
+
+test('on a plan, cost is the quota a model uses and its time: GLM-5.3-flash beats GLM-5.3 on small tasks; medium out of the window and large stay quality-first', () => {
+  const cat = catalog({ prices: { 'z-ai/glm-5.3': [0.6, 2.2], 'z-ai/glm-5.3-flash': [0.1, 0.4] } });
+  const idx = new BenchmarkIndex(cat);
+  const rows = accountRowsFrom([
+    { provider: 'opencode', accountId: 'glm-53', account: 'GLM 5.3 · Z.AI Coding Plan', model: 'glm-5.3', endpoint: 'api.z.ai', state: 'ready', launchOptions: { 'canvastty-accounts': { account: 'glm-53', effort: 'default', trustFolder: false } } },
+    { provider: 'opencode', accountId: 'glm-flash', account: 'GLM flash', model: 'glm-5.3-flash', endpoint: 'api.z.ai', state: 'ready', launchOptions: { 'canvastty-accounts': { account: 'glm-flash', effort: 'default', trustFolder: false } } }
+  ]);
+  const p = providersFrom(providers({ installed: ['opencode'] }));
+  const settings = (extra = {}) => declared({ plans: [], flat: ['host:api.z.ai'], trust: { 'host:api.z.ai': 'D2' }, ...extra });
+  const run = (type, level, extra = {}, more = {}) => decide(ctx({ catalog: cat, index: idx, providers: p.list, providersGiven: true, accountRows: rows, callerProvider: 'opencode', auto: null, view: view(type, level), settings: settings(extra), ...more }));
+  // PONG (chat, small): flash is 3 points below, inside the window of 8, and uses far less of the plan.
+  const small = run('chat', 'small');
+  assert.equal(small.top.accountId, 'glm-flash');
+  const flash = small.top.planCost;
+  // 1.2 × the tokens at a sixth of the token price: about a fifth of the quota GLM-5.3 would use.
+  assert.equal(flash.quota, Math.round(1.2 * ((0.1 + 0.4 * 3) / (0.6 + 2.2 * 3)) * 1_000) / 1_000);
+  assert.match(whyLine(small.top, small, NOW), /flat-rate plan, unpriced: no cost per task within the plan's limits; ~22% of the plan quota glm-5-3 would use · 3\.0 points below the best, allowed 8/u);
+  // Speeds known (the person's figures): flash 4× the output speed, so about 3.3× sooner with 1.2× the tokens.
+  const timed = run('chat', 'small', { speeds: { 'glm-5-3': 50, 'glm-5-3-flash': 200 } });
+  assert.equal(timed.top.planCost.faster, 3.3);
+  assert.match(whyLine(timed.top, timed, NOW), /~3\.3× faster/u);
+  // Coding, medium: flash is 8.7 points below (window 5) — outside, so GLM-5.3.
+  assert.equal(run('coding', 'medium').top.accountId, 'glm-53');
+  // Research, large: flash is 3.0 below and inside the window of 3, but large tasks stay quality-first.
+  assert.equal(run('research', 'large').top.accountId, 'glm-53');
+  assert.equal(run('research', 'small').top.accountId, 'glm-flash', 'the same pair on a small task');
+  assert.equal(run('research', 'small', {}, { explore: { roll: 0.99, retired: new Set(), highRisk: true } }).top.accountId, 'glm-53', 'a risky task stays quality-first');
+  // The person's quota weight wins over the price ratio; learned tokens replace the 1.2× default.
+  assert.equal(run('chat', 'small', { quotaWeights: { 'glm-5-3-flash': 1 } }).top.accountId, 'glm-53', 'flash tokens count like GLM-5.3 tokens: 1.2× the quota');
+  assert.equal(run('chat', 'small', {}, { tokenFactor: id => id === 'glm-5-3-flash' ? 6 : null }).top.accountId, 'glm-53', 'flash took 6× the tokens in practice');
+});
+
+test('a declared plan counting prompts: every model costs one prompt, so score decides; by tokens the cheaper model wins; learned tokens from outcomes', () => {
+  const cat = catalog({ prices: { 'z-ai/glm-5.3': [0.6, 2.2], 'z-ai/glm-5.3-flash': [0.1, 0.4] } });
+  const idx = new BenchmarkIndex(cat);
+  const plan = (quotaBy) => declared({ plans: [{ ...declared().plans[2], ...(quotaBy ? { quotaBy } : {}) }] });
+  const base = { catalog: cat, index: idx, accountRows: [], auto: null, callerProvider: 'opencode', view: view('research', 'small'), providers: providersFrom(providers({ installed: ['opencode'] })).list };
+  assert.equal(decide(ctx({ ...base, settings: plan() })).top.model, 'zai-coding-plan/glm-5.3-flash', 'by tokens (the default)');
+  assert.equal(decide(ctx({ ...base, settings: plan('prompts') })).top.model, 'zai-coding-plan/glm-5.3', 'by prompts');
+  assert.equal(validateRouteSettings({ ...plan('prompts') }).plans[0].quotaBy, 'prompts');
+  assert.throws(() => validateRouteSettings({ ...declared(), plans: [{ ...declared().plans[2], quotaBy: 'coins' }] }), /quota kind/u);
+  assert.equal(validateRouteSettings({ ...declared(), valueSpeed: undefined }).valueSpeed, 'moderate', 'older saves');
+  // Tokens the orchestrator reports with route_outcome: the median of ≥ 5, as a factor of the level's default.
+  const records = new RouteRecords([], () => undefined);
+  const option = { key: 'k', cli: 'opencode', kind: 'coding-plan', signIn: 'plan:glm-plan', label: 'x', model: 'zai-coding-plan/glm-5.3-flash', identity: 'glm-5-3-flash', effort: null, score: null, scoreSource: null, cost: 0, costBasis: 'plan', estimate: '', why: '' };
+  for (let i = 0; i < 5; i++) records.add({ id: `r${i}`, at: i, card: 'o', type: 'research', level: 'small', typeFrom: 'jev', confidence: 0.9, strategy: 'single-cheap', cohort: null, candidates: 1, dropped: 0, explored: false, preferred: false, options: [option], outcome: { result: 'done', ok: true, by: 'orchestrator', at: i, tokens: 130_000 + i } });
+  assert.equal(records.tokenFactor('glm-5-3-flash', () => 65_000), 2);
+  assert.equal(records.tokenFactor('glm-5-3', () => 65_000), null);
+});

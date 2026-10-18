@@ -77,6 +77,8 @@
       modes: { off: "Off", shadow: "Learning", suggest: "Suggest", auto: "Auto" },
       strictness: { triage: "by the task", strict: "always strict" },
       unavailable: "The saved settings could not be read yet: command review is Off and nothing can be saved. The Assistant tries again by itself.",
+      chain: "Trust the orchestrator's task for its subagents' new files",
+      chainHelp: "When you typed the orchestrator's task yourself, its subagents may create new files inside the project without asking, if the review is at least 95% sure the file serves that task. Never for changes to existing files, files outside the project, secrets, or commands.",
       routing: "Automatic routing",
       routingHelp: "Orchestrators get a provider and model suggestion for each subagent.",
       loops: "Loop alerts",
@@ -105,6 +107,8 @@
       modes: { off: "\u0412\u044B\u043A\u043B", shadow: "\u041E\u0431\u0443\u0447\u0435\u043D\u0438\u0435", suggest: "\u041F\u043E\u0434\u0441\u043A\u0430\u0437\u043A\u0438", auto: "\u0410\u0432\u0442\u043E" },
       strictness: { triage: "\u043F\u043E \u0437\u0430\u0434\u0430\u0447\u0435", strict: "\u0432\u0441\u0435\u0433\u0434\u0430 \u0441\u0442\u0440\u043E\u0433\u043E" },
       unavailable: "\u0421\u043E\u0445\u0440\u0430\u043D\u0451\u043D\u043D\u044B\u0435 \u043D\u0430\u0441\u0442\u0440\u043E\u0439\u043A\u0438 \u043F\u043E\u043A\u0430 \u043D\u0435 \u043F\u0440\u043E\u0447\u0438\u0442\u0430\u043D\u044B: \u043F\u0440\u043E\u0432\u0435\u0440\u043A\u0430 \u043A\u043E\u043C\u0430\u043D\u0434 \u0432\u044B\u043A\u043B\u044E\u0447\u0435\u043D\u0430, \u0441\u043E\u0445\u0440\u0430\u043D\u0438\u0442\u044C \u043D\u0438\u0447\u0435\u0433\u043E \u043D\u0435\u043B\u044C\u0437\u044F. \u041F\u043E\u043C\u043E\u0449\u043D\u0438\u043A \u043F\u043E\u043F\u0440\u043E\u0431\u0443\u0435\u0442 \u0435\u0449\u0451 \u0440\u0430\u0437 \u0441\u0430\u043C.",
+      chain: "\u0414\u043E\u0432\u0435\u0440\u044F\u0442\u044C \u0437\u0430\u0434\u0430\u0447\u0435 \u043E\u0440\u043A\u0435\u0441\u0442\u0440\u0430\u0442\u043E\u0440\u0430 \u0434\u043B\u044F \u043D\u043E\u0432\u044B\u0445 \u0444\u0430\u0439\u043B\u043E\u0432 \u0435\u0433\u043E \u0441\u0443\u0431\u0430\u0433\u0435\u043D\u0442\u043E\u0432",
+      chainHelp: "\u0415\u0441\u043B\u0438 \u0437\u0430\u0434\u0430\u0447\u0443 \u043E\u0440\u043A\u0435\u0441\u0442\u0440\u0430\u0442\u043E\u0440\u0443 \u0432\u044B \u043D\u0430\u043F\u0438\u0441\u0430\u043B\u0438 \u0441\u0430\u043C\u0438, \u0435\u0433\u043E \u0441\u0443\u0431\u0430\u0433\u0435\u043D\u0442\u044B \u043C\u043E\u0433\u0443\u0442 \u0431\u0435\u0437 \u0432\u043E\u043F\u0440\u043E\u0441\u0430 \u0441\u043E\u0437\u0434\u0430\u0432\u0430\u0442\u044C \u043D\u043E\u0432\u044B\u0435 \u0444\u0430\u0439\u043B\u044B \u0432 \u043F\u0440\u043E\u0435\u043A\u0442\u0435, \u043A\u043E\u0433\u0434\u0430 \u043F\u0440\u043E\u0432\u0435\u0440\u043A\u0430 \u043D\u0435 \u043C\u0435\u043D\u044C\u0448\u0435 \u0447\u0435\u043C \u043D\u0430 95% \u0443\u0432\u0435\u0440\u0435\u043D\u0430, \u0447\u0442\u043E \u0444\u0430\u0439\u043B \u043D\u0443\u0436\u0435\u043D \u0434\u043B\u044F \u044D\u0442\u043E\u0439 \u0437\u0430\u0434\u0430\u0447\u0438. \u041D\u0438\u043A\u043E\u0433\u0434\u0430 \u2014 \u0434\u043B\u044F \u0438\u0437\u043C\u0435\u043D\u0435\u043D\u0438\u044F \u0441\u0443\u0449\u0435\u0441\u0442\u0432\u0443\u044E\u0449\u0438\u0445 \u0444\u0430\u0439\u043B\u043E\u0432, \u0444\u0430\u0439\u043B\u043E\u0432 \u0432\u043D\u0435 \u043F\u0440\u043E\u0435\u043A\u0442\u0430, \u0441\u0435\u043A\u0440\u0435\u0442\u043E\u0432 \u0438 \u043A\u043E\u043C\u0430\u043D\u0434.",
       routing: "\u0410\u0432\u0442\u043E\u043C\u0430\u0442\u0438\u0447\u0435\u0441\u043A\u0438\u0439 \u0432\u044B\u0431\u043E\u0440 \u043C\u043E\u0434\u0435\u043B\u0438",
       routingHelp: "\u041E\u0440\u043A\u0435\u0441\u0442\u0440\u0430\u0442\u043E\u0440 \u043F\u043E\u043B\u0443\u0447\u0430\u0435\u0442 \u043F\u0440\u0435\u0434\u043B\u043E\u0436\u0435\u043D\u0438\u0435 \u043F\u0440\u043E\u0432\u0430\u0439\u0434\u0435\u0440\u0430 \u0438 \u043C\u043E\u0434\u0435\u043B\u0438 \u0434\u043B\u044F \u043A\u0430\u0436\u0434\u043E\u0433\u043E \u0441\u0443\u0431\u0430\u0433\u0435\u043D\u0442\u0430.",
       loops: "\u0421\u0438\u0433\u043D\u0430\u043B \u0437\u0430\u0446\u0438\u043A\u043B\u0438\u0432\u0430\u043D\u0438\u044F",
@@ -134,8 +138,9 @@
     saving = saving.then(async () => {
       if (!state) return;
       const { routing, loopAlerts, flows, commandReview } = state;
+      const trustChain = state.trustChain === true;
       try {
-        state = await host.service.request(SERVICE, "harness.saveSettings", { settings: { commandReview, routing, loopAlerts, flows, ...change } });
+        state = await host.service.request(SERVICE, "harness.saveSettings", { settings: { commandReview, routing, loopAlerts, flows, trustChain, ...change } });
         say(t.saved);
       } catch (error) {
         say(`${t.notSaved}${errorText(error)}`, true);
@@ -167,6 +172,7 @@
         "div",
         { className: "setting-group" },
         settingRow(t.review, reviewHelp(s), review),
+        settingRow(t.chain, t.chainHelp, toggle("trustChain", s.trustChain === true, t.chain, (value) => save({ trustChain: value }))),
         settingRow(t.routing, t.routingHelp, toggle("routing", s.routing, t.routing, (value) => save({ routing: value }))),
         settingRow(t.loops, t.loopsHelp, toggle("loopAlerts", s.loopAlerts, t.loops, (value) => save({ loopAlerts: value }))),
         settingRow(t.flows, t.flowsHelp, toggle("flows", s.flows, t.flows, (value) => save({ flows: value })))

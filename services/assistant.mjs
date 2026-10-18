@@ -76,7 +76,7 @@ function serve({ methods, notifications = {}, onInitialize, input = process.stdi
     return true;
   };
   const host = {
-    callHost: (method, params) => new Promise((resolve5, reject) => {
+    callHost: (method, params) => new Promise((resolve6, reject) => {
       if (hostGone) {
         reject(new Error("The host connection is closed."));
         return;
@@ -90,7 +90,7 @@ function serve({ methods, notifications = {}, onInitialize, input = process.stdi
         pending.delete(id);
         reject(new Error(`The host did not answer ${method} in time.`));
       }, limit2.hostCallMs);
-      pending.set(id, { resolve: resolve5, reject, timer });
+      pending.set(id, { resolve: resolve6, reject, timer });
       if (!send({ id, method, params })) {
         clearTimeout(timer);
         pending.delete(id);
@@ -1346,14 +1346,14 @@ function retryDelayMs(attempt, headers, timing) {
   return timing.now + delay + timing.expectedLatencyMs < timing.deadlineAt ? delay : null;
 }
 function sleep(ms, signal) {
-  return new Promise((resolve5, reject) => {
+  return new Promise((resolve6, reject) => {
     if (signal.aborted) {
       reject(signal.reason);
       return;
     }
     const timer = setTimeout(() => {
       signal.removeEventListener("abort", abort);
-      resolve5();
+      resolve6();
     }, ms);
     const abort = () => {
       clearTimeout(timer);
@@ -2256,9 +2256,9 @@ function applyTemperature(probs, temperature) {
   if (temperature === 1) return [...probs];
   const logs = probs.map((p2) => p2 > 0 ? Math.log(p2) / temperature : -Infinity);
   const peak = Math.max(...logs);
-  const weights = logs.map((value) => Number.isFinite(value) ? Math.exp(value - peak) : 0);
-  const total = weights.reduce((sum, value) => sum + value, 0);
-  return weights.map((value) => value / total);
+  const weights2 = logs.map((value) => Number.isFinite(value) ? Math.exp(value - peak) : 0);
+  const total = weights2.reduce((sum, value) => sum + value, 0);
+  return weights2.map((value) => value / total);
 }
 function letterPassRequest(input) {
   const ollamaOptions = { temperature: 0, num_predict: 1, ...input.numCtx ? { num_ctx: input.numCtx } : {} };
@@ -3164,11 +3164,11 @@ var AssistantBudget = class {
       if (onAbort) signal?.removeEventListener("abort", onAbort);
       onAbort = null;
     };
-    const ready2 = new Promise((resolve5, reject) => {
+    const ready2 = new Promise((resolve6, reject) => {
       wake = () => {
         admitted = true;
         unlisten();
-        resolve5();
+        resolve6();
       };
       if (!signal) return;
       onAbort = () => {
@@ -5175,7 +5175,7 @@ var AssistantEngine = class _AssistantEngine {
 import { createHash as createHash3 } from "node:crypto";
 import { lstatSync } from "node:fs";
 import { homedir as homedir2, tmpdir as tmpdir2 } from "node:os";
-import { isAbsolute as isAbsolute3, join as join4, relative as relative3 } from "node:path";
+import { isAbsolute as isAbsolute3, join as join4, relative as relative3, resolve as resolve3, sep as sep3 } from "node:path";
 
 // src/shared/commandReview.ts
 var REVIEWABLE_ACP_KINDS = ["read", "edit", "delete", "move", "search", "execute", "fetch"];
@@ -7516,6 +7516,23 @@ function exactAllow(facts) {
 
 // src/review/reviewService.ts
 var ASKING_PROFILES = /* @__PURE__ */ new Set(["normal", "plan"]);
+var TRUST_CHAIN_MIN_SERVES = 0.95;
+function newFileTargets(toolName, toolInput, truncated, cwd) {
+  const raw = record(toolInput);
+  if (truncated || !raw || !wholeContentWrite(toolName, toolInput, truncated, cwd)) return null;
+  const abs = (path) => isAbsolute3(path) ? path : join4(cwd, path);
+  let paths;
+  if (toolName === "apply_patch" || toolName === "patch") {
+    const patch = [raw.command, raw.patch, raw.patchText, raw.input].find((value) => typeof value === "string") ?? "";
+    paths = patchPaths(patch);
+  } else {
+    const path = [raw.file_path, raw.filePath, raw.path].find((value) => typeof value === "string" && value.length > 0);
+    paths = path ? [path] : [];
+  }
+  if (!paths.length) return null;
+  const targets = paths.map(abs);
+  return targets.every(nothingAt) ? targets : null;
+}
 var MAX_SESSIONS = 512;
 var MAX_TURNS = 5;
 var MAX_REQUEST_CHARS = 16384;
@@ -7929,6 +7946,11 @@ var ReviewService = class {
         return null;
       }
       const verdict = await run();
+      const chained = !verdict.act && !signal.aborted && this.trustChain(request, state, rules, facts, verdict);
+      if (chained) {
+        this.rememberVerdict(request.sessionId, summary, mode, { ...verdict, act: "allow", outcome: "allow", by: "assistant", reason: "trust-chain" }, "allow");
+        return { verdict: "allow", reason: "CanvasTTY Assistant: allowed by the trust chain: the person asked its orchestrator for this task, and this writes a new file inside the project that the review is sure serves it" };
+      }
       if (signal.aborted && !verdict.act) {
         const answer2 = ask("unavailable");
         this.rememberVerdict(request.sessionId, summary, mode, { ...verdict, reason: "unavailable" }, act(answer2));
@@ -7948,6 +7970,33 @@ var ReviewService = class {
     } catch {
       return mode === "auto" ? ask("unavailable") : null;
     }
+  }
+  /**
+   * The person's trust chain (their own switch, off by default): a subagent may create new files in the project
+   * without asking when the task it serves came from the person through its orchestrator. All of these must hold:
+   * the switch is on; the card is a subagent whose orchestrator's own request is the person's (typed by them: the
+   * launcher's task or a turn its Auto router saw, never only the orchestrator's text); the call only creates files
+   * (no overwrite, no partial edit, no shell), whole content visible and not cut, at most the review's content size;
+   * every target is inside the project, not protected, not a credential path; no tier-1 rule spoke; the light review
+   * is at least TRUST_CHAIN_MIN_SERVES sure it serves the request and did not say block; the session is not suspect.
+   */
+  trustChain(request, state, rules, facts, verdict) {
+    if (this.options.trustChain?.() !== true) return false;
+    if (!state.subagent || !state.parent || state.suspect || this.circuit.personOnly(request.sessionId)) return false;
+    const above = this.sessions.get(state.parent);
+    if (!above || above.subagent || !this.ownTexts(above).length) return false;
+    if (rules.verdict || facts.actionClass !== "edit_in_project" || facts.kind !== "edit" || facts.writesOutside || facts.credentialAccess || facts.protectedWrite || facts.truncated) return false;
+    if (verdict.outcome === "deny" || verdict.modelDenied || typeof verdict.probability !== "number" || verdict.probability < TRUST_CHAIN_MIN_SERVES) return false;
+    const action = actionFromDetail(detailFromHook(request.tool.name, request.input, request.truncated));
+    if (action.inputTruncated || (action.content?.length ?? 0) > REVIEW_LIMITS.contentChars) return false;
+    const cwd = action.commandCwd ?? request.agentCwd ?? request.cwd;
+    const targets = newFileTargets(request.tool.name, request.input, request.truncated, cwd);
+    if (!targets) return false;
+    const root = realish(resolve3(request.cwd));
+    return targets.every((path) => {
+      const abs = realish(resolve3(path));
+      return abs.startsWith(`${root}${sep3}`) && !isCredentialPath(abs) && !isProtectedRel(relative3(root, abs).split(sep3).join("/"));
+    });
   }
   async ladder(request, state, personRequest, facts, rules, content, signal, contentVisible = false) {
     const settings = this.options.settings();
@@ -8075,7 +8124,7 @@ function advise(triage, input) {
 
 // src/triage/taskRoute.ts
 import { existsSync, statSync as statSync2 } from "node:fs";
-import { dirname as dirname2, isAbsolute as isAbsolute4, join as join5, relative as relative4, resolve as resolve3 } from "node:path";
+import { dirname as dirname2, isAbsolute as isAbsolute4, join as join5, relative as relative4, resolve as resolve4 } from "node:path";
 function actionable(triage) {
   return triage.kindBand === "auto" || triage.difficultyBand === "auto" || [triage.destructive, triage.networkPublish, triage.secrets, triage.outsideProject].some((p2) => p2 >= ROUTE_TAUS.risk) || triage.untrusted >= ROUTE_TAUS.untrusted || triage.parallel >= ROUTE_TAUS.parallel;
 }
@@ -8096,7 +8145,7 @@ async function askTaskRoute(engine, input, ctx) {
   return { decision, triage: decision.fallbackReason ? null : captured.triage };
 }
 function isGitRepository(cwd) {
-  let current = resolve3(cwd);
+  let current = resolve4(cwd);
   for (let depth = 0; depth < 64; depth++) {
     try {
       if (existsSync(join5(current, ".git"))) return true;
@@ -8111,7 +8160,7 @@ function isGitRepository(cwd) {
 }
 var PATH_TOKEN = /(?:^|[\s"'`(\[<])((?:\.{0,2}\/)?[\w@.-]+(?:\/[\w@.-]+)*\.[A-Za-z0-9]{1,8}|(?:\.{0,2}\/)?[\w@.-]+(?:\/[\w@.-]+)+\/?)(?=$|[\s"'`)\]>,.:;!?])/gu;
 function mentionedExistingPaths(task, cwd) {
-  const root = resolve3(cwd);
+  const root = resolve4(cwd);
   const seen = /* @__PURE__ */ new Set();
   let found = 0, checked = 0;
   for (const match of task.slice(0, FIELD_BOUNDS.task * 4).matchAll(PATH_TOKEN)) {
@@ -8119,7 +8168,7 @@ function mentionedExistingPaths(task, cwd) {
     if (!token || isAbsolute4(token) || seen.has(token)) continue;
     seen.add(token);
     if (++checked > 64) break;
-    const target = resolve3(root, token), rel = relative4(root, target);
+    const target = resolve4(root, token), rel = relative4(root, target);
     if (!rel || rel.startsWith("..") || isAbsolute4(rel)) continue;
     try {
       statSync2(target);
@@ -8187,7 +8236,7 @@ var BadgeBoard = class {
 import { randomBytes as randomBytes3 } from "node:crypto";
 import { constants as constants2 } from "node:fs";
 import { lstat, open, readdir as readdir2, realpath } from "node:fs/promises";
-import { basename as basename2, extname, join as join6, sep as sep3 } from "node:path";
+import { basename as basename2, extname, join as join6, sep as sep4 } from "node:path";
 
 // src/harness/flowFile.ts
 var FLOW_LIMITS = Object.freeze({ files: 32, fileBytes: 32768, roles: 8, name: 80, description: 400, task: 2e3, title: 60 });
@@ -8786,7 +8835,7 @@ async function projectFlows(cwd) {
   }
   const folder = join6(root, ".canvastty", "flows");
   try {
-    if (!(await realpath(folder)).startsWith(root + sep3)) {
+    if (!(await realpath(folder)).startsWith(root + sep4)) {
       problems.push({ file: ".canvastty/flows", problem: { code: "outside" } });
       return { flows, problems };
     }
@@ -8986,11 +9035,11 @@ var PlanStore = class {
   }
   /** Resolves on the next change or after `ms`. */
   waitForChange(ms) {
-    return new Promise((resolve5) => {
+    return new Promise((resolve6) => {
       const done = () => {
         clearTimeout(timer);
         this.waiters.delete(done);
-        resolve5();
+        resolve6();
       };
       const timer = setTimeout(done, ms);
       this.waiters.add(done);
@@ -9201,15 +9250,15 @@ function reportText(journal, strings3, extra) {
 
 // src/harness/settings.ts
 var COMMAND_REVIEW_LEVELS = ["strict", "basic", "off"];
-var DEFAULT_HARNESS_SETTINGS = Object.freeze({ routing: true, loopAlerts: true, flows: true });
+var DEFAULT_HARNESS_SETTINGS = Object.freeze({ routing: true, loopAlerts: true, flows: true, trustChain: false });
 var KEYS = Object.keys(DEFAULT_HARNESS_SETTINGS);
 function validateHarnessSettings(value) {
   if (!value || typeof value !== "object" || Array.isArray(value)) throw new Error("Invalid harness settings.");
   const record4 = value;
-  if (Object.keys(record4).some((key) => !KEYS.includes(key)) || KEYS.some((key) => typeof record4[key] !== "boolean")) {
+  if (Object.keys(record4).some((key) => !KEYS.includes(key)) || KEYS.some((key) => typeof record4[key] !== "boolean" && !(key === "trustChain" && record4[key] === void 0))) {
     throw new Error("Invalid harness settings.");
   }
-  return { routing: record4.routing, loopAlerts: record4.loopAlerts, flows: record4.flows };
+  return { routing: record4.routing, loopAlerts: record4.loopAlerts, flows: record4.flows, trustChain: record4.trustChain === true };
 }
 function normalizeHarnessSettings(value) {
   const record4 = value && typeof value === "object" && !Array.isArray(value) ? value : {};
@@ -10693,11 +10742,11 @@ var AA_WEIGHTS = {
   chat: { "Intelligence Index": 1 }
 };
 function benchmarkScore(row, type) {
-  const weights = row.source.kind === "artificial-analysis" ? AA_WEIGHTS[type] : LIVEBENCH_WEIGHTS[type];
-  if (!weights) return null;
-  if (!Object.keys(weights).length) return row.overall;
+  const weights2 = row.source.kind === "artificial-analysis" ? AA_WEIGHTS[type] : LIVEBENCH_WEIGHTS[type];
+  if (!weights2) return null;
+  if (!Object.keys(weights2).length) return row.overall;
   let total = 0;
-  for (const [name, weight] of Object.entries(weights)) {
+  for (const [name, weight] of Object.entries(weights2)) {
     const value = row.categories[name];
     if (value === null || value === void 0) return null;
     total += value * weight;
@@ -11237,7 +11286,7 @@ function badgeText(model) {
 // src/auto/launch.ts
 import { randomBytes as randomBytes4 } from "node:crypto";
 import { existsSync as existsSync2, readFileSync as readFileSync2, statSync as statSync3 } from "node:fs";
-import { dirname as dirname3, join as join9, resolve as resolve4 } from "node:path";
+import { dirname as dirname3, join as join9, resolve as resolve5 } from "node:path";
 var LOCAL_ENVIRONMENT_KINDS = ["worktree"];
 var MODEL_KEYS = ["model", "small_model", "enabled_providers", "disabled_providers"];
 var CONFIG_NAMES = ["opencode.json", "opencode.jsonc", join9(".opencode", "opencode.json"), join9(".opencode", "opencode.jsonc")];
@@ -11288,7 +11337,7 @@ function modelChoiceIn(config) {
   return null;
 }
 function projectModelConfig(cwd) {
-  let current = resolve4(cwd);
+  let current = resolve5(cwd);
   for (let depth = 0; depth < 64; depth++) {
     for (const name of CONFIG_NAMES) {
       const path = join9(current, name);
@@ -11694,7 +11743,7 @@ var AutoRouter = class {
       if (Number.isInteger(value) && value > 1023 && value < 65536) stored = value;
     } catch {
     }
-    const listen = (port) => new Promise((resolve5, reject) => {
+    const listen = (port) => new Promise((resolve6, reject) => {
       const server = createServer((request, response) => {
         void this.handle(request, response);
       });
@@ -11704,7 +11753,7 @@ var AutoRouter = class {
       server.once("error", reject);
       server.listen({ port, host: "127.0.0.1", exclusive: true }, () => {
         server.off("error", reject);
-        resolve5(server);
+        resolve6(server);
       });
     });
     this.starting = (async () => {
@@ -11736,7 +11785,7 @@ var AutoRouter = class {
     this.server = null;
     if (!server) return;
     server.closeAllConnections?.();
-    await new Promise((resolve5) => server.close(() => resolve5()));
+    await new Promise((resolve6) => server.close(() => resolve6()));
   }
   /** Nothing uses the router any more: the port closes (it is reused next time). */
   idle() {
@@ -11821,7 +11870,7 @@ var AutoRouter = class {
     }
   }
   readBody(request) {
-    return new Promise((resolve5, reject) => {
+    return new Promise((resolve6, reject) => {
       const chunks = [];
       let size = 0;
       request.on("data", (chunk) => {
@@ -11833,7 +11882,7 @@ var AutoRouter = class {
         }
         chunks.push(chunk);
       });
-      request.on("end", () => resolve5(Buffer.concat(chunks)));
+      request.on("end", () => resolve6(Buffer.concat(chunks)));
       request.on("error", reject);
     });
   }
@@ -11862,10 +11911,10 @@ var AutoRouter = class {
       try {
         const answer = await Promise.race([
           this.deps.decide(text6, grant, controller.signal),
-          new Promise((resolve5) => {
+          new Promise((resolve6) => {
             timer = setTimeout(() => {
               controller.abort();
-              resolve5(null);
+              resolve6(null);
             }, this.timeouts.jevMs);
           })
         ]);
@@ -12186,9 +12235,9 @@ var AutoRouter = class {
           }
           if (next.done) break;
           take(next.value);
-          if (!response.write(next.value)) await new Promise((resolve5) => {
-            response.once("drain", resolve5);
-            response.once("close", resolve5);
+          if (!response.write(next.value)) await new Promise((resolve6) => {
+            response.once("drain", resolve6);
+            response.once("close", resolve6);
           });
           if (response.destroyed) {
             failed = true;
@@ -12583,6 +12632,9 @@ function shadowPrice(quota, share, ref) {
 // src/route/settings.ts
 var ROUTE_ALLOWS = ["prefer", "allow", "never"];
 var NEW_MODEL_POLICIES = ["wait", "provisional", "explore"];
+var QUOTA_BYS = ["tokens", "prompts", "unknown"];
+var VALUE_SPEEDS = ["low", "moderate", "high"];
+var SPEED_WEIGHT = { low: 0.2, moderate: 0.5, high: 1 };
 var ROUTE_CLIS = ["claude", "codex", "grok", "kimi", "qwen", "opencode", "hermes", "omp", "pi", "cursor", "minimax", "devin", "antigravity"];
 var MAX_PLANS2 = 16;
 var MAX_PLAN_MODELS = 16;
@@ -12605,7 +12657,10 @@ var DEFAULT_ROUTE_SETTINGS = Object.freeze({
   exploreShare: 0.05,
   aliases: [],
   notEquivalent: [],
-  flat: []
+  flat: [],
+  valueSpeed: "moderate",
+  speeds: {},
+  quotaWeights: {}
 });
 var RouteSettingsError = class extends Error {
 };
@@ -12624,7 +12679,7 @@ var PROTO = /* @__PURE__ */ new Set(["__proto__", "constructor", "prototype"]);
 function plan2(value) {
   if (!isRecord8(value)) fail5("Invalid plan.");
   const v = value;
-  const allowed = ["id", "cli", "kind", "label", "models", "reserve", "maxParallel", "allowance", "windowHours", "allow", "trust"];
+  const allowed = ["id", "cli", "kind", "label", "models", "reserve", "maxParallel", "allowance", "windowHours", "allow", "trust", "quotaBy", "multipliers"];
   if (Object.keys(v).some((key) => !allowed.includes(key))) fail5("Invalid plan field.");
   if (typeof v.id !== "string" || !ID5.test(v.id)) fail5("Invalid plan id.");
   if (!ROUTE_CLIS.includes(v.cli)) fail5("Invalid plan CLI.");
@@ -12637,6 +12692,8 @@ function plan2(value) {
   if (v.windowHours !== void 0 && !intIn(v.windowHours, 1, 24 * 31)) fail5("Invalid window.");
   if (!ROUTE_ALLOWS.includes(v.allow)) fail5("Invalid allow.");
   if (!trustOk(v.trust)) fail5("Invalid trust.");
+  if (v.quotaBy !== void 0 && !QUOTA_BYS.includes(v.quotaBy)) fail5("Invalid quota kind.");
+  const multipliers = v.multipliers === void 0 ? void 0 : weights(v.multipliers, "multipliers");
   return {
     id: v.id,
     cli: v.cli,
@@ -12648,9 +12705,12 @@ function plan2(value) {
     ...v.allowance !== void 0 ? { allowance: v.allowance } : {},
     ...v.windowHours !== void 0 ? { windowHours: v.windowHours } : {},
     allow: v.allow,
-    trust: v.trust
+    trust: v.trust,
+    ...v.quotaBy !== void 0 ? { quotaBy: v.quotaBy } : {},
+    ...multipliers && Object.keys(multipliers).length ? { multipliers } : {}
   };
 }
+var weights = (value, what) => map(value, MAX_PINS, (k) => IDENTITY.test(k), (x) => typeof x === "number" && Number.isFinite(x) && x >= 0.01 && x <= 100, what);
 function map(value, max, key, item, what) {
   if (value === void 0) return {};
   if (!isRecord8(value)) fail5(`Invalid ${what}.`);
@@ -12699,8 +12759,15 @@ function validateRouteSettings(value) {
     exploreShare: v.exploreShare,
     aliases,
     notEquivalent: [...new Set(v.notEquivalent)],
-    flat: [...new Set(flat)]
+    flat: [...new Set(flat)],
+    valueSpeed: "moderate",
+    speeds: {},
+    quotaWeights: {}
   };
+  if (v.valueSpeed !== void 0 && !VALUE_SPEEDS.includes(v.valueSpeed)) fail5("Invalid speed preference.");
+  result.valueSpeed = v.valueSpeed ?? "moderate";
+  result.speeds = v.speeds === void 0 ? {} : map(v.speeds, MAX_PINS, (k) => IDENTITY.test(k), (x) => typeof x === "number" && Number.isFinite(x) && x >= 1 && x <= 1e4, "speeds");
+  result.quotaWeights = v.quotaWeights === void 0 ? {} : weights(v.quotaWeights, "quota weights");
   if (JSON.stringify(result).length > MAX_SETTINGS_CHARS) fail5("The routing settings are too large: remove some plans, models or aliases.");
   return result;
 }
@@ -12795,7 +12862,7 @@ function rawCandidates(ctx) {
   const raws = [];
   const known = (identity) => ctx.index.rows(identity).length > 0;
   const declared = /* @__PURE__ */ new Set();
-  const resolve5 = (cli, model) => {
+  const resolve6 = (cli, model) => {
     const r = resolveModel(cli, model, ctx.settings.aliases, known);
     return { identity: r.identity, from: r.from };
   };
@@ -12808,7 +12875,7 @@ function rawCandidates(ctx) {
     else models = plan3.models.length ? plan3.models : [null];
     if (!MODEL_CLIS.has(plan3.cli)) models = [null];
     for (const model of models) {
-      const resolved = model ? resolve5(plan3.cli, model) : { identity: null, from: "none" };
+      const resolved = model ? resolve6(plan3.cli, model) : { identity: null, from: "none" };
       const takes = effortsOf(plan3.cli, entry);
       for (const effort of effortVariants(ctx.index, resolved.identity, takes)) {
         raws.push({ ...base, model, resolved, effort, effortVia: takes.length ? "spawn" : "none", ...plan3.cli === "opencode" ? { context: openCodeContext(model) } : {} });
@@ -12817,7 +12884,7 @@ function rawCandidates(ctx) {
   }
   for (const row of ctx.accountRows) {
     const host = row.endpoint;
-    const resolved = resolve5(row.provider, row.model);
+    const resolved = resolve6(row.provider, row.model);
     const takes = CLI_EFFORTS[row.provider] ?? [];
     const rowEffort = typeof row.launchOptions?.[ACCOUNTS_ID]?.effort === "string" && row.launchOptions[ACCOUNTS_ID].effort !== "default" ? row.launchOptions[ACCOUNTS_ID].effort : null;
     const efforts = rowEffort ? [rowEffort] : effortVariants(ctx.index, resolved.identity, takes);
@@ -13094,10 +13161,12 @@ function decide(ctx) {
       trust: { level: raw.trust, warn: trust.warn },
       allow: raw.allow,
       demoted: null,
+      planCost: null,
       spawn,
       newModel: !!raw.model && raw.kind !== "auto" && (score2 === null || score2.source === "provisional")
     });
   }
+  planCosts(candidates, ctx, raws);
   const measuredIdentities = new Set(candidates.filter((c) => c.score?.source === "measured" && c.identity).map((c) => c.identity));
   for (const c of candidates) if (c.newModel && c.identity && measuredIdentities.has(c.identity)) c.newModel = false;
   const groupKey = (c) => !c.identity || ctx.settings.notEquivalent.includes(c.key) ? `route:${c.key}` : `${c.identity}|${c.scoredEffort ?? ""}`;
@@ -13119,9 +13188,10 @@ function decide(ctx) {
   const headroomOk = (c) => SUBSCRIPTION_KINDS.has(c.kind) && (c.costBasis === "free" || c.costBasis === "burning" || c.kind === "coding-plan" && c.estimate.kind === "launches");
   const quotaKnown = (c) => c.availability.state === "ready" && !(SUBSCRIPTION_KINDS.has(c.kind) && c.costBasis === "unknown");
   const lowerEffort = view.level !== "large";
+  const qualityFirst = view.level === "large" || view.strong || ctx.explore.highRisk;
   let eligible = best === null ? [] : scored.filter((group) => rep(group).score.value >= best - window - 1e-9).sort((ga, gb) => {
     const a = rep(ga), b = rep(gb);
-    return (ctx.settings.preferSubscriptions ? Number(headroomOk(b)) - Number(headroomOk(a)) : 0) || compareCost(a, b) || (a.allow === "prefer" || b.allow === "prefer" ? allowRank(a.allow) - allowRank(b.allow) : Number(quotaKnown(b)) - Number(quotaKnown(a))) || (lowerEffort ? effortRank2(a.effort) - effortRank2(b.effort) : 0) || b.score.value - a.score.value || a.key.localeCompare(b.key);
+    return (ctx.settings.preferSubscriptions ? Number(headroomOk(b)) - Number(headroomOk(a)) : 0) || compareCost(a, b) || (qualityFirst ? 0 : comparePlan(a, b)) || (a.allow === "prefer" || b.allow === "prefer" ? allowRank(a.allow) - allowRank(b.allow) : Number(quotaKnown(b)) - Number(quotaKnown(a))) || (lowerEffort ? effortRank2(a.effort) - effortRank2(b.effort) : 0) || b.score.value - a.score.value || a.key.localeCompare(b.key);
   });
   if (view.level === "large") eligible = keepMeasuredFirst(eligible, rep);
   const others = scored.filter((group) => !eligible.includes(group)).sort((a, b) => rep(b).score.value - rep(a).score.value || compareCost(rep(a), rep(b)) || rep(a).key.localeCompare(rep(b).key));
@@ -13177,6 +13247,61 @@ function accountPrice(ctx, raw) {
   const own = raw.resolved.identity ? ctx.index.catalogModel(raw.model ?? "", raw.context) : null;
   if (own && !ctx.catalog.pricesStale && (own.inputPrice !== null || own.outputPrice !== null)) return taskUsd(ctx.view.level, { priceIn: own.inputPrice, priceOut: own.outputPrice });
   return null;
+}
+var SMALL_MODEL_TOKENS = 1.2;
+var SMALL_MODEL2 = /(?:^|[-_])(?:flash|mini|lite|nano|small|haiku|fast|instant|air)(?:$|[-_\d])/u;
+function expectedTokens(identity, level, ctx) {
+  const base = TASK_TOKENS[level].input + TASK_TOKENS[level].output;
+  const learned = identity ? ctx.tokenFactor?.(identity) ?? null : null;
+  return Math.round(base * (learned ?? (identity && SMALL_MODEL2.test(identity) ? SMALL_MODEL_TOKENS : 1)));
+}
+function planCosts(candidates, ctx, raws) {
+  const groupOf = (c) => c.kind === "subscription" || c.kind === "coding-plan" || c.kind === "cli-default" ? c.signIn : c.costBasis === "flat" ? `flat:${c.endpoint}` : null;
+  const plans = new Map(ctx.settings.plans.map((plan3) => [`plan:${plan3.id}`, plan3]));
+  const groups = /* @__PURE__ */ new Map();
+  for (const c of candidates) {
+    const g = groupOf(c);
+    if (g) groups.set(g, [...groups.get(g) ?? [], c]);
+  }
+  void raws;
+  const blend = (identity) => {
+    const p2 = apiPrice(ctx.catalog, identity);
+    return p2 ? (p2.priceIn ?? 0) + (p2.priceOut ?? 0) * 3 : null;
+  };
+  const weightK = SPEED_WEIGHT[ctx.settings.valueSpeed];
+  for (const [key, members] of groups) {
+    const plan3 = plans.get(key);
+    const quotaBy = plan3?.quotaBy ?? "tokens";
+    const top = [...members].sort((a, b) => (blend(b.identity) ?? -1) - (blend(a.identity) ?? -1))[0];
+    const topPrice = blend(top.identity);
+    const tokensOf = (c) => expectedTokens(c.identity, ctx.view.level, ctx);
+    const weightOf = (c) => {
+      const person2 = c.identity ? plan3?.multipliers?.[c.identity] ?? ctx.settings.quotaWeights[c.identity] : void 0;
+      if (person2 !== void 0) return person2;
+      const price3 = blend(c.identity);
+      return quotaBy === "tokens" && price3 !== null && topPrice ? price3 / topPrice : 1;
+    };
+    const speedOf = (c) => c.identity ? ctx.settings.speeds[c.identity] ?? null : null;
+    const timed = members.every((c) => speedOf(c) !== null);
+    const topQuota = quotaBy === "prompts" ? 1 : tokensOf(top) * weightOf(top);
+    const topTime = timed ? tokensOf(top) / speedOf(top) : null;
+    for (const c of members) {
+      const quota = quotaBy === "prompts" ? 1 : tokensOf(c) * weightOf(c) / topQuota;
+      const time2 = timed && topTime ? tokensOf(c) / speedOf(c) / topTime : null;
+      c.planCost = {
+        cost: Math.round((quota + (time2 === null ? 0 : weightK * time2)) * 1e3) / 1e3,
+        quota: Math.round(quota * 1e3) / 1e3,
+        time: time2,
+        faster: time2 ? Math.round(1 / time2 * 10) / 10 : null,
+        against: c === top ? null : top.identity ?? top.model,
+        tokens: tokensOf(c)
+      };
+    }
+  }
+}
+function comparePlan(a, b) {
+  if (!a.planCost || !b.planCost) return 0;
+  return a.planCost.cost - b.planCost.cost;
 }
 var allowRank = (allow) => allow === "prefer" ? 0 : 1;
 var effortRank2 = (effort) => effort ? EFFORT_RANK2.indexOf(effort) : -1;
@@ -13236,6 +13361,12 @@ function modelText(c) {
   return `${c.cli} \xB7 ${model}${c.effort ? `@${c.effort}` : ""}${identity}${via}`;
 }
 function costText(c, now) {
+  const base = costBase(c, now);
+  const p2 = c.planCost;
+  if (!p2 || !p2.against) return base;
+  return `${base}; ~${Math.round(p2.quota * 100)}% of the plan quota ${p2.against} would use${p2.faster && p2.faster !== 1 ? `, ~${p2.faster}\xD7 ${p2.faster > 1 ? "faster" : "as fast"}` : ""}`;
+}
+function costBase(c, now) {
   const read = c.quota ? `, read ${ago(c.quota.readAt, now)}` : "";
   const used = c.quota?.window ? `${windowName(c.quota.window.minutes, c.quota.window.label)} ${Math.round(c.quota.window.usedPercent)}% used` : "";
   switch (c.costBasis) {
@@ -13337,10 +13468,26 @@ var RouteRecords = class {
     }
     return null;
   }
-  setOutcome(record4, result, by, at, ok) {
+  setOutcome(record4, result, by, at, ok, tokens3) {
     if (record4.outcome?.by === "person" && by === "orchestrator") return;
-    record4.outcome = { result, ok: ok ?? result === "done", by, at };
+    const kept = tokens3 ?? record4.outcome?.tokens;
+    record4.outcome = { result, ok: ok ?? result === "done", by, at, ...kept !== void 0 ? { tokens: kept } : {} };
     this.save(this.list);
+  }
+  /**
+   * Tokens a model really took per task, as a factor of the level's default (median of at least 5 outcomes that
+   * reported tokens), or null.
+   */
+  tokenFactor(identity, base) {
+    const ratios = [];
+    for (const record4 of this.list) {
+      const option = record4.options[record4.spawned?.option ?? 0];
+      if (option?.identity !== identity || typeof record4.outcome?.tokens !== "number") continue;
+      ratios.push(record4.outcome.tokens / base(record4.level));
+    }
+    if (ratios.length < 5) return null;
+    ratios.sort((a, b) => a - b);
+    return Math.round(ratios[Math.floor(ratios.length / 2)] * 1e3) / 1e3;
   }
   /** Outcomes per route key (the option that ran). */
   routeStats() {
@@ -13412,6 +13559,11 @@ var QUOTA_COOLDOWN_MS = 3e5;
 var MAX_COOLDOWN_MS = 24 * 36e5;
 var WRITE_DELAY_MS2 = 150;
 var KEEP_MS = 30 * 6e4;
+function digestOf(providers, rows) {
+  const clis = providers.list.filter((entry) => entry.available !== false && entry.installed !== false).map((entry) => `${entry.id}${entry.signIn && entry.signIn !== "unknown" ? `:${entry.signIn}` : ""}`);
+  const accounts = rows.filter((row) => row.state === "ready").map((row) => `@${row.accountId}`);
+  return [.../* @__PURE__ */ new Set([...clis, ...accounts])].join(" ").slice(0, 300);
+}
 var trimSlash = (path) => path.length > 1 ? path.replace(/[\\/]+$/u, "") : path;
 function parseDigest(value) {
   if (typeof value !== "string" || !value.trim()) return null;
@@ -13649,11 +13801,12 @@ var RouteService = class {
         return c && c.until > now ? c : null;
       },
       stats,
+      tokenFactor: (identity) => this.records.tokenFactor(identity, (level) => TASK_TOKENS[level].input + TASK_TOKENS[level].output),
       prefer: clean3(input.prefer, 200) || null,
       orchestrate: input.orchestrate === true,
       explore: { roll: this.random(), retired, highRisk: ruleDifficulty(task) === "hard" }
     });
-    return { decision: result, view, source };
+    return { decision: result, view, source, providers, accountRows };
   }
   /**
    * What the orchestrator passed, or what it passed earlier: the full list_providers and list_routes are large, so a
@@ -13693,7 +13846,7 @@ var RouteService = class {
     if (!this.options.enabled()) return { content: "Automatic routing is off in the Assistant settings: choose the provider and model yourself." };
     const decided = await this.decideFor(caller, input);
     if ("error" in decided) return { content: decided.error, isError: true };
-    const { decision, view, source } = decided;
+    const { decision, view, source, providers, accountRows } = decided;
     const now = this.now();
     if (!decision.top) {
       const reasons = [...new Set(decision.dropped.map((entry) => `${entry.cli}${entry.model ? ` ${entry.model}` : ""}: ${entry.reason}`))].slice(0, 6);
@@ -13730,6 +13883,7 @@ var RouteService = class {
           `${short2(decision.top, 0)}${decision.explored ? " (exploring a new model)" : ""}.`,
           ...decision.alternatives.map((c, i) => `Or ${i + 1}: ${short2(c, i + 1)}.`),
           `Pass spawn to spawn_agent unchanged (add title, cwd, prompt). Then route_outcome {decisionId:"${record4.id}"}.`,
+          ...Array.isArray(input.providers) || Array.isArray(input.accountRoutes) ? [`Next time send only task: your lists are kept for 30 min (or send digest "${digestOf(providers, accountRows)}").`] : [],
           JSON.stringify({ decisionId: record4.id, spawn: decision.top.spawn, kind: decision.top.kind, alternatives: decision.alternatives.map((c) => ({ spawn: c.spawn, kind: c.kind })) })
         ].join("\n")
       };
@@ -13769,7 +13923,8 @@ ${JSON.stringify({
     if (!["done", "failed", "error", "cancelled", "canceled", "timeout", "idle", "exited"].includes(status)) return { content: "status must be done, failed, cancelled or timeout (from wait_for_agent / get_agent_result).", isError: true };
     const result = classifyOutcome(status === "timeout" ? "failed" : status, strings2(input.exitLines, 40, 400));
     const ok = typeof input.ok === "boolean" ? input.ok && result === "done" : void 0;
-    this.records.setOutcome(record4, result, "orchestrator", this.now(), ok);
+    const tokens3 = typeof input.tokens === "number" && Number.isInteger(input.tokens) && input.tokens > 0 && input.tokens <= 1e8 ? input.tokens : void 0;
+    this.records.setOutcome(record4, result, "orchestrator", this.now(), ok, tokens3);
     const option = record4.options[record4.spawned?.option ?? 0];
     if (result === "limit" && option) this.cool(option);
     return { content: `Recorded ${result}${result === "limit" ? `: ${option?.label ?? "that route"} rests for a while and route picks another one` : ""}.` };
@@ -13982,6 +14137,7 @@ var Assistant = class {
       engine: this.engine,
       settings: () => this.settings,
       locale,
+      trustChain: () => this.harness.settings.trustChain,
       ...options.git === null ? { git: null } : {},
       suggest: (sessionId, verdict, summary) => {
         void this.harness.setBadge(sessionId, "review", suggestionBadge(verdict, summary, this.harness.strings));
@@ -14364,8 +14520,8 @@ function retryStored(host, failed, apply, delays = RETRY_DELAYS_MS) {
 
 // src/service/main.ts
 var resolveReady;
-var ready = new Promise((resolve5) => {
-  resolveReady = resolve5;
+var ready = new Promise((resolve6) => {
+  resolveReady = resolve6;
 });
 var assistant = null;
 var str2 = (value) => typeof value === "string" ? value : "";

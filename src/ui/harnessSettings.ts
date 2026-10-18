@@ -1,11 +1,11 @@
-// The plugin's settings page (bundled to settings/harness.js): four controls. Decision models are optional and live
+// The plugin's settings page (bundled to settings/harness.js): command review (with its trust chain), routing, loop alerts and flows. Decision models are optional and live
 // on their own page, opened from the link at the bottom.
 import { el, errorText, host, onContext, segmented, SERVICE, settingRow, toggle, type PageLocale } from './common.ts';
 
 type Level = 'strict' | 'basic' | 'off';
 interface State {
   commandReview: Level | 'custom'; custom: { mode: string; strictness: string } | null; settingsUnavailable: boolean;
-  routing: boolean; loopAlerts: boolean; flows: boolean; models: number;
+  routing: boolean; loopAlerts: boolean; flows: boolean; trustChain?: boolean; models: number;
 }
 
 const STRINGS = {
@@ -22,6 +22,7 @@ const STRINGS = {
     modes: { off: 'Off', shadow: 'Learning', suggest: 'Suggest', auto: 'Auto' } as Record<string, string>,
     strictness: { triage: 'by the task', strict: 'always strict' } as Record<string, string>,
     unavailable: 'The saved settings could not be read yet: command review is Off and nothing can be saved. The Assistant tries again by itself.',
+    chain: 'Trust the orchestrator\'s task for its subagents\' new files', chainHelp: 'When you typed the orchestrator\'s task yourself, its subagents may create new files inside the project without asking, if the review is at least 95% sure the file serves that task. Never for changes to existing files, files outside the project, secrets, or commands.',
     routing: 'Automatic routing', routingHelp: 'Orchestrators get a provider and model suggestion for each subagent.',
     loops: 'Loop alerts', loopsHelp: 'A "loop?" badge when a card repeats the same command in one turn with no file edits seen.',
     flows: 'Flows', flowsHelp: 'An orchestrator may ask you to approve a flow (roles and tasks). This is a request it is told to follow, not a lock: CanvasTTY cannot yet stop an orchestrator that starts agents without it.',
@@ -41,6 +42,7 @@ const STRINGS = {
     modes: { off: 'Выкл', shadow: 'Обучение', suggest: 'Подсказки', auto: 'Авто' },
     strictness: { triage: 'по задаче', strict: 'всегда строго' },
     unavailable: 'Сохранённые настройки пока не прочитаны: проверка команд выключена, сохранить ничего нельзя. Помощник попробует ещё раз сам.',
+    chain: 'Доверять задаче оркестратора для новых файлов его субагентов', chainHelp: 'Если задачу оркестратору вы написали сами, его субагенты могут без вопроса создавать новые файлы в проекте, когда проверка не меньше чем на 95% уверена, что файл нужен для этой задачи. Никогда — для изменения существующих файлов, файлов вне проекта, секретов и команд.',
     routing: 'Автоматический выбор модели', routingHelp: 'Оркестратор получает предложение провайдера и модели для каждого субагента.',
     loops: 'Сигнал зацикливания', loopsHelp: 'Значок «цикл?», когда окно за один ход повторяет одну команду, а правок файлов не видно.',
     flows: 'Сценарии', flowsHelp: 'Оркестратор может попросить вас одобрить сценарий (роли и задачи). Это просьба, которой его просят следовать, а не запрет: CanvasTTY пока не может остановить оркестратор, который запускает агентов без неё.',
@@ -65,8 +67,9 @@ function save(change: Partial<State>): void {
   saving = saving.then(async () => {
     if (!state) return;
     const { routing, loopAlerts, flows, commandReview } = state;
+    const trustChain = state.trustChain === true;
     try {
-      state = await host.service.request(SERVICE, 'harness.saveSettings', { settings: { commandReview, routing, loopAlerts, flows, ...change } }) as State;
+      state = await host.service.request(SERVICE, 'harness.saveSettings', { settings: { commandReview, routing, loopAlerts, flows, trustChain, ...change } }) as State;
       say(t.saved);
     } catch (error) { say(`${t.notSaved}${errorText(error)}`, true); }
     render();
@@ -93,6 +96,7 @@ function render(): void {
     ...(s.settingsUnavailable ? [el('p', { className: 'notice', textContent: t.unavailable })] : []),
     el('div', { className: 'setting-group' },
       settingRow(t.review, reviewHelp(s), review),
+      settingRow(t.chain, t.chainHelp, toggle('trustChain', s.trustChain === true, t.chain, value => save({ trustChain: value }))),
       settingRow(t.routing, t.routingHelp, toggle('routing', s.routing, t.routing, value => save({ routing: value }))),
       settingRow(t.loops, t.loopsHelp, toggle('loopAlerts', s.loopAlerts, t.loops, value => save({ loopAlerts: value }))),
       settingRow(t.flows, t.flowsHelp, toggle('flows', s.flows, t.flows, value => save({ flows: value })))),

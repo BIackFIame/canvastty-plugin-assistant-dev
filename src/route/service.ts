@@ -18,7 +18,7 @@ import type { AutoPreference } from '../auto/settings.ts';
 import { ruleDifficulty } from '../harness/router.ts';
 import type { DataClass, DataClassMode } from '../shared/settings.ts';
 import { ALIAS_TABLE_AS_OF, BUNDLED_ALIASES, resolveModel } from './aliases.ts';
-import { decide, estimateText, modelText, whyLine, type AccountRow, type AutoExpectation, type Candidate, type ProviderInfo, type RouteDecision } from './engine.ts';
+import { decide, estimateText, modelText, TASK_TOKENS, whyLine, type AccountRow, type AutoExpectation, type Candidate, type ProviderInfo, type RouteDecision } from './engine.ts';
 import { parseLimits, quotaOf, STALE_MS, type LimitsCache } from './limits.ts';
 import { classifyOutcome, RouteRecords, type OptionRecord, type OutcomeResult, type RouteRecord } from './records.ts';
 import { normalizeRouteSettings, validateRouteSettings, type RouteSettings } from './settings.ts';
@@ -33,6 +33,13 @@ const MAX_COOLDOWN_MS = 24 * 3_600_000;
 const WRITE_DELAY_MS = 150;
 /** How long an orchestrator's full provider and account lists are kept for later compact calls. */
 const KEEP_MS = 30 * 60_000;
+
+/** A digest an orchestrator can send instead of its lists: available CLIs with their sign-in, @ ready accounts. */
+function digestOf(providers: { list: ProviderInfo[] }, rows: AccountRow[]): string {
+  const clis = providers.list.filter(entry => entry.available !== false && entry.installed !== false).map(entry => `${entry.id}${entry.signIn && entry.signIn !== 'unknown' ? `:${entry.signIn}` : ''}`);
+  const accounts = rows.filter(row => row.state === 'ready').map(row => `@${row.accountId}`);
+  return [...new Set([...clis, ...accounts])].join(' ').slice(0, 300);
+}
 
 const trimSlash = (path: string): string => path.length > 1 ? path.replace(/[\\/]+$/u, '') : path;
 
@@ -235,7 +242,7 @@ export class RouteService {
   }
 
   /** The decision for a task, without recording it (tests and the offline replay use it too). */
-  async decideFor(caller: CallerCard, input: Record<string, unknown>): Promise<{ decision: RouteDecision; view: TurnView; source: 'jev' | 'rules' } | { error: string }> {
+  async decideFor(caller: CallerCard, input: Record<string, unknown>): Promise<{ decision: RouteDecision; view: TurnView; source: 'jev' | 'rules'; providers: { list: ProviderInfo[]; given: boolean }; accountRows: AccountRow[] } | { error: string }> {
     const task = clean(input.task, 4_000);
     if (!task) return { error: 'Give the subagent\'s task in `task`.' };
     let decision: TurnDecision | null = null;
@@ -257,10 +264,11 @@ export class RouteService {
       callerProvider: typeof caller.provider === 'string' ? caller.provider : null, cardClass, mode: this.options.dataClassMode(), limits: this.limits,
       catalog, index, auto, now, busy: key => this.busy(key), launches: (id, ms) => this.launches(id, ms),
       cooldown: key => { const c = this.cooldowns.get(key); return c && c.until > now ? c : null; }, stats,
+      tokenFactor: identity => this.records.tokenFactor(identity, level => TASK_TOKENS[level].input + TASK_TOKENS[level].output),
       prefer: clean(input.prefer, 200) || null, orchestrate: input.orchestrate === true,
       explore: { roll: this.random(), retired, highRisk: ruleDifficulty(task) === 'hard' }
     });
-    return { decision: result, view, source };
+    return { decision: result, view, source, providers, accountRows };
   }
 
   /**
@@ -301,7 +309,7 @@ export class RouteService {
     if (!this.options.enabled()) return { content: 'Automatic routing is off in the Assistant settings: choose the provider and model yourself.' };
     const decided = await this.decideFor(caller, input);
     if ('error' in decided) return { content: decided.error, isError: true };
-    const { decision, view, source } = decided;
+    const { decision, view, source, providers, accountRows } = decided;
     const now = this.now();
     if (!decision.top) {
       const reasons = [...new Set(decision.dropped.map(entry => `${entry.cli}${entry.model ? ` ${entry.model}` : ''}: ${entry.reason}`))].slice(0, 6);
@@ -327,6 +335,7 @@ export class RouteService {
           `${short(decision.top, 0)}${decision.explored ? ' (exploring a new model)' : ''}.`,
           ...decision.alternatives.map((c, i) => `Or ${i + 1}: ${short(c, i + 1)}.`),
           `Pass spawn to spawn_agent unchanged (add title, cwd, prompt). Then route_outcome {decisionId:"${record.id}"}.`,
+          ...(Array.isArray(input.providers) || Array.isArray(input.accountRoutes) ? [`Next time send only task: your lists are kept for 30 min (or send digest "${digestOf(providers, accountRows)}").`] : []),
           JSON.stringify({ decisionId: record.id, spawn: decision.top.spawn, kind: decision.top.kind, alternatives: decision.alternatives.map(c => ({ spawn: c.spawn, kind: c.kind })) })
         ].join('\n')
       };
@@ -359,7 +368,8 @@ export class RouteService {
     // Exit lines are only classified here, never stored.
     const result: OutcomeResult = classifyOutcome(status === 'timeout' ? 'failed' : status, strings(input.exitLines, 40, 400));
     const ok = typeof input.ok === 'boolean' ? input.ok && result === 'done' : undefined;
-    this.records.setOutcome(record, result, 'orchestrator', this.now(), ok);
+    const tokens = typeof input.tokens === 'number' && Number.isInteger(input.tokens) && input.tokens > 0 && input.tokens <= 100_000_000 ? input.tokens : undefined;
+    this.records.setOutcome(record, result, 'orchestrator', this.now(), ok, tokens);
     const option = record.options[record.spawned?.option ?? 0];
     if (result === 'limit' && option) this.cool(option);
     return { content: `Recorded ${result}${result === 'limit' ? `: ${option?.label ?? 'that route'} rests for a while and route picks another one` : ''}.` };

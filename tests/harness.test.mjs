@@ -68,7 +68,7 @@ test('settings: four controls; command review maps onto the Assistant modes; def
   const off = withCommandReview(strict, 'off');
   assert.deepEqual([off.modes['command.review'], off.enabled, commandReviewLevel(off)], ['off', true, 'off'], 'task triage keeps the Assistant on');
   assert.equal(withCommandReview({ ...off, modes: { ...off.modes, 'task.route': 'off' } }, 'off').enabled, false);
-  assert.deepEqual(normalizeHarnessSettings({ routing: false, junk: 1 }), { routing: false, loopAlerts: true, flows: true });
+  assert.deepEqual(normalizeHarnessSettings({ routing: false, junk: 1 }), { routing: false, loopAlerts: true, flows: true, trustChain: false });
   assert.throws(() => validateHarnessSettings({ routing: true, loopAlerts: true }), /Invalid/u);
   assert.throws(() => validateHarnessSettings({ routing: true, loopAlerts: true, flows: true, extra: false }), /Invalid/u);
 });
@@ -312,9 +312,9 @@ test('the Assistant wires it: decide feeds loops and the journal whatever review
   await flush();
   assert.equal(host.badges(card.id).at(-1).text, 'loop?');
   assert.match((await assistant.tool('task_list', orchestrator, {})).content, /empty/u);
-  assert.deepEqual(assistant.harnessState(), { commandReview: 'off', custom: null, settingsUnavailable: false, routing: true, loopAlerts: true, flows: true, models: 0 });
+  assert.deepEqual(assistant.harnessState(), { commandReview: 'off', custom: null, settingsUnavailable: false, routing: true, loopAlerts: true, flows: true, trustChain: false, models: 0 });
   await assistant.saveHarness({ commandReview: 'strict', routing: false, loopAlerts: true, flows: true });
-  assert.deepEqual(host.storage.harness, { routing: false, loopAlerts: true, flows: true });
+  assert.deepEqual(host.storage.harness, { routing: false, loopAlerts: true, flows: true, trustChain: false });
   assert.equal(host.storage.settings.modes['command.review'], 'auto');
   await assert.rejects(assistant.saveHarness({ commandReview: 'paranoid', routing: true, loopAlerts: true, flows: true }), /Strict, Basic rules or Off/u);
 });

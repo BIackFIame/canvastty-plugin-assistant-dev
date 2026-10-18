@@ -45,7 +45,7 @@ function page(file, replies, extraSdk = {}) {
 
 const settle = () => new Promise(resolve => setTimeout(resolve, 10));
 
-test('settings page: four controls (Strict/Basic rules/Off, then three switches), Russian and English, the palette from the context', async () => {
+test('settings page: five controls (Strict/Basic rules/Off, the trust chain off by default, then three switches), Russian and English, the palette from the context', async () => {
   const state = { commandReview: 'off', custom: null, settingsUnavailable: false, routing: true, loopAlerts: true, flows: true, models: 0 };
   const ui = page('settings/harness.js', { 'harness.settings': state, 'harness.saveSettings': ({ settings }) => ({ ...state, ...settings }) });
   await settle();
@@ -54,20 +54,29 @@ test('settings page: four controls (Strict/Basic rules/Off, then three switches)
   assert.equal(ui.html.lang, 'ru');
   assert.equal(ui.html.props['--ui-scale'], '1.25', 'the host scale, when sent, sizes the page');
   const rows = ui.app.all().filter(node => node.className === 'setting-row');
-  assert.equal(rows.length, 4);
+  assert.equal(rows.length, 5);
   assert.match(ui.app.text(), /Проверка команд .* Строго Базовые правила Выкл/u);
+  assert.match(ui.app.text(), /Доверять задаче оркестратора для новых файлов его субагентов/u);
+  assert.equal(ui.app.all().find(node => node.name === 'trustChain').checked, false, 'off until the person turns it on');
   // Each level in one line; Basic rules says it blocks.
   assert.match(ui.app.text(), /Строго: всё, кроме команд чтения, ждёт вашего ответа\./u);
   assert.match(ui.app.text(), /Базовые правила: блокирует то, что запрещают жёсткие правила/u);
   assert.match(ui.app.text(), /Выкл: Помощник не проверяет команды\./u);
   assert.doesNotMatch(ui.app.text(), /Предупреждать|до запуска ничего/u);
   assert.match(ui.app.text(), /Сценарии/u);
-  assert.equal(ui.app.all().filter(node => node.tagName === 'INPUT').length, 3);
+  assert.equal(ui.app.all().filter(node => node.tagName === 'INPUT').length, 4);
   // Strict saves through the service with every other value as it was.
   ui.app.all().find(node => node.tagName === 'BUTTON' && node.textContent === 'Строго').click();
   await settle();
-  assert.deepEqual(ui.requests.find(request => request.method === 'harness.saveSettings').params, { settings: { commandReview: 'strict', routing: true, loopAlerts: true, flows: true } });
+  assert.deepEqual(ui.requests.find(request => request.method === 'harness.saveSettings').params, { settings: { commandReview: 'strict', routing: true, loopAlerts: true, flows: true, trustChain: false } });
+  // The trust chain: saved with everything else as it was.
+  const chain = ui.app.all().find(node => node.name === 'trustChain');
+  chain.checked = true;
+  for (const listener of chain.listeners.change) listener();
+  await settle();
+  assert.equal(ui.requests.filter(request => request.method === 'harness.saveSettings').at(-1).params.settings.trustChain, true);
   ui.context('en', 'sage');
+  assert.match(ui.app.text(), /Trust the orchestrator's task for its subagents' new files/u);
   assert.match(ui.app.text(), /Command review .* Strict Basic rules Off/u);
   assert.match(ui.app.text(), /not a lock/u, 'flows are described as a request, not a gate');
   assert.doesNotMatch(ui.app.text(), /Warn|before anything starts/u);

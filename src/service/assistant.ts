@@ -143,7 +143,7 @@ export class Assistant {
       ...(options.now ? { now: options.now } : {})
     });
     this.review = new ReviewService({
-      engine: this.engine, settings: () => this.settings, locale,
+      engine: this.engine, settings: () => this.settings, locale, trustChain: () => this.harness.settings.trustChain,
       ...(options.git === null ? { git: null } : {}),
       suggest: (sessionId, verdict, summary) => { void this.harness.setBadge(sessionId, 'review', suggestionBadge(verdict, summary, this.harness.strings)); }
     });
@@ -339,7 +339,7 @@ export class Assistant {
    * The harness page: its four controls (command review here, the rest in the harness) and nothing else. A command
    * review the levels do not describe exactly is `custom`, with what it is, shown read-only until a level is chosen.
    */
-  harnessState(): { commandReview: CommandReviewState; custom: { mode: string; strictness: string } | null; settingsUnavailable: boolean; routing: boolean; loopAlerts: boolean; flows: boolean; models: number } {
+  harnessState(): { commandReview: CommandReviewState; custom: { mode: string; strictness: string } | null; settingsUnavailable: boolean; routing: boolean; loopAlerts: boolean; flows: boolean; trustChain: boolean; models: number } {
     const level = commandReviewLevel(this.settings);
     return {
       commandReview: level,

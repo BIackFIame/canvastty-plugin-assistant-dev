@@ -545,3 +545,73 @@ test('the settings page saves through the service: validated, stored, and a brok
   assert.equal(assistant.settings.grant, 'off', 'nothing changed');
   assert.throws(() => assistant.check('missing'), /Unknown backend/u);
 });
+
+// ---------------------------------------------------------------------------------------------------------------
+// The trust chain (the person's switch on the settings page; off unless they turn it on)
+// ---------------------------------------------------------------------------------------------------------------
+
+/** Live run 9: the orchestrator's text for C (not a quote of the person's), effect_hidden 0.17, no second reviewer, nothing qualified. */
+const RUN9_PERSON = 'Build a small text statistics module in code/: textstats.mjs with countWords, topWords and readingMinutes, and textstats.test.mjs with node:test tests. Use a subagent for it.';
+const RUN9_CHILD = 'Create code/textstats.mjs (countWords, topWords, readingMinutes) and code/textstats.test.mjs with node:test. Write only these two files.';
+function run9Engine(serves = asked => /textstats/u.test(asked) ? 0.97 : 0.4) {
+  const engine = fakeEngine({ mode: 'auto', qualified: false, smart: null });
+  engine.hasVerifier = () => false;
+  const ask = engine.ask.bind(engine);
+  engine.ask = async (request, ctx) => {
+    const asked = request.fields.find(field => field.name === 'person_request').value;
+    const decision = await ask(request, ctx);
+    const answers = answersOf(serves(asked, request), 0.01, { effect_hidden: 0.17 });
+    const mapped = request.map?.(answers, {}, { variant: 'full', truncated: false, family: 'jev', autoCapable: true });
+    return { ...decision, answers, outcome: mapped?.outcome ?? null, qualifiedOutcome: mapped?.qualifiedOutcome ?? null };
+  };
+  return engine;
+}
+function run9(on, { personTask = RUN9_PERSON, engine = run9Engine() } = {}) {
+  const { review } = service(engine, {}, { trustChain: () => on });
+  review.noteLaunch('orch9', { task: personTask, dataClass: null, triage: false, role: 'orchestrator' });
+  review.noteLaunch('c9', { task: null, dataClass: null, triage: false, role: 'subagent', parentSessionId: 'orch9' });
+  review.noteTurn('c9', RUN9_CHILD, { role: 'subagent', parentSessionId: 'orch9' });
+  return review;
+}
+const newFile = (file, extra = {}) => ({ ...write('c9', file), ...extra, input: { filePath: join(project, file), content: 'export function countWords(text) { return text.split(/\\s+/u).filter(Boolean).length; }\n', ...(extra.input ?? {}) } });
+
+test('trust chain: off (the default), run 9\'s new-file writes still go to the person; on, they are allowed and the reason says so', async () => {
+  const { DEFAULT_HARNESS_SETTINGS, validateHarnessSettings } = await import('../src/harness/settings.ts');
+  assert.equal(DEFAULT_HARNESS_SETTINGS.trustChain, false, 'off for a new install: the person decides trust');
+  assert.equal(validateHarnessSettings({ routing: true, loopAlerts: true, flows: true }).trustChain, false, 'a save without it leaves it off');
+  for (const file of ['code/textstats.mjs', 'code/textstats.test.mjs']) {
+    const off = await run9(false).decide(newFile(file), 10_000);
+    assert.equal(off.verdict, 'deny', `${file}: as live, it needs a second review and the subagent cannot ask`);
+    const review = run9(true);
+    const on = await review.decide(newFile(file), 10_000);
+    assert.equal(on.verdict, 'allow', file);
+    assert.match(on.reason, /trust chain/u);
+    assert.equal(review.recent()[0].reason, 'trust-chain');
+  }
+  // OpenCode's bridge shape (`edit` with only file_path and content) for a file that does not exist yet.
+  const bridge = await run9(true).decide({ ...write('c9', 'code/new.mjs'), tool: { name: 'edit', kind: 'edit', command: null, paths: [join(project, 'code/new.mjs')] }, input: { file_path: join(project, 'code/new.mjs'), content: '// textstats helper\n' } }, 10_000);
+  assert.equal(bridge.verdict, 'allow');
+});
+
+test('trust chain never applies to overwrites, partial edits, outside paths, secrets, protected paths, commands, cut or large content, low confidence, or an orchestrator task that was not the person\'s', async () => {
+  const notAllowed = async (call, options, why) => { const answer = await run9(true, options).decide(call, 10_000); assert.notEqual(answer?.verdict, 'allow', why); };
+  mkdirSync(join(project, 'code'), { recursive: true });
+  writeFileSync(join(project, 'code', 'existing.mjs'), 'old\n');
+  await notAllowed(newFile('code/existing.mjs'), {}, 'an overwrite of an existing file');
+  await notAllowed({ ...write('c9', 'code/existing.mjs'), tool: { name: 'edit', kind: 'edit', command: null, paths: [join(project, 'code/existing.mjs')] }, input: { file_path: join(project, 'code/existing.mjs'), content: 'new\n' } }, {}, 'the bridge shape on an existing file is a partial edit');
+  await notAllowed({ ...write('c9', 'code/a.mjs'), tool: { name: 'Edit', kind: 'edit', command: null, paths: [join(project, 'code/a.mjs')] }, input: { file_path: join(project, 'code/a.mjs'), old_string: 'a', new_string: 'b' } }, {}, 'a partial edit');
+  await notAllowed(newFile('../outside-textstats.mjs'), {}, 'outside the project');
+  await notAllowed(newFile('code/.env'), {}, 'a credential path');
+  await notAllowed(newFile('code/textstats.secrets.json'), {}, 'a secrets file');
+  await notAllowed(newFile('.github/workflows/textstats.yml'), {}, 'a protected path');
+  await notAllowed({ ...write('c9', 'x'), tool: { name: 'bash', kind: 'shell', command: 'echo hi > code/textstats.mjs', paths: [] }, input: { command: 'echo hi > code/textstats.mjs' } }, {}, 'a shell command');
+  await notAllowed({ ...newFile('code/cut.mjs'), truncated: true }, {}, 'cut input');
+  await notAllowed(newFile('code/big.mjs', { input: { content: `// textstats\n${'x'.repeat(20_000)}` } }), {}, 'content above the review size');
+  await notAllowed(newFile('code/textstats.mjs'), { engine: run9Engine(() => 0.94) }, 'serves_request below 0.95');
+  await notAllowed(newFile('code/textstats.mjs'), { personTask: null }, 'the orchestrator\'s task is not known to be the person\'s (run 9 as it ran: no launcher task, not on Auto)');
+  // A card the person started is not a subagent: the chain does not apply (the usual rules do).
+  const { review } = service(run9Engine(), {}, { trustChain: () => true });
+  review.noteLaunch('top9', { task: null, dataClass: null, triage: false, role: 'agent' });
+  assert.notEqual((await review.decide({ ...newFile('code/top.mjs'), sessionId: 'top9', role: 'agent' }, 10_000))?.reason ?? '', 'trust chain');
+  assert.ok(!review.recent().some(entry => entry.reason === 'trust-chain'));
+});

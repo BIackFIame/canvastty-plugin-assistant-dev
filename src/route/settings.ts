@@ -16,6 +16,13 @@ export type NewModelPolicy = 'wait' | 'provisional' | 'explore';
 export const NEW_MODEL_POLICIES: readonly NewModelPolicy[] = ['wait', 'provisional', 'explore'];
 export type TrustLevel = DataClass | 'unset';
 export type PlanKind = 'subscription' | 'coding-plan';
+/** How a plan counts its quota: by tokens (a cheaper model's tokens count less), by prompts, or not known. */
+export type QuotaBy = 'tokens' | 'prompts' | 'unknown';
+export const QUOTA_BYS: readonly QuotaBy[] = ['tokens', 'prompts', 'unknown'];
+/** How much a faster model is worth on a plan, against the quota it uses. */
+export type ValueSpeed = 'low' | 'moderate' | 'high';
+export const VALUE_SPEEDS: readonly ValueSpeed[] = ['low', 'moderate', 'high'];
+export const SPEED_WEIGHT: Readonly<Record<ValueSpeed, number>> = { low: 0.2, moderate: 0.5, high: 1 };
 
 /** CLIs `spawn_agent` can start (CanvasTTY's agent providers); anything else is refused by the host anyway. */
 export const ROUTE_CLIS = ['claude', 'codex', 'grok', 'kimi', 'qwen', 'opencode', 'hermes', 'omp', 'pi', 'cursor', 'minimax', 'devin', 'antigravity'] as const;
@@ -45,6 +52,10 @@ export interface PlanDecl {
   allow: RouteAllow;
   /** The highest data class the person trusts it with; `unset` until they say. */
   trust: TrustLevel;
+  /** How the plan counts quota (default: by tokens). */
+  quotaBy?: QuotaBy;
+  /** Quota weight per model identity (1 = like the plan's top model); default: its API token price ratio. */
+  multipliers?: Record<string, number>;
 }
 
 export interface AliasOverride { cli: string; alias: string; identity: string }
@@ -76,6 +87,12 @@ export interface RouteSettings {
    * within the plan's limits. An account whose name says "coding plan" counts as one too.
    */
   flat: string[];
+  /** On plans (subscriptions, coding plans, flat-rate accounts): how much a faster model is worth. */
+  valueSpeed: ValueSpeed;
+  /** Output speed per model identity in tokens/s, as the person knows it (no source gives it yet). */
+  speeds: Record<string, number>;
+  /** Quota weight per model identity for flat-rate accounts and plans without their own. */
+  quotaWeights: Record<string, number>;
 }
 
 export const MAX_PLANS = 16;
@@ -89,7 +106,7 @@ export const MAX_SETTINGS_CHARS = 16_384;
 
 export const DEFAULT_ROUTE_SETTINGS: Readonly<RouteSettings> = Object.freeze({
   version: 1, plans: [], preferSubscriptions: true, expectedShare: { small: 3, medium: 8, large: 15 },
-  allow: {}, trust: {}, pins: {}, boosts: {}, newModels: 'wait', exploreShare: 0.05, aliases: [], notEquivalent: [], flat: []
+  allow: {}, trust: {}, pins: {}, boosts: {}, newModels: 'wait', exploreShare: 0.05, aliases: [], notEquivalent: [], flat: [], valueSpeed: 'moderate', speeds: {}, quotaWeights: {}
 }) as Readonly<RouteSettings>;
 
 class RouteSettingsError extends Error {}
@@ -108,7 +125,7 @@ const PROTO = new Set(['__proto__', 'constructor', 'prototype']);
 function plan(value: unknown): PlanDecl {
   if (!isRecord(value)) fail('Invalid plan.');
   const v = value as Record<string, unknown>;
-  const allowed = ['id', 'cli', 'kind', 'label', 'models', 'reserve', 'maxParallel', 'allowance', 'windowHours', 'allow', 'trust'];
+  const allowed = ['id', 'cli', 'kind', 'label', 'models', 'reserve', 'maxParallel', 'allowance', 'windowHours', 'allow', 'trust', 'quotaBy', 'multipliers'];
   if (Object.keys(v).some(key => !allowed.includes(key))) fail('Invalid plan field.');
   if (typeof v.id !== 'string' || !ID.test(v.id)) fail('Invalid plan id.');
   if (!(ROUTE_CLIS as readonly unknown[]).includes(v.cli)) fail('Invalid plan CLI.');
@@ -121,13 +138,19 @@ function plan(value: unknown): PlanDecl {
   if (v.windowHours !== undefined && !intIn(v.windowHours, 1, 24 * 31)) fail('Invalid window.');
   if (!ROUTE_ALLOWS.includes(v.allow as RouteAllow)) fail('Invalid allow.');
   if (!trustOk(v.trust)) fail('Invalid trust.');
+  if (v.quotaBy !== undefined && !QUOTA_BYS.includes(v.quotaBy as QuotaBy)) fail('Invalid quota kind.');
+  const multipliers = v.multipliers === undefined ? undefined : weights(v.multipliers, 'multipliers');
   return {
     id: v.id as string, cli: v.cli as string, kind: v.kind as PlanKind, label: v.label as string, models: [...new Set(v.models as string[])],
     reserve: v.reserve as number, maxParallel: v.maxParallel as number,
     ...(v.allowance !== undefined ? { allowance: v.allowance as number } : {}), ...(v.windowHours !== undefined ? { windowHours: v.windowHours as number } : {}),
-    allow: v.allow as RouteAllow, trust: v.trust as TrustLevel
+    allow: v.allow as RouteAllow, trust: v.trust as TrustLevel,
+    ...(v.quotaBy !== undefined ? { quotaBy: v.quotaBy as QuotaBy } : {}), ...(multipliers && Object.keys(multipliers).length ? { multipliers } : {})
   };
 }
+
+const weights = (value: unknown, what: string): Record<string, number> =>
+  map<number>(value, MAX_PINS, k => IDENTITY.test(k), (x): x is number => typeof x === 'number' && Number.isFinite(x) && x >= 0.01 && x <= 100, what);
 
 function map<T>(value: unknown, max: number, key: (k: string) => boolean, item: (v: unknown) => v is T, what: string): Record<string, T> {
   if (value === undefined) return {};
@@ -171,8 +194,14 @@ export function validateRouteSettings(value: unknown): RouteSettings {
     version: 1, plans, preferSubscriptions: v.preferSubscriptions as boolean,
     expectedShare: { small: share.small as number, medium: share.medium as number, large: share.large as number },
     allow, trust, pins, boosts, newModels: v.newModels as NewModelPolicy, exploreShare: v.exploreShare as number, aliases,
-    notEquivalent: [...new Set(v.notEquivalent as string[])], flat: [...new Set(flat as string[])]
+    notEquivalent: [...new Set(v.notEquivalent as string[])], flat: [...new Set(flat as string[])],
+    valueSpeed: 'moderate', speeds: {}, quotaWeights: {}
   };
+  // Saved before plan cost by quota and speed existed: moderate, none.
+  if (v.valueSpeed !== undefined && !VALUE_SPEEDS.includes(v.valueSpeed as ValueSpeed)) fail('Invalid speed preference.');
+  result.valueSpeed = (v.valueSpeed as ValueSpeed | undefined) ?? 'moderate';
+  result.speeds = v.speeds === undefined ? {} : map<number>(v.speeds, MAX_PINS, k => IDENTITY.test(k), (x): x is number => typeof x === 'number' && Number.isFinite(x) && x >= 1 && x <= 10_000, 'speeds');
+  result.quotaWeights = v.quotaWeights === undefined ? {} : weights(v.quotaWeights, 'quota weights');
   // Plugin storage holds 64 KB for everything the Assistant keeps: this part stays small.
   if (JSON.stringify(result).length > MAX_SETTINGS_CHARS) fail('The routing settings are too large: remove some plans, models or aliases.');
   return result;

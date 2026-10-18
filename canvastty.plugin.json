@@ -30,8 +30,8 @@
     },
     {
       "path": "services/assistant.mjs",
-      "bytes": 846538,
-      "sha256": "50278caf881b4e592e400a63c655a75c28072f63e39838410d6bdf324af2fd9b"
+      "bytes": 856554,
+      "sha256": "4e319c8d94de01c783d0d5001256e44ca73c95d6b881f03a9d5fb43559a909a0"
     },
     {
       "path": "settings/assistant.html",
@@ -40,8 +40,8 @@
     },
     {
       "path": "settings/assistant.js",
-      "bytes": 134228,
-      "sha256": "92c1aaa7988b776a90ae1ea56f2076321a9114b00ea976d845c5f9e2466323b2"
+      "bytes": 140059,
+      "sha256": "36eda45fdab54bee067166fe4420865a7c5c3f916e02f5b5f331efc29f9e643d"
     },
     {
       "path": "settings/assistant.css",
@@ -55,8 +55,8 @@
     },
     {
       "path": "settings/harness.js",
-      "bytes": 15018,
-      "sha256": "b2d0e81c677b65e6398e78e1824866957c1f2aceb344ce2478c5cf20ccd42d05"
+      "bytes": 17296,
+      "sha256": "773f99ff50918e4f5b4405c24460a97effde72da425a60a956241f68790b0b4e"
     },
     {
       "path": "apps/harness.css",
@@ -353,6 +353,10 @@
               "ok": {
                 "type": "boolean",
                 "description": "Optional: false when it ended but did not do the task."
+              },
+              "tokens": {
+                "type": "integer",
+                "description": "Optional: tokens the subagent used, when you know them (for the cost of a plan's models)."
               }
             },
             "required": [

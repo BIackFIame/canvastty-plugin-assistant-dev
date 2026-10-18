@@ -56,7 +56,7 @@ export interface RouteRecord {
   options: OptionRecord[];
   /** Which option the orchestrator started, when a subagent of that CLI appeared shortly after. */
   spawned?: { session: string; option: number; at: number; endedAt?: number };
-  outcome?: { result: OutcomeResult; ok: boolean; by: 'orchestrator' | 'person'; at: number };
+  outcome?: { result: OutcomeResult; ok: boolean; by: 'orchestrator' | 'person'; at: number; tokens?: number };
 }
 
 /** Classifies what the orchestrator reports (status words and exit lines); the text itself is not kept. */
@@ -101,11 +101,28 @@ export class RouteRecords {
     return null;
   }
 
-  setOutcome(record: RouteRecord, result: OutcomeResult, by: 'orchestrator' | 'person', at: number, ok?: boolean): void {
+  setOutcome(record: RouteRecord, result: OutcomeResult, by: 'orchestrator' | 'person', at: number, ok?: boolean, tokens?: number): void {
     // The person's word wins over the orchestrator's report; a later report from the orchestrator does not undo it.
     if (record.outcome?.by === 'person' && by === 'orchestrator') return;
-    record.outcome = { result, ok: ok ?? result === 'done', by, at };
+    const kept = tokens ?? record.outcome?.tokens;
+    record.outcome = { result, ok: ok ?? result === 'done', by, at, ...(kept !== undefined ? { tokens: kept } : {}) };
     this.save(this.list);
+  }
+
+  /**
+   * Tokens a model really took per task, as a factor of the level's default (median of at least 5 outcomes that
+   * reported tokens), or null.
+   */
+  tokenFactor(identity: string, base: (level: Level) => number): number | null {
+    const ratios: number[] = [];
+    for (const record of this.list) {
+      const option = record.options[record.spawned?.option ?? 0];
+      if (option?.identity !== identity || typeof record.outcome?.tokens !== 'number') continue;
+      ratios.push(record.outcome.tokens / base(record.level));
+    }
+    if (ratios.length < 5) return null;
+    ratios.sort((a, b) => a - b);
+    return Math.round(ratios[Math.floor(ratios.length / 2)]! * 1_000) / 1_000;
   }
 
   /** Outcomes per route key (the option that ran). */

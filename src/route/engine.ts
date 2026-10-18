@@ -24,7 +24,7 @@ import type { AutoPreference, AutoTier } from '../auto/settings.ts';
 import { classRank, type DataClass, type DataClassMode } from '../shared/settings.ts';
 import { resolveModel, type Resolved } from './aliases.ts';
 import { quotaOf, shadowPrice, type LimitsCache, type ShadowPrice, type SubscriptionQuota } from './limits.ts';
-import { DEFAULT_MAX_PARALLEL, DEFAULT_RESERVE, trustRank, type PlanDecl, type RouteAllow, type RouteSettings, type TrustLevel } from './settings.ts';
+import { DEFAULT_MAX_PARALLEL, DEFAULT_RESERVE, SPEED_WEIGHT, trustRank, type PlanDecl, type RouteAllow, type RouteSettings, type TrustLevel } from './settings.ts';
 
 export const ASSISTANT_ID = 'canvastty-assistant';
 export const ACCOUNTS_ID = 'canvastty-accounts';
@@ -113,6 +113,8 @@ export interface RouteContext {
   cooldown(signIn: string): { until: number; reason: string } | null;
   /** Outcomes per route key. */
   stats: ReadonlyMap<string, RouteStats>;
+  /** Learned tokens per task of a model, as a factor of TASK_TOKENS (null: not enough outcomes with tokens). */
+  tokenFactor?(identity: string): number | null;
   /** The orchestrator's explicit choice: a CLI, a model, a plan or account id. */
   prefer: string | null;
   /** The child must orchestrate (needs CanvasTTY's agent tools). */
@@ -181,6 +183,12 @@ export interface Candidate {
   trust: { level: TrustLevel | 'auto'; warn: boolean };
   allow: RouteAllow;
   demoted: string | null;
+  /**
+   * On a plan (a subscription, a coding plan, a flat-rate account): what one task takes of the plan against the
+   * plan's top model — its quota share (expected tokens × quota weight) and, when speeds are known, its time —
+   * folded into `cost` (lower is better) with the person's "value speed". Null off a plan.
+   */
+  planCost: { cost: number; quota: number; time: number | null; faster: number | null; against: string | null; tokens: number } | null;
   spawn: Spawn;
   /** Specific model without a score of its own (unscored or provisional). */
   newModel: boolean;
@@ -519,10 +527,12 @@ export function decide(ctx: RouteContext): RouteDecision {
       ...(raw.planId ? { planId: raw.planId } : {}), ...(raw.accountId ? { accountId: raw.accountId } : {}), ...(raw.endpoint ? { endpoint: raw.endpoint } : {}),
       model: raw.kind === 'auto' ? ctx.auto!.model : raw.model, identity: raw.resolved.identity, resolvedFrom: raw.resolved.from, effort: raw.effort,
       scoredEffort: measured?.effort ?? raw.effort,
-      score, pin, boost, cost, costBasis, estimate, quota, availability, trust: { level: raw.trust, warn: trust.warn }, allow: raw.allow, demoted: null, spawn,
+      score, pin, boost, cost, costBasis, estimate, quota, availability, trust: { level: raw.trust, warn: trust.warn }, allow: raw.allow, demoted: null, planCost: null, spawn,
       newModel: !!raw.model && raw.kind !== 'auto' && (score === null || score.source === 'provisional')
     });
   }
+
+  planCosts(candidates, ctx, raws);
 
   // A new model is one the cohort measures at no effort at all: a known model's other effort is not new.
   const measuredIdentities = new Set(candidates.filter(c => c.score?.source === 'measured' && c.identity).map(c => c.identity!));
@@ -554,10 +564,13 @@ export function decide(ctx: RouteContext): RouteDecision {
   const headroomOk = (c: Candidate): boolean => SUBSCRIPTION_KINDS.has(c.kind) && (c.costBasis === 'free' || c.costBasis === 'burning' || (c.kind === 'coding-plan' && c.estimate.kind === 'launches'));
   const quotaKnown = (c: Candidate): boolean => c.availability.state === 'ready' && !(SUBSCRIPTION_KINDS.has(c.kind) && c.costBasis === 'unknown');
   const lowerEffort = view.level !== 'large';
+  // Large or risky tasks stay quality-first: a plan's cheaper, faster model wins only small and medium ones.
+  const qualityFirst = view.level === 'large' || view.strong || ctx.explore.highRisk;
   let eligible = best === null ? [] : scored.filter(group => rep(group).score!.value >= best - window - 1e-9).sort((ga, gb) => {
     const a = rep(ga), b = rep(gb);
     return (ctx.settings.preferSubscriptions ? Number(headroomOk(b)) - Number(headroomOk(a)) : 0)
       || compareCost(a, b)
+      || (qualityFirst ? 0 : comparePlan(a, b))
       || (a.allow === 'prefer' || b.allow === 'prefer' ? allowRank(a.allow) - allowRank(b.allow) : Number(quotaKnown(b)) - Number(quotaKnown(a)))
       || (lowerEffort ? effortRank(a.effort) - effortRank(b.effort) : 0)
       || b.score!.value - a.score!.value
@@ -611,6 +624,59 @@ function accountPrice(ctx: RouteContext, raw: Raw): number | null {
   const own = raw.resolved.identity ? ctx.index.catalogModel(raw.model ?? '', raw.context) : null;
   if (own && !ctx.catalog.pricesStale && (own.inputPrice !== null || own.outputPrice !== null)) return taskUsd(ctx.view.level, { priceIn: own.inputPrice, priceOut: own.outputPrice });
   return null;
+}
+
+/** Expected tokens of one task for a model: learned from outcomes, else the level's default (×1.2 for a small model). */
+export const SMALL_MODEL_TOKENS = 1.2;
+const SMALL_MODEL = /(?:^|[-_])(?:flash|mini|lite|nano|small|haiku|fast|instant|air)(?:$|[-_\d])/u;
+function expectedTokens(identity: string | null, level: Level, ctx: RouteContext): number {
+  const base = TASK_TOKENS[level].input + TASK_TOKENS[level].output;
+  const learned = identity ? ctx.tokenFactor?.(identity) ?? null : null;
+  return Math.round(base * (learned ?? (identity && SMALL_MODEL.test(identity) ? SMALL_MODEL_TOKENS : 1)));
+}
+
+/**
+ * Plan cost: within one plan (a plan's sign-in, or a flat-rate account address), each model's quota share against
+ * the plan's top model (the one with the highest API price): expected tokens × quota weight, where the weight is the
+ * person's multiplier, else the API price ratio when the plan counts tokens (1 when it counts prompts or nobody knows).
+ * With every member's speed known, the relative time counts too, weighted by "value speed".
+ */
+function planCosts(candidates: Candidate[], ctx: RouteContext, raws: Raw[]): void {
+  const groupOf = (c: Candidate): string | null => c.kind === 'subscription' || c.kind === 'coding-plan' || c.kind === 'cli-default' ? c.signIn : c.costBasis === 'flat' ? `flat:${c.endpoint}` : null;
+  const plans = new Map(ctx.settings.plans.map(plan => [`plan:${plan.id}`, plan]));
+  const groups = new Map<string, Candidate[]>();
+  for (const c of candidates) { const g = groupOf(c); if (g) groups.set(g, [...groups.get(g) ?? [], c]); }
+  void raws;
+  const blend = (identity: string | null): number | null => { const p = apiPrice(ctx.catalog, identity); return p ? (p.priceIn ?? 0) + (p.priceOut ?? 0) * 3 : null; };
+  const weightK = SPEED_WEIGHT[ctx.settings.valueSpeed];
+  for (const [key, members] of groups) {
+    const plan = plans.get(key);
+    const quotaBy = plan?.quotaBy ?? 'tokens';
+    const top = [...members].sort((a, b) => (blend(b.identity) ?? -1) - (blend(a.identity) ?? -1))[0]!;
+    const topPrice = blend(top.identity);
+    const tokensOf = (c: Candidate): number => expectedTokens(c.identity, ctx.view.level, ctx);
+    const weightOf = (c: Candidate): number => {
+      const person = c.identity ? plan?.multipliers?.[c.identity] ?? ctx.settings.quotaWeights[c.identity] : undefined;
+      if (person !== undefined) return person;
+      const price = blend(c.identity);
+      return quotaBy === 'tokens' && price !== null && topPrice ? price / topPrice : 1;
+    };
+    const speedOf = (c: Candidate): number | null => c.identity ? ctx.settings.speeds[c.identity] ?? null : null;
+    const timed = members.every(c => speedOf(c) !== null);
+    const topQuota = quotaBy === 'prompts' ? 1 : tokensOf(top) * weightOf(top);
+    const topTime = timed ? tokensOf(top) / speedOf(top)! : null;
+    for (const c of members) {
+      const quota = quotaBy === 'prompts' ? 1 : (tokensOf(c) * weightOf(c)) / topQuota;
+      const time = timed && topTime ? (tokensOf(c) / speedOf(c)!) / topTime : null;
+      c.planCost = { cost: Math.round((quota + (time === null ? 0 : weightK * time)) * 1_000) / 1_000, quota: Math.round(quota * 1_000) / 1_000, time,
+        faster: time ? Math.round((1 / time) * 10) / 10 : null, against: c === top ? null : top.identity ?? top.model, tokens: tokensOf(c) };
+    }
+  }
+}
+
+function comparePlan(a: Candidate, b: Candidate): number {
+  if (!a.planCost || !b.planCost) return 0;
+  return a.planCost.cost - b.planCost.cost;
 }
 
 const allowRank = (allow: RouteAllow): number => allow === 'prefer' ? 0 : 1;
@@ -672,6 +738,13 @@ export function modelText(c: Candidate): string {
 }
 
 export function costText(c: Candidate, now: number): string {
+  const base = costBase(c, now);
+  const p = c.planCost;
+  if (!p || !p.against) return base;
+  return `${base}; ~${Math.round(p.quota * 100)}% of the plan quota ${p.against} would use${p.faster && p.faster !== 1 ? `, ~${p.faster}× ${p.faster > 1 ? 'faster' : 'as fast'}` : ''}`;
+}
+
+function costBase(c: Candidate, now: number): string {
   const read = c.quota ? `, read ${ago(c.quota.readAt, now)}` : '';
   const used = c.quota?.window ? `${windowName(c.quota.window.minutes, c.quota.window.label)} ${Math.round(c.quota.window.usedPercent)}% used` : '';
   switch (c.costBasis) {

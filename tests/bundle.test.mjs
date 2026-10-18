@@ -131,7 +131,7 @@ test('end to end over JSON-RPC: off answers nothing; on in Auto the rule allows 
   // A fresh install: command review Off until the person turns it on; no model is asked, nothing is saved.
   assert.equal(await service.request('canvastty.decide', decide('sudo ls')), null);
   assert.equal(ollama.requests.length, 0);
-  assert.deepEqual(await service.request('harness.settings'), { commandReview: 'off', custom: null, settingsUnavailable: false, routing: true, loopAlerts: true, flows: true, models: 0 });
+  assert.deepEqual(await service.request('harness.settings'), { commandReview: 'off', custom: null, settingsUnavailable: false, routing: true, loopAlerts: true, flows: true, trustChain: false, models: 0 });
   assert.equal(storage.settings, undefined);
   // Basic rules: hard rules block, nothing else is enforced.
   await service.request('harness.saveSettings', { settings: { commandReview: 'basic', routing: true, loopAlerts: true, flows: true } });

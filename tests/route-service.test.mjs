@@ -94,7 +94,8 @@ test('route_outcome: a usage-limit exit rests the route (its window\'s reset, or
   route.sessionEvent({ type: 'created', session: { id: 'child-9', provider: 'claude', role: 'subagent', parentSessionId: orchestrator.id, status: 'starting' } });
   assert.equal((await route.tool('route_outcome', { ...orchestrator, id: 'another-orch' }, { decisionId: answer.decisionId, status: 'failed' })).isError, true);
   assert.equal((await route.tool('route_outcome', orchestrator, { decisionId: answer.decisionId, status: 'weird' })).isError, true);
-  const recorded = await route.tool('route_outcome', orchestrator, { sessionId: 'child-9', status: 'failed', exitLines: ['Claude usage limit reached. Your limit will reset at 5pm.'] });
+  const recorded = await route.tool('route_outcome', orchestrator, { sessionId: 'child-9', status: 'failed', tokens: 123_456, exitLines: ['Claude usage limit reached. Your limit will reset at 5pm.'] });
+  assert.equal(route.records.get(answer.decisionId).outcome.tokens, 123_456, 'tokens are kept for the plan cost');
   assert.match(recorded.content, /Recorded limit: Max rests for a while/u);
   const record = route.records.get(answer.decisionId);
   assert.deepEqual([record.outcome.result, record.outcome.ok, record.outcome.by], ['limit', false, 'orchestrator']);
@@ -163,8 +164,11 @@ test('pick_route is compact: short lines and spawn values; later calls send only
   const json = lastJson(first);
   assert.deepEqual(Object.keys(json), ['decisionId', 'spawn', 'kind', 'alternatives']);
   assert.equal(json.alternatives.length, 2);
+  assert.match(first.content, /Next time send only task: your lists are kept for 30 min \(or send digest "codex:ok claude:ok qwen:ok kimi:ok opencode:ok hermes:ok grok:ok @zai-glm @or-opus"\)/u);
   // Only the task: the lists this orchestrator passed are kept.
-  const again = lastJson(await route.tool('pick_route', orchestrator, { task: 'Explain the cache layer' }));
+  const againAnswer = await route.tool('pick_route', orchestrator, { task: 'Explain the cache layer' });
+  assert.doesNotMatch(againAnswer.content, /Next time/u, 'said once, when the lists were sent');
+  const again = lastJson(againAnswer);
   assert.deepEqual(again.spawn, json.spawn);
   // Another orchestrator has no kept lists: the declared plans only — no account rows of someone else's.
   const other = lastJson(await route.tool('pick_route', { ...orchestrator, id: 'other-orch-0001' }, { task: 'Explain the cache layer' }));

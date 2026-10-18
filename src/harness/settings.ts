@@ -22,18 +22,25 @@ export interface HarnessSettings {
   loopAlerts: boolean;
   /** The flow tools and the flow preview card. */
   flows: boolean;
+  /**
+   * Command review's trust chain: a subagent may create new files in the project without asking when its
+   * orchestrator's task was typed by the person and the review is sure the file serves it. Off unless the person
+   * turns it on.
+   */
+  trustChain: boolean;
 }
 
-export const DEFAULT_HARNESS_SETTINGS: Readonly<HarnessSettings> = Object.freeze({ routing: true, loopAlerts: true, flows: true });
+export const DEFAULT_HARNESS_SETTINGS: Readonly<HarnessSettings> = Object.freeze({ routing: true, loopAlerts: true, flows: true, trustChain: false });
 const KEYS = Object.keys(DEFAULT_HARNESS_SETTINGS) as Array<keyof HarnessSettings>;
 
 export function validateHarnessSettings(value: unknown): HarnessSettings {
   if (!value || typeof value !== 'object' || Array.isArray(value)) throw new Error('Invalid harness settings.');
   const record = value as Record<string, unknown>;
-  if (Object.keys(record).some(key => !KEYS.includes(key as keyof HarnessSettings)) || KEYS.some(key => typeof record[key] !== 'boolean')) {
+  // The trust chain came later: a page or save without it leaves it off.
+  if (Object.keys(record).some(key => !KEYS.includes(key as keyof HarnessSettings)) || KEYS.some(key => typeof record[key] !== 'boolean' && !(key === 'trustChain' && record[key] === undefined))) {
     throw new Error('Invalid harness settings.');
   }
-  return { routing: record.routing as boolean, loopAlerts: record.loopAlerts as boolean, flows: record.flows as boolean };
+  return { routing: record.routing as boolean, loopAlerts: record.loopAlerts as boolean, flows: record.flows as boolean, trustChain: record.trustChain === true };
 }
 
 /** Saved values made valid: a missing or bad key takes its default. */

@@ -1,13 +1,13 @@
 import { createHash } from 'node:crypto';
 import { lstatSync } from 'node:fs';
 import { homedir, tmpdir } from 'node:os';
-import { isAbsolute, join, relative } from 'node:path';
+import { isAbsolute, join, relative, resolve, sep } from 'node:path';
 import { REVIEW_LIMITS, type AcpPermissionDetail, type AcpToolKind, type ReviewReason } from '../shared/commandReview.ts';
 import type { AssistantSettings, DataClass } from '../shared/settings.ts';
 import { ReviewCircuit } from '../engine/bands.ts';
 import type { ShadowLabel } from '../engine/ShadowRecorder.ts';
 import { askCommandReview, reviewSummary, type CommandReviewEngine, type CommandReviewVerdict } from './commandReview.ts';
-import { computeCommandFacts, defaultGit, factPhrases, pathContext, realish, SessionWriteTracker, commandFromArgv, type CommandFacts, type GitRunner, type ReviewAction } from './commandFacts.ts';
+import { computeCommandFacts, defaultGit, factPhrases, isCredentialPath, isProtectedRel, pathContext, realish, SessionWriteTracker, commandFromArgv, type CommandFacts, type GitRunner, type ReviewAction } from './commandFacts.ts';
 import { tier1, type TIER1_DENY_RULES } from './commandRules.ts';
 import { collectReferencedFiles } from './referencedFiles.ts';
 
@@ -72,6 +72,33 @@ export interface ReviewServiceOptions {
   now?: () => number;
   /** The person's language, for reasons written for them (the others are for the agent, in English). */
   locale?: 'en' | 'ru';
+  /** "Trust the orchestrator's task for its subagents' new files" (the person's switch; off unless they turn it on). */
+  trustChain?: () => boolean;
+}
+
+/** The trust chain allows a subagent's new file only when the light review is at least this sure it serves the task. */
+export const TRUST_CHAIN_MIN_SERVES = 0.95;
+
+/**
+ * The absolute paths a call creates, when it only creates files whose whole content is in its input (a whole-file
+ * write, the OpenCode bridge's edit shape, or a patch that only adds files) and none of them exists yet (lstat:
+ * not even a dangling link). Null for anything else: an overwrite, a partial edit, cut input.
+ */
+export function newFileTargets(toolName: string, toolInput: unknown, truncated: boolean, cwd: string): string[] | null {
+  const raw = record(toolInput);
+  if (truncated || !raw || !wholeContentWrite(toolName, toolInput, truncated, cwd)) return null;
+  const abs = (path: string): string => isAbsolute(path) ? path : join(cwd, path);
+  let paths: string[];
+  if (toolName === 'apply_patch' || toolName === 'patch') {
+    const patch = [raw.command, raw.patch, raw.patchText, raw.input].find((value): value is string => typeof value === 'string') ?? '';
+    paths = patchPaths(patch);
+  } else {
+    const path = [raw.file_path, raw.filePath, raw.path].find((value): value is string => typeof value === 'string' && value.length > 0);
+    paths = path ? [path] : [];
+  }
+  if (!paths.length) return null;
+  const targets = paths.map(abs);
+  return targets.every(nothingAt) ? targets : null;
 }
 
 interface SessionState {
@@ -473,6 +500,11 @@ export class ReviewService {
         return null;
       }
       const verdict = await run();
+      const chained = !verdict.act && !signal.aborted && this.trustChain(request, state, rules, facts, verdict);
+      if (chained) {
+        this.rememberVerdict(request.sessionId, summary, mode, { ...verdict, act: 'allow', outcome: 'allow', by: 'assistant', reason: 'trust-chain' }, 'allow');
+        return { verdict: 'allow', reason: 'CanvasTTY Assistant: allowed by the trust chain: the person asked its orchestrator for this task, and this writes a new file inside the project that the review is sure serves it' };
+      }
       if (signal.aborted && !verdict.act) {
         const answer = ask('unavailable');
         this.rememberVerdict(request.sessionId, summary, mode, { ...verdict, reason: 'unavailable' }, act(answer));
@@ -494,6 +526,31 @@ export class ReviewService {
       // enforce nothing.
       return mode === 'auto' ? ask('unavailable') : null;
     }
+  }
+
+  /**
+   * The person's trust chain (their own switch, off by default): a subagent may create new files in the project
+   * without asking when the task it serves came from the person through its orchestrator. All of these must hold:
+   * the switch is on; the card is a subagent whose orchestrator's own request is the person's (typed by them: the
+   * launcher's task or a turn its Auto router saw, never only the orchestrator's text); the call only creates files
+   * (no overwrite, no partial edit, no shell), whole content visible and not cut, at most the review's content size;
+   * every target is inside the project, not protected, not a credential path; no tier-1 rule spoke; the light review
+   * is at least TRUST_CHAIN_MIN_SERVES sure it serves the request and did not say block; the session is not suspect.
+   */
+  private trustChain(request: DecideRequest, state: SessionState, rules: ReturnType<typeof tier1>, facts: CommandFacts, verdict: CommandReviewVerdict): boolean {
+    if (this.options.trustChain?.() !== true) return false;
+    if (!state.subagent || !state.parent || state.suspect || this.circuit.personOnly(request.sessionId)) return false;
+    const above = this.sessions.get(state.parent);
+    if (!above || above.subagent || !this.ownTexts(above).length) return false;
+    if (rules.verdict || facts.actionClass !== 'edit_in_project' || facts.kind !== 'edit' || facts.writesOutside || facts.credentialAccess || facts.protectedWrite || facts.truncated) return false;
+    if (verdict.outcome === 'deny' || verdict.modelDenied || typeof verdict.probability !== 'number' || verdict.probability < TRUST_CHAIN_MIN_SERVES) return false;
+    const action = actionFromDetail(detailFromHook(request.tool.name, request.input, request.truncated));
+    if (action.inputTruncated || (action.content?.length ?? 0) > REVIEW_LIMITS.contentChars) return false;
+    const cwd = action.commandCwd ?? request.agentCwd ?? request.cwd;
+    const targets = newFileTargets(request.tool.name, request.input, request.truncated, cwd);
+    if (!targets) return false;
+    const root = realish(resolve(request.cwd));
+    return targets.every(path => { const abs = realish(resolve(path)); return abs.startsWith(`${root}${sep}`) && !isCredentialPath(abs) && !isProtectedRel(relative(root, abs).split(sep).join('/')); });
   }
 
   private async ladder(request: DecideRequest, state: SessionState, personRequest: string | null, facts: CommandFacts, rules: ReturnType<typeof tier1>, content: string | null, signal: AbortSignal, contentVisible = false): Promise<CommandReviewVerdict> {

@@ -2,6 +2,16 @@
 
 ## Next
 
+- **Trust chain** (command review, off by default, the person's switch on the settings page): a subagent may create
+  new files in the project without asking when its orchestrator's task was typed by the person and the review is at
+  least 95% sure the file serves it. Never for overwrites, partial edits, paths outside the project, secrets,
+  protected paths, commands, cut or oversized content.
+- **Plan cost by quota and speed**: on subscriptions, coding plans and flat-rate accounts a model costs the quota it
+  uses (expected tokens, ×1.2 for small models until outcomes say otherwise, times a quota weight: the API price
+  ratio to the plan's top model, or the person's) and, with known speeds, its time ("value speed"). Within the
+  quality window the cheapest wins small and medium tasks; large and risky tasks stay quality-first. Plans can count
+  quota by tokens, prompts or not known. `route_outcome` takes `tokens`. The first compact `pick_route` answer says
+  how to send a digest next time.
 - **Route v2** (agent-level routing, no core change): `route` and its alias `pick_route` choose where a subagent runs —
   your subscriptions on their own CLIs, coding plans through OpenCode, the Accounts plugin's model accounts, Model:
   Auto, or a CLI's own default last — by the Auto catalog's score for the task type within the preference's quality

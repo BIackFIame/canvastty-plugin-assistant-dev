@@ -6,7 +6,7 @@ import type { AutoTier } from '../auto/settings.ts';
 import type { SubscriptionQuota } from '../route/limits.ts';
 import type { RouteRecord } from '../route/records.ts';
 import type { Estimate } from '../route/engine.ts';
-import { ROUTE_CLIS, type NewModelPolicy, type PlanDecl, type RouteAllow, type RouteSettings, type TrustLevel } from '../route/settings.ts';
+import { ROUTE_CLIS, type QuotaBy, type ValueSpeed, type NewModelPolicy, type PlanDecl, type RouteAllow, type RouteSettings, type TrustLevel } from '../route/settings.ts';
 import { el } from './common.ts';
 
 export interface RouteState {
@@ -55,6 +55,10 @@ export const ROUTE_PAGE_STRINGS = {
     add: 'Add', newPlan: 'Declare a subscription or plan', name: 'Name (Max, Pro, GLM plan…)', cli: 'CLI', planKind: 'Kind',
     accounts: 'Model accounts (CanvasTTY Accounts)', accountsSeen: (age: string) => `As the orchestrator last passed them, ${age}.`, accountsNone: 'Not passed by an orchestrator since the Assistant started.',
     flatRate: 'flat-rate plan',
+    quotaBy: 'Quota counted by', quotaKind: { tokens: 'tokens', prompts: 'prompts', unknown: 'not known' } as Record<string, string>,
+    weights: 'Quota weights (model=weight, …; 1 = like the plan\'s top model)', speeds: 'Output speeds (model=tokens/s, …)',
+    valueSpeed: 'On plans, value speed', speed: { low: 'little', moderate: 'moderately', high: 'a lot' } as Record<string, string>,
+    planHelp: 'On a plan a model costs the quota it uses and the time it takes: its expected tokens (a small model ×1.2 until outcomes say otherwise) times its quota weight (by default its API price against the plan\'s top model), and, when you give speeds, its time. Within the quality window the cheapest wins for small and medium tasks; large or risky tasks stay quality-first.',
     other: 'Other routes', autoRoute: 'Model: Auto (Jev) as a subagent route', never: 'Never use this CLI on its own sign-in',
     neverList: 'Never:', choices: 'Choices', preferSubs: 'Prefer subscriptions with headroom over a cheaper API route, within the quality window',
     newModels: 'New models', policy: { wait: 'Wait for a measured score', provisional: 'Provisional score (mapped, −5)', explore: 'Provisional, and explore 5% of easy tasks' } as Record<string, string>,
@@ -96,6 +100,10 @@ export const ROUTE_PAGE_STRINGS = {
     add: 'Добавить', newPlan: 'Объявить подписку или план', name: 'Название (Max, Pro, план GLM…)', cli: 'CLI', planKind: 'Вид',
     accounts: 'Аккаунты моделей (CanvasTTY Accounts)', accountsSeen: (age: string) => `Как их последний раз передал оркестратор, ${age}.`, accountsNone: 'С запуска Ассистента оркестратор их не передавал.',
     flatRate: 'фиксированный тариф',
+    quotaBy: 'Квота считается по', quotaKind: { tokens: 'токенам', prompts: 'запросам', unknown: 'неизвестно' } as Record<string, string>,
+    weights: 'Веса квоты (модель=вес, …; 1 — как у старшей модели плана)', speeds: 'Скорость вывода (модель=токенов/с, …)',
+    valueSpeed: 'На планах ценить скорость', speed: { low: 'немного', moderate: 'умеренно', high: 'сильно' } as Record<string, string>,
+    planHelp: 'На плане модель стоит ту квоту, которую тратит, и то время, которое занимает: ожидаемые токены (у маленькой модели ×1,2, пока результаты не покажут иное) на её вес квоты (по умолчанию — её цена API к старшей модели плана) и, если вы указали скорости, её время. В пределах окна качества для маленьких и средних задач побеждает самая дешёвая; большие и рискованные задачи — сначала качество.',
     other: 'Другие пути', autoRoute: 'Модель «Авто (Jev)» как путь для субагента', never: 'Никогда не запускать этот CLI на его собственном входе',
     neverList: 'Никогда:', choices: 'Выбор', preferSubs: 'Предпочитать подписки с запасом более дешёвому API в пределах окна качества',
     newModels: 'Новые модели', policy: { wait: 'Ждать измеренной оценки', provisional: 'Предварительная оценка (пересчитанная, −5)', explore: 'Предварительная и проба на 5% простых задач' } as Record<string, string>,
@@ -203,7 +211,12 @@ export function renderRouting(state: RouteState, t: Strings, page: RoutePageHost
   section.append(el('h2', { textContent: t.choices }), el('label', { className: 'check' }, prefer, ` ${t.preferSubs}`),
     el('div', { className: 'row' }, el('span', { className: 'label', textContent: t.newModels }),
       selectOf<NewModelPolicy>('route-new-model-policy', settings.newModels, (['wait', 'provisional', 'explore'] as const).map(value => [value, t.policy[value]!] as [NewModelPolicy, string]), value => save(next => { next.newModels = value; }))),
-    el('p', { className: 'muted', textContent: t.policyHelp }));
+    el('p', { className: 'muted', textContent: t.policyHelp }),
+    el('div', { className: 'row' }, el('span', { className: 'label', textContent: t.valueSpeed }),
+      selectOf<ValueSpeed>('route-value-speed', settings.valueSpeed, (['low', 'moderate', 'high'] as const).map(value => [value, t.speed[value]!] as [ValueSpeed, string]), value => save(next => { next.valueSpeed = value; }))),
+    pairsRow('route-speeds', t.speeds, settings.speeds, next => save(s => { s.speeds = next; })),
+    pairsRow('route-quota-weights', t.weights, settings.quotaWeights, next => save(s => { s.quotaWeights = next; })),
+    el('p', { className: 'muted', textContent: t.planHelp }));
 
   // Pins and boosts.
   section.append(el('h2', { textContent: t.pins }), el('p', { className: 'muted', textContent: t.pinsHelp }));
@@ -307,6 +320,9 @@ function planRow(plan: PlanDecl, state: RouteState, t: Strings, save: (change: (
   }));
   controls.append(saveNumbers);
   item.append(controls);
+  item.append(el('div', { className: 'row' }, el('span', { className: 'label', textContent: t.quotaBy }),
+    selectOf<QuotaBy>(`route-plan-quota-${plan.id}`, plan.quotaBy ?? 'tokens', (['tokens', 'prompts', 'unknown'] as const).map(value => [value, t.quotaKind[value]!] as [QuotaBy, string]), value => edit(entry => { entry.quotaBy = value; }))),
+    pairsRow(`route-plan-weights-${plan.id}`, t.weights, plan.multipliers ?? {}, next => edit(entry => { if (Object.keys(next).length) entry.multipliers = next; else delete entry.multipliers; })));
   const facts = [plan.kind === 'subscription' ? t.quota(view?.quota ?? null, ago) : t.launches(view?.launches ?? 0, plan.allowance, plan.windowHours ?? 5), t.running(view?.running ?? 0)].filter(Boolean).join(' · ');
   if (facts) item.append(el('p', { className: 'muted', textContent: facts, dataset: { quota: plan.id } }));
   const models = el('input', { name: `route-plan-models-${plan.id}`, value: plan.models.join(', ') });
@@ -314,6 +330,21 @@ function planRow(plan: PlanDecl, state: RouteState, t: Strings, save: (change: (
   item.append(el('div', { className: 'row' }, el('span', { className: 'label', textContent: t.models }), models),
     el('p', { className: 'muted', textContent: view?.models.length ? view.models.map(m => t.resolved(m.model, m.identity, m.from, state.aliases.asOf)).join('; ') : t.modelsHelp }));
   return item;
+}
+
+/** "glm-5-3-flash=0.3, glm-5-3=1" ↔ { id: number }; the service validates the result. */
+function pairsRow(name: string, label: string, value: Record<string, number>, onChange: (next: Record<string, number>) => void): HTMLDivElement {
+  const input = el('input', { name, value: Object.entries(value).map(([k, v]) => `${k}=${v}`).join(', ') });
+  input.addEventListener('change', () => {
+    const next: Record<string, number> = {};
+    for (const part of input.value.split(/[,;\s]+/u).filter(Boolean)) {
+      const [key, raw] = part.split('=');
+      const number = Number(raw);
+      if (key && Number.isFinite(number)) next[key.trim().toLowerCase().replace(/[. _]/gu, '-')] = number;
+    }
+    onChange(next);
+  });
+  return el('div', { className: 'row' }, el('span', { className: 'label', textContent: label }), input);
 }
 
 const splitModels = (value: string): string[] => [...new Set(value.split(/[,\s]+/u).map(part => part.trim()).filter(Boolean))].slice(0, 16);

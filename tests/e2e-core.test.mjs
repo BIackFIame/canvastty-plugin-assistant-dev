@@ -205,8 +205,8 @@ test('the built plugin installs into CanvasTTY\'s PluginManager and its tools, h
 
   // The settings page's four controls go through the service; storage is CanvasTTY's own.
   const settings = await supervisor.request('canvastty-assistant', 'assistant', 'harness.settings', {});
-  assert.deepEqual(settings, { commandReview: 'basic', custom: null, settingsUnavailable: false, routing: true, loopAlerts: true, flows: true, models: 0 });
+  assert.deepEqual(settings, { commandReview: 'basic', custom: null, settingsUnavailable: false, routing: true, loopAlerts: true, flows: true, trustChain: false, models: 0 });
   await supervisor.request('canvastty-assistant', 'assistant', 'harness.saveSettings', { settings: { commandReview: 'off', routing: true, loopAlerts: false, flows: true } });
-  assert.deepEqual(await manager.storageGet('canvastty-assistant', 'harness'), { routing: true, loopAlerts: false, flows: true });
+  assert.deepEqual(await manager.storageGet('canvastty-assistant', 'harness'), { routing: true, loopAlerts: false, flows: true, trustChain: false });
   assert.equal((await manager.storageGet('canvastty-assistant', 'settings')).modes['command.review'], 'off');
 });

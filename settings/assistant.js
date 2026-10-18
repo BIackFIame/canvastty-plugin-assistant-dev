@@ -747,7 +747,10 @@
     exploreShare: 0.05,
     aliases: [],
     notEquivalent: [],
-    flat: []
+    flat: [],
+    valueSpeed: "moderate",
+    speeds: {},
+    quotaWeights: {}
   });
 
   // src/ui/routing.ts
@@ -786,6 +789,13 @@
       accountsSeen: (age) => `As the orchestrator last passed them, ${age}.`,
       accountsNone: "Not passed by an orchestrator since the Assistant started.",
       flatRate: "flat-rate plan",
+      quotaBy: "Quota counted by",
+      quotaKind: { tokens: "tokens", prompts: "prompts", unknown: "not known" },
+      weights: "Quota weights (model=weight, \u2026; 1 = like the plan's top model)",
+      speeds: "Output speeds (model=tokens/s, \u2026)",
+      valueSpeed: "On plans, value speed",
+      speed: { low: "little", moderate: "moderately", high: "a lot" },
+      planHelp: "On a plan a model costs the quota it uses and the time it takes: its expected tokens (a small model \xD71.2 until outcomes say otherwise) times its quota weight (by default its API price against the plan's top model), and, when you give speeds, its time. Within the quality window the cheapest wins for small and medium tasks; large or risky tasks stay quality-first.",
       other: "Other routes",
       autoRoute: "Model: Auto (Jev) as a subagent route",
       never: "Never use this CLI on its own sign-in",
@@ -858,6 +868,13 @@
       accountsSeen: (age) => `\u041A\u0430\u043A \u0438\u0445 \u043F\u043E\u0441\u043B\u0435\u0434\u043D\u0438\u0439 \u0440\u0430\u0437 \u043F\u0435\u0440\u0435\u0434\u0430\u043B \u043E\u0440\u043A\u0435\u0441\u0442\u0440\u0430\u0442\u043E\u0440, ${age}.`,
       accountsNone: "\u0421 \u0437\u0430\u043F\u0443\u0441\u043A\u0430 \u0410\u0441\u0441\u0438\u0441\u0442\u0435\u043D\u0442\u0430 \u043E\u0440\u043A\u0435\u0441\u0442\u0440\u0430\u0442\u043E\u0440 \u0438\u0445 \u043D\u0435 \u043F\u0435\u0440\u0435\u0434\u0430\u0432\u0430\u043B.",
       flatRate: "\u0444\u0438\u043A\u0441\u0438\u0440\u043E\u0432\u0430\u043D\u043D\u044B\u0439 \u0442\u0430\u0440\u0438\u0444",
+      quotaBy: "\u041A\u0432\u043E\u0442\u0430 \u0441\u0447\u0438\u0442\u0430\u0435\u0442\u0441\u044F \u043F\u043E",
+      quotaKind: { tokens: "\u0442\u043E\u043A\u0435\u043D\u0430\u043C", prompts: "\u0437\u0430\u043F\u0440\u043E\u0441\u0430\u043C", unknown: "\u043D\u0435\u0438\u0437\u0432\u0435\u0441\u0442\u043D\u043E" },
+      weights: "\u0412\u0435\u0441\u0430 \u043A\u0432\u043E\u0442\u044B (\u043C\u043E\u0434\u0435\u043B\u044C=\u0432\u0435\u0441, \u2026; 1 \u2014 \u043A\u0430\u043A \u0443 \u0441\u0442\u0430\u0440\u0448\u0435\u0439 \u043C\u043E\u0434\u0435\u043B\u0438 \u043F\u043B\u0430\u043D\u0430)",
+      speeds: "\u0421\u043A\u043E\u0440\u043E\u0441\u0442\u044C \u0432\u044B\u0432\u043E\u0434\u0430 (\u043C\u043E\u0434\u0435\u043B\u044C=\u0442\u043E\u043A\u0435\u043D\u043E\u0432/\u0441, \u2026)",
+      valueSpeed: "\u041D\u0430 \u043F\u043B\u0430\u043D\u0430\u0445 \u0446\u0435\u043D\u0438\u0442\u044C \u0441\u043A\u043E\u0440\u043E\u0441\u0442\u044C",
+      speed: { low: "\u043D\u0435\u043C\u043D\u043E\u0433\u043E", moderate: "\u0443\u043C\u0435\u0440\u0435\u043D\u043D\u043E", high: "\u0441\u0438\u043B\u044C\u043D\u043E" },
+      planHelp: "\u041D\u0430 \u043F\u043B\u0430\u043D\u0435 \u043C\u043E\u0434\u0435\u043B\u044C \u0441\u0442\u043E\u0438\u0442 \u0442\u0443 \u043A\u0432\u043E\u0442\u0443, \u043A\u043E\u0442\u043E\u0440\u0443\u044E \u0442\u0440\u0430\u0442\u0438\u0442, \u0438 \u0442\u043E \u0432\u0440\u0435\u043C\u044F, \u043A\u043E\u0442\u043E\u0440\u043E\u0435 \u0437\u0430\u043D\u0438\u043C\u0430\u0435\u0442: \u043E\u0436\u0438\u0434\u0430\u0435\u043C\u044B\u0435 \u0442\u043E\u043A\u0435\u043D\u044B (\u0443 \u043C\u0430\u043B\u0435\u043D\u044C\u043A\u043E\u0439 \u043C\u043E\u0434\u0435\u043B\u0438 \xD71,2, \u043F\u043E\u043A\u0430 \u0440\u0435\u0437\u0443\u043B\u044C\u0442\u0430\u0442\u044B \u043D\u0435 \u043F\u043E\u043A\u0430\u0436\u0443\u0442 \u0438\u043D\u043E\u0435) \u043D\u0430 \u0435\u0451 \u0432\u0435\u0441 \u043A\u0432\u043E\u0442\u044B (\u043F\u043E \u0443\u043C\u043E\u043B\u0447\u0430\u043D\u0438\u044E \u2014 \u0435\u0451 \u0446\u0435\u043D\u0430 API \u043A \u0441\u0442\u0430\u0440\u0448\u0435\u0439 \u043C\u043E\u0434\u0435\u043B\u0438 \u043F\u043B\u0430\u043D\u0430) \u0438, \u0435\u0441\u043B\u0438 \u0432\u044B \u0443\u043A\u0430\u0437\u0430\u043B\u0438 \u0441\u043A\u043E\u0440\u043E\u0441\u0442\u0438, \u0435\u0451 \u0432\u0440\u0435\u043C\u044F. \u0412 \u043F\u0440\u0435\u0434\u0435\u043B\u0430\u0445 \u043E\u043A\u043D\u0430 \u043A\u0430\u0447\u0435\u0441\u0442\u0432\u0430 \u0434\u043B\u044F \u043C\u0430\u043B\u0435\u043D\u044C\u043A\u0438\u0445 \u0438 \u0441\u0440\u0435\u0434\u043D\u0438\u0445 \u0437\u0430\u0434\u0430\u0447 \u043F\u043E\u0431\u0435\u0436\u0434\u0430\u0435\u0442 \u0441\u0430\u043C\u0430\u044F \u0434\u0435\u0448\u0451\u0432\u0430\u044F; \u0431\u043E\u043B\u044C\u0448\u0438\u0435 \u0438 \u0440\u0438\u0441\u043A\u043E\u0432\u0430\u043D\u043D\u044B\u0435 \u0437\u0430\u0434\u0430\u0447\u0438 \u2014 \u0441\u043D\u0430\u0447\u0430\u043B\u0430 \u043A\u0430\u0447\u0435\u0441\u0442\u0432\u043E.",
       other: "\u0414\u0440\u0443\u0433\u0438\u0435 \u043F\u0443\u0442\u0438",
       autoRoute: "\u041C\u043E\u0434\u0435\u043B\u044C \xAB\u0410\u0432\u0442\u043E (Jev)\xBB \u043A\u0430\u043A \u043F\u0443\u0442\u044C \u0434\u043B\u044F \u0441\u0443\u0431\u0430\u0433\u0435\u043D\u0442\u0430",
       never: "\u041D\u0438\u043A\u043E\u0433\u0434\u0430 \u043D\u0435 \u0437\u0430\u043F\u0443\u0441\u043A\u0430\u0442\u044C \u044D\u0442\u043E\u0442 CLI \u043D\u0430 \u0435\u0433\u043E \u0441\u043E\u0431\u0441\u0442\u0432\u0435\u043D\u043D\u043E\u043C \u0432\u0445\u043E\u0434\u0435",
@@ -1007,7 +1024,22 @@
           next.newModels = value;
         }))
       ),
-      el("p", { className: "muted", textContent: t2.policyHelp })
+      el("p", { className: "muted", textContent: t2.policyHelp }),
+      el(
+        "div",
+        { className: "row" },
+        el("span", { className: "label", textContent: t2.valueSpeed }),
+        selectOf2("route-value-speed", settings.valueSpeed, ["low", "moderate", "high"].map((value) => [value, t2.speed[value]]), (value) => save2((next) => {
+          next.valueSpeed = value;
+        }))
+      ),
+      pairsRow("route-speeds", t2.speeds, settings.speeds, (next) => save2((s) => {
+        s.speeds = next;
+      })),
+      pairsRow("route-quota-weights", t2.weights, settings.quotaWeights, (next) => save2((s) => {
+        s.quotaWeights = next;
+      })),
+      el("p", { className: "muted", textContent: t2.planHelp })
     );
     section.append(el("h2", { textContent: t2.pins }), el("p", { className: "muted", textContent: t2.pinsHelp }));
     const pinList = el("ul", { className: "recent", dataset: { route: "pins" } });
@@ -1139,6 +1171,20 @@
     }));
     controls.append(saveNumbers);
     item.append(controls);
+    item.append(
+      el(
+        "div",
+        { className: "row" },
+        el("span", { className: "label", textContent: t2.quotaBy }),
+        selectOf2(`route-plan-quota-${plan.id}`, plan.quotaBy ?? "tokens", ["tokens", "prompts", "unknown"].map((value) => [value, t2.quotaKind[value]]), (value) => edit((entry) => {
+          entry.quotaBy = value;
+        }))
+      ),
+      pairsRow(`route-plan-weights-${plan.id}`, t2.weights, plan.multipliers ?? {}, (next) => edit((entry) => {
+        if (Object.keys(next).length) entry.multipliers = next;
+        else delete entry.multipliers;
+      }))
+    );
     const facts = [plan.kind === "subscription" ? t2.quota(view?.quota ?? null, ago) : t2.launches(view?.launches ?? 0, plan.allowance, plan.windowHours ?? 5), t2.running(view?.running ?? 0)].filter(Boolean).join(" \xB7 ");
     if (facts) item.append(el("p", { className: "muted", textContent: facts, dataset: { quota: plan.id } }));
     const models = el("input", { name: `route-plan-models-${plan.id}`, value: plan.models.join(", ") });
@@ -1150,6 +1196,19 @@
       el("p", { className: "muted", textContent: view?.models.length ? view.models.map((m) => t2.resolved(m.model, m.identity, m.from, state2.aliases.asOf)).join("; ") : t2.modelsHelp })
     );
     return item;
+  }
+  function pairsRow(name, label, value, onChange) {
+    const input = el("input", { name, value: Object.entries(value).map(([k, v]) => `${k}=${v}`).join(", ") });
+    input.addEventListener("change", () => {
+      const next = {};
+      for (const part of input.value.split(/[,;\s]+/u).filter(Boolean)) {
+        const [key, raw] = part.split("=");
+        const number2 = Number(raw);
+        if (key && Number.isFinite(number2)) next[key.trim().toLowerCase().replace(/[. _]/gu, "-")] = number2;
+      }
+      onChange(next);
+    });
+    return el("div", { className: "row" }, el("span", { className: "label", textContent: label }), input);
   }
   var splitModels = (value) => [...new Set(value.split(/[,\s]+/u).map((part) => part.trim()).filter(Boolean))].slice(0, 16);
   function addPlan(settings, t2, save2) {
