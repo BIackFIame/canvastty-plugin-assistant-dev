@@ -94,7 +94,7 @@ test('security: 127.0.0.1 only; a missing or wrong key is 401, an Origin or a fo
   assert.equal(router['server'].address().address, '127.0.0.1');
   assert.match(token, /^sk-ctty-[A-Za-z0-9_-]{43}$/u);
   assert.equal((await call(port, { method: 'GET', path: '/v1/models' })).status, 401);
-  assert.equal((await call(port, { method: 'GET', path: '/v1/models', token: `${token.slice(0, -1)}A` })).status, 401);
+  assert.equal((await call(port, { method: 'GET', path: '/v1/models', token: `${token.slice(0, -1)}${token.endsWith('A') ? 'E' : 'A'}` })).status, 401, 'one character off (the last base64url character of 32 bytes is one of 16, so a fixed "A" matched 1 run in 16)');
   assert.equal((await call(port, { method: 'GET', path: '/v1/models', token: 'sk-ctty-short' })).status, 401);
   assert.equal((await call(port, { method: 'GET', path: '/v1/models', token, headers: { origin: 'http://127.0.0.1:3000' } })).status, 403);
   assert.equal((await call(port, { method: 'GET', path: '/v1/models', token, headers: { origin: 'null' } })).status, 403);
