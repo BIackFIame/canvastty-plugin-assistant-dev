@@ -312,6 +312,26 @@ test('everything fails: a clear error, and a slow first chunk counts as a timeou
   assert.match(JSON.parse(none.text).error.code, /no_model/u);
 });
 
+test('caps: the reservation is realistic (the card\'s p90 output, 4k cold, never above max_tokens), reconciled with the reported cost; a refusal says what is left', async t => {
+  // Live run 7: OpenCode asks max_tokens 128k on every call; holding all of it at $10/M ($1.28) stopped a card with $0.10 left.
+  const { token, port, router } = await setup(t, { models: [{ id: 'vendor/pricey', tier: 'medium', priceIn: 2, priceOut: 10 }], extra: { perCardUsdCap: 0.1, dailyUsdCap: 1 } });
+  const big = text => ({ ...userTurn(text), max_tokens: 128_000 });
+  const entry = { priceIn: 2, priceOut: 10, output: null };
+  assert.equal(router.estimate(entry, 0, 128_000, 'card-0001-aaaa'), 4_096 * 10 / 1e6, 'cold start: 4k output tokens');
+  assert.equal(router.estimate(entry, 0, 1_000, 'card-0001-aaaa'), 1_000 * 10 / 1e6, 'never above max_tokens');
+  for (let i = 0; i < 3; i++) assert.equal((await call(port, { token, body: big(`Write function ${i}`) })).status, 200, `call ${i} fits with $0.10 left`);
+  // The fake upstream reports 3–7 output tokens a call: the p90 of what this card produced.
+  const seen = router.recent().map(record => record.tokensOut).filter(n => typeof n === 'number');
+  assert.equal(router.estimate(entry, 0, 128_000, 'card-0001-aaaa'), Math.max(...seen) * 10 / 1e6);
+  assert.equal(router.estimate(entry, 0, 128_000, 'another-card'), 4_096 * 10 / 1e6, 'per card');
+  assert.ok(router.statsView().spentToday < 0.01, 'the reported cost counts, not the reservation');
+  // Too little left even for a realistic reservation: refused, with what is left and what the call needs.
+  const tight = await setup(t, { models: [{ id: 'vendor/pricey', tier: 'medium', priceIn: 2, priceOut: 10 }], extra: { perCardUsdCap: 0.03, dailyUsdCap: 1 } });
+  const refused = await call(tight.port, { token: tight.token, body: big('Write a function') });
+  assert.equal(refused.status, 402);
+  assert.match(JSON.parse(refused.text).error.message, /this card's cap is reached: \$0\.03 of \$0\.03 left, this call needs about \$0\.04/u);
+});
+
 test('caps: the per-card and daily caps are reserved before sending, so parallel calls cannot overshoot; spent → 402', async t => {
   // max_tokens 1000 × $8/M out ≈ $0.008 + input: each call reserves about $0.008; a cap of $0.012 fits one.
   const { token, port, upstream } = await setup(t, { models: [{ id: 'vendor/large-a', tier: 'medium', priceIn: 2, priceOut: 8 }], extra: { perCardUsdCap: 0.012, dailyUsdCap: 1 }, behaviours: {} });

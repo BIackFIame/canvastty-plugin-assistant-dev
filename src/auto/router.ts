@@ -123,6 +123,15 @@ export function retryAfterMs(header: string | null, now: number): number | null 
   return Number.isFinite(ms) && ms > 0 ? Math.min(ms, COOLDOWN_MS.maxRetryAfter) : null;
 }
 
+/** Cap reservations: output tokens held before a card has shown its own (OpenCode asks for up to 128k each call). */
+export const COLD_OUTPUT_TOKENS = 4_096;
+const OUTPUT_SAMPLES_MIN = 3;
+const OUTPUT_SAMPLES_MAX = 50;
+export function percentile(values: readonly number[], p: number): number {
+  const sorted = [...values].sort((a, b) => a - b);
+  return sorted[Math.min(sorted.length - 1, Math.max(0, Math.ceil(p * sorted.length) - 1))]!;
+}
+
 /** Spend per local day and per card, with reservations held while a call runs (no overshoot by parallel calls). */
 class Spend {
   private day = '';
@@ -151,12 +160,18 @@ class Spend {
   today(): number { this.roll(); return this.total; }
   ofCard(id: string): number { this.roll(); return this.cards.get(id)?.spent ?? 0; }
 
-  /** Holds `estimate` against both caps; throws 402 when either is spent. */
+  /**
+   * Holds `estimate` against both caps; throws 402 when either is spent, saying how much is left and what the call
+   * needs. The estimate is realistic (see AutoRouter.estimate), and `commit` replaces it with the cost the upstream
+   * reported: a call can pass a cap by at most its own error, never by the sum of parallel calls.
+   */
   reserve(sessionId: string, estimate: number, caps: { daily: number; perCard: number }): { commit(cost: number | null): void; release(): void } {
     this.roll();
     const card = this.card(sessionId);
-    if (this.total + this.held >= caps.daily || this.total + this.held + estimate > caps.daily) throw new HttpError(402, 'daily_cap', 'Auto (Jev): the daily cap is reached; change it on the Decision models page.');
-    if (card.spent + card.held >= caps.perCard || card.spent + card.held + estimate > caps.perCard) throw new HttpError(402, 'card_cap', 'Auto (Jev): this card\'s cap is reached; change it on the Decision models page.');
+    const usd = (value: number): string => `$${value < 0.01 ? value.toFixed(4) : value.toFixed(2)}`;
+    const dayLeft = Math.max(0, caps.daily - this.total - this.held), cardLeft = Math.max(0, caps.perCard - card.spent - card.held);
+    if (dayLeft <= 0 || estimate > dayLeft) throw new HttpError(402, 'daily_cap', `Auto (Jev): the daily cap is reached: ${usd(dayLeft)} of ${usd(caps.daily)} left, this call needs about ${usd(estimate)}. Change it on the Decision models page.`);
+    if (cardLeft <= 0 || estimate > cardLeft) throw new HttpError(402, 'card_cap', `Auto (Jev): this card's cap is reached: ${usd(cardLeft)} of ${usd(caps.perCard)} left, this call needs about ${usd(estimate)}. Change it on the Decision models page.`);
     this.held += estimate; card.held += estimate;
     let done = false;
     const free = (): void => { if (done) return; done = true; this.held = Math.max(0, this.held - estimate); card.held = Math.max(0, card.held - estimate); };
@@ -215,6 +230,8 @@ export class AutoRouter {
   private port: number | null = null;
   private readonly leases = new Map<string, Lease>();
   private readonly cooldowns = new Map<string, number>();
+  /** Output tokens of each card's last calls (memory only), for realistic cap reservations. */
+  private readonly outputs = new Map<string, number[]>();
   private readonly active = new Map<string, Set<AbortController>>();
   private activeTotal = 0;
   private readonly shownModel = new Map<string, string>();
@@ -318,6 +335,7 @@ export class AutoRouter {
     if (this.shownModel.delete(sessionId)) this.deps.badge?.(sessionId, null);
     this.mainConversation.delete(sessionId);
     this.spend.forget(sessionId);
+    this.outputs.delete(sessionId);
   }
 
   /** Cards CanvasTTY no longer lists lose their keys (after a restart of the service). */
@@ -510,9 +528,26 @@ export class AutoRouter {
     }
   }
 
-  private estimate(entry: InventoryEntry, bodyBytes: number, maxTokens: unknown): number {
-    const output = typeof maxTokens === 'number' && maxTokens > 0 ? Math.min(maxTokens, 32_768) : entry.output ?? DEFAULT_OUTPUT;
+  /**
+   * The reservation for one call: its input at the input price, plus the output this card's calls really produce
+   * (the 90th percentile of its last outputs; 4k tokens until 3 were seen), never more than the call's own
+   * max_tokens. Holding the full max_tokens (128k on OpenCode) made a card stop at a cap long before it was spent.
+   */
+  estimate(entry: InventoryEntry, bodyBytes: number, maxTokens: unknown, sessionId?: string): number {
+    const limit = typeof maxTokens === 'number' && maxTokens > 0 ? Math.min(maxTokens, 32_768) : entry.output ?? DEFAULT_OUTPUT;
+    const seen = sessionId ? this.outputs.get(sessionId) ?? [] : [];
+    const typical = seen.length >= OUTPUT_SAMPLES_MIN ? percentile(seen, 0.9) : COLD_OUTPUT_TOKENS;
+    const output = Math.min(limit, Math.max(1, typical));
     return ((bodyBytes / 4) * (entry.priceIn ?? 0) + output * (entry.priceOut ?? 0)) / 1e6;
+  }
+
+  /** The output tokens a finished call reported, for this card's next reservations. */
+  private sawOutput(sessionId: string, tokens: number | null): void {
+    if (tokens === null || !Number.isFinite(tokens) || tokens < 0) return;
+    const list = this.outputs.get(sessionId) ?? [];
+    list.push(tokens);
+    if (list.length > OUTPUT_SAMPLES_MAX) list.splice(0, list.length - OUTPUT_SAMPLES_MAX);
+    this.outputs.set(sessionId, list);
   }
 
   private costOf(entry: InventoryEntry, usage: UsageReader['usage']): number | null {
@@ -547,7 +582,7 @@ export class AutoRouter {
       const payload = Buffer.from(JSON.stringify({ ...body, model: candidate.model.id, ...effort }), 'utf8');
       let reservation: ReturnType<Spend['reserve']>;
       try {
-        reservation = this.spend.reserve(grant.sessionId, this.estimate(entry, payload.length, body.max_tokens), { daily: settings.dailyUsdCap, perCard: settings.perCardUsdCap });
+        reservation = this.spend.reserve(grant.sessionId, this.estimate(entry, payload.length, body.max_tokens, grant.sessionId), { daily: settings.dailyUsdCap, perCard: settings.perCardUsdCap });
       } catch (error) {
         // Over a cap with this model's estimate: a cheaper model further down may still fit.
         if (error instanceof HttpError && error.status === 402) { capped ??= error; record.attempts--; continue; }
@@ -640,6 +675,7 @@ export class AutoRouter {
         }
         if (stream) usage.end(); else { try { usage.json(JSON.parse(chunks.join(''))); } catch { /* no usage */ } }
         record.tokensIn = usage.usage.in; record.tokensOut = usage.usage.out;
+        this.sawOutput(grant.sessionId, usage.usage.out);
         const cost = this.costOf(entry, usage.usage);
         record.costUsd = cost;
         reservation.commit(cost);
