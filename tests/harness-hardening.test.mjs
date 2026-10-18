@@ -16,7 +16,7 @@ import { commandReviewLevel, withCommandReview } from '../src/harness/settings.t
 import { STRINGS } from '../src/harness/i18n.ts';
 import { DEFAULT_ASSISTANT_SETTINGS } from '../src/shared/settings.ts';
 import { Assistant } from '../src/service/assistant.ts';
-import { readStored, retryStored } from '../src/service/startup.ts';
+import { dropRetiredKeys, readStored, retryStored, RETIRED_KEYS, STORED_KEYS } from '../src/service/startup.ts';
 
 const base = realpathSync(mkdtempSync(join(tmpdir(), 'canvastty-hardening-')));
 process.on('exit', () => rmSync(base, { recursive: true, force: true }));
@@ -92,6 +92,37 @@ test('F1: a storage read error is not a first run: Off, nothing saved over the s
   assert.equal(assistant.harnessState().settingsUnavailable, false);
   assert.equal(assistant.harness.settings.routing, false);
   assert.ok(host.events.some(event => event.event === 'settings'));
+});
+
+test('storage: keys earlier versions left are dropped at start, so saves fit CanvasTTY\'s 64 KB quota again; current keys and unreadable ones are left alone', async () => {
+  assert.deepEqual(RETIRED_KEYS, ['model-route-history', 'model-discovery']);
+  assert.ok(RETIRED_KEYS.every(key => !STORED_KEYS.includes(key)), 'never a key this build reads');
+  // The live profile: the old route history held 55.7 KB, and CanvasTTY refuses a write that makes the file > 64 KB.
+  const history = { entries: Array.from({ length: 600 }, (_, i) => ({ at: i, task: 'x'.repeat(80), provider: 'claude' })) };
+  const host = fakeHost({ storage: { 'model-route-history': history, settings: withCommandReview(DEFAULT_ASSISTANT_SETTINGS, 'basic') } });
+  const callHost = host.callHost;
+  host.callHost = async (method, params) => {
+    if (method === 'storage.set' && Buffer.byteLength(JSON.stringify({ ...host.storage, [params.key]: params.value }, null, 2)) > 64 * 1024) throw new Error('Plugin storage exceeds the 64 KB quota.');
+    return callHost(method, params);
+  };
+  assert.ok(Buffer.byteLength(JSON.stringify(host.storage, null, 2)) > 55_000);
+  const before = new Assistant({ host, dataDir: mkdtempSync(join(base, 'data-')), git: null, settings: host.storage.settings });
+  await assert.rejects(before.save(withCommandReview(DEFAULT_ASSISTANT_SETTINGS, 'strict')), /64 KB quota/u, 'as live: the save fails');
+  assert.deepEqual(await dropRetiredKeys(host), ['model-route-history']);
+  assert.equal(host.storage['model-route-history'], null);
+  assert.equal(commandReviewLevel(host.storage.settings), 'basic', 'the current settings are untouched');
+  assert.ok(Buffer.byteLength(JSON.stringify(host.storage, null, 2)) < 8 * 1024);
+  const after = new Assistant({ host, dataDir: mkdtempSync(join(base, 'data-')), git: null, settings: host.storage.settings });
+  await after.save(withCommandReview(DEFAULT_ASSISTANT_SETTINGS, 'strict'));
+  assert.equal(commandReviewLevel(host.storage.settings), 'strict');
+  assert.ok(host.logs.some(entry => entry.level === 'info' && /dropped keys earlier versions left: model-route-history/u.test(entry.message)));
+  // Nothing to drop: no write at all. A key that cannot be read is not written blind.
+  const quiet = fakeHost();
+  assert.deepEqual(await dropRetiredKeys(quiet), []);
+  assert.equal(quiet.calls.filter(call => call.method === 'storage.set').length, 0);
+  const locked = fakeHost({ failReads: 1, storage: { 'model-route-history': history } });
+  assert.deepEqual(await dropRetiredKeys(locked), []);
+  assert.deepEqual(locked.storage['model-route-history'], history);
 });
 
 test('F1/F9: the level names and their one-line descriptions say what each does; "custom" shows what the settings really are', async () => {

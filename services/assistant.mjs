@@ -12795,6 +12795,27 @@ function requesterOf(role) {
 
 // src/service/startup.ts
 var STORED_KEYS = ["settings", "harness", "autoRouting"];
+var RETIRED_KEYS = ["model-route-history", "model-discovery"];
+async function dropRetiredKeys(host, keys = RETIRED_KEYS) {
+  const dropped = [];
+  for (const key of keys) {
+    let value;
+    try {
+      value = await host.callHost("storage.get", { key });
+    } catch {
+      continue;
+    }
+    if (value === null || value === void 0) continue;
+    try {
+      await host.callHost("storage.set", { key, value: null });
+      dropped.push(key);
+    } catch (error) {
+      host.log("warn", `storage: the old key ${key} could not be dropped (${error instanceof Error ? error.message.slice(0, 120) : "error"})`);
+    }
+  }
+  if (dropped.length) host.log("info", `storage: dropped keys earlier versions left: ${dropped.join(", ")}`);
+  return dropped;
+}
 var RETRY_DELAYS_MS = [2e3, 1e4, 3e4, 6e4, 3e5];
 async function readStored(host, keys = STORED_KEYS) {
   const values = {};
@@ -12854,6 +12875,7 @@ serve({
   onInitialize: async (params, host) => {
     const dataDir = typeof params.dataDir === "string" ? params.dataDir : process.cwd();
     const { values, failed } = await readStored(host);
+    await dropRetiredKeys(host);
     assistant = new Assistant({
       host,
       dataDir,

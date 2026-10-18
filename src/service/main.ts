@@ -1,7 +1,7 @@
 // Service entry (bundled to services/assistant.mjs): wires the Assistant to CanvasTTY's JSON-RPC protocol.
 import { serve, type Host } from '../rpc.ts';
 import { Assistant, type LaunchContext, type SessionSummary } from './assistant.ts';
-import { readStored, retryStored } from './startup.ts';
+import { dropRetiredKeys, readStored, retryStored } from './startup.ts';
 
 // Requests that arrive while the service is still reading its settings wait for it (CanvasTTY's own timeout
 // bounds the wait; a late decision is an "ask" there, never an allow).
@@ -23,6 +23,8 @@ serve({
     const dataDir = typeof params.dataDir === 'string' ? params.dataDir : process.cwd();
     // A failed read is not "nothing saved": see startup.ts.
     const { values, failed } = await readStored(host);
+    // Old builds' keys would keep every settings save over CanvasTTY's 64 KB quota.
+    await dropRetiredKeys(host);
     assistant = new Assistant({
       host, dataDir, settings: values.settings, settingsUnavailable: failed.includes('settings'), harness: values.harness, harnessUnavailable: failed.includes('harness'),
       autoRouting: values.autoRouting, autoRoutingUnavailable: failed.includes('autoRouting'), locale: params.locale

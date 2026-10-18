@@ -97,6 +97,9 @@ test('the built plugin installs into CanvasTTY\'s PluginManager and its tools, h
     assert.equal((await manager.protocolResponse(`canvastty-plugin://canvastty-assistant/${page}`)).status, 200, page);
   }
   await manager.setNativeCodeTrusted('canvastty-assistant', true);
+  // An earlier build's route history, as on the live profile: close to CanvasTTY's 64 KB storage quota.
+  await manager.storageSet('canvastty-assistant', 'model-route-history', { entries: Array.from({ length: 470 }, (_, i) => ({ at: i, task: 'x'.repeat(80) })) });
+  assert.notEqual(await manager.storageGet('canvastty-assistant', 'model-route-history'), null);
   const specs = manager.trustedServiceSpecs();
   assert.equal(specs.length, 1);
 
@@ -139,6 +142,7 @@ test('the built plugin installs into CanvasTTY\'s PluginManager and its tools, h
   const orchestrator = terminals.create({ provider: 'claude', cwd: project, profile: 'normal', position: { x: 0, y: 0 }, role: 'orchestrator', title: 'Lead' });
   await supervisor.sync(specs);
   await waitFor(() => sessions.subscribers.size === 1);
+  assert.equal(await manager.storageGet('canvastty-assistant', 'model-route-history'), null, 'the service dropped the old key at start');
   const child = terminals.create({ provider: 'claude', cwd: project, profile: 'normal', position: { x: 0, y: 0 }, role: 'subagent', parentSessionId: orchestrator.id, title: 'Worker' });
 
   // Tools: listed per role under the plugin's prefix.

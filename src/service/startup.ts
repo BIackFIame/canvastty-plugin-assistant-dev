@@ -10,6 +10,35 @@ export const STORED_KEYS = ['settings', 'harness', 'autoRouting'] as const;
 export type StoredKey = typeof STORED_KEYS[number];
 export type Stored = Partial<Record<StoredKey, unknown>>;
 
+/**
+ * Keys earlier builds of this plugin stored that this build no longer reads. CanvasTTY's storage has no way to list
+ * keys, so they are named here (from the plugin's history: the old route history and the model discovery cache).
+ * Left behind, they count against CanvasTTY's 64 KB storage quota: live, an old 55.7 KB route history made every
+ * settings save fail.
+ */
+export const RETIRED_KEYS = ['model-route-history', 'model-discovery'] as const;
+
+/**
+ * Drops the retired keys at start (set to null, which CanvasTTY stores as a few bytes). A key that cannot be read is
+ * left alone (its read may fail again later; nothing is written blind). Never throws.
+ */
+export async function dropRetiredKeys(host: Host, keys: readonly string[] = RETIRED_KEYS): Promise<string[]> {
+  const dropped: string[] = [];
+  for (const key of keys) {
+    let value: unknown;
+    try { value = await host.callHost('storage.get', { key }); } catch { continue; }
+    if (value === null || value === undefined) continue;
+    try {
+      await host.callHost('storage.set', { key, value: null });
+      dropped.push(key);
+    } catch (error) {
+      host.log('warn', `storage: the old key ${key} could not be dropped (${error instanceof Error ? error.message.slice(0, 120) : 'error'})`);
+    }
+  }
+  if (dropped.length) host.log('info', `storage: dropped keys earlier versions left: ${dropped.join(', ')}`);
+  return dropped;
+}
+
 /** Delays between later reads after a failed one (the last repeats). */
 export const RETRY_DELAYS_MS: readonly number[] = [2_000, 10_000, 30_000, 60_000, 300_000];
 
