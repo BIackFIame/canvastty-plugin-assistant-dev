@@ -40,8 +40,8 @@
     },
     {
       "path": "settings/assistant.js",
-      "bytes": 76943,
-      "sha256": "eb564296c06d5bfb7e5c5287dcb258d6c43a0acbb5aff2b0c1b685090dbf425e"
+      "bytes": 133102,
+      "sha256": "54fd7e7af8524be04d03a7f55b3ae84da64255301ba0724d5934f04691efd44b"
     },
     {
       "path": "settings/assistant.css",
@@ -544,7 +544,7 @@
       "kind": "canvas-app",
       "title": "Decision models",
       "title.ru": "Модели решений",
-      "description": "Optional decision models (Jev, Laya, Eikos, Ollama), data rules, recent reviews and Auto (Jev) model routing.",
+      "description": "Optional decision models (Jev, Laya, Eikos, Ollama), data rules, recent reviews, Auto (Jev) model routing and where agents run.",
       "entry": "settings/assistant.html",
       "defaultSize": {
         "width": 760,

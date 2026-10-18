@@ -6,9 +6,13 @@ import type { AssistantBackendPreset, AssistantBackendSettings, AssistantBackend
 import type { RecentReview } from '../review/reviewService.ts';
 import { applyAppearance, whenIdle, type Appearance } from './common.ts';
 import { AUTO_PAGE_STRINGS, newAutoView, renderAuto, type AutoState } from './autoRouting.ts';
+import { renderRouting, ROUTE_PAGE_STRINGS, type RouteState } from './routing.ts';
 
 interface PluginHost {
   onContext(listener: (context: { appearance: Appearance }) => void): void;
+  /** Host SDK requests; `limits.get` needs the manifest's `limits:read`. */
+  request?(method: string, params?: unknown): Promise<unknown>;
+  onVisibilityChange?(listener: (state: 'visible' | 'hidden') => void): void;
   secrets: { set(key: string, value: string): Promise<void>; delete(key: string): Promise<void> };
   service: {
     request(serviceId: string, method: string, params?: unknown): Promise<unknown>;
@@ -67,6 +71,8 @@ let t: Strings = STRINGS.en;
 let autoStrings = AUTO_PAGE_STRINGS.en;
 let state: State | null = null;
 let autoState: AutoState | null = null;
+let routeStrings = ROUTE_PAGE_STRINGS.en;
+let routeState: RouteState | null = null;
 /** The last «Проверить» result per Auto upstream, until the page reloads. */
 const autoView = newAutoView();
 const root = document.querySelector('#app')!;
@@ -108,15 +114,33 @@ function checkbox(checked: boolean, label: string, onChange: (checked: boolean) 
 }
 
 async function load(): Promise<void> {
-  const [main, auto] = await Promise.all([
+  const [main, auto, route] = await Promise.all([
     host.service.request(SERVICE, 'state') as Promise<State>,
     // A service from before Auto (Jev) has no such method: the page simply shows no Auto rows.
-    (host.service.request(SERVICE, 'auto.state') as Promise<AutoState>).catch(() => null)
+    (host.service.request(SERVICE, 'auto.state') as Promise<AutoState>).catch(() => null),
+    (host.service.request(SERVICE, 'route.state') as Promise<RouteState>).catch(() => null)
   ]);
   state = main;
   autoState = auto;
+  routeState = route;
   render();
 }
+
+/**
+ * CanvasTTY gives a service no limit windows of its own (phase 1): this page reads them with `limits.get` when it
+ * opens and every 60 s while it is visible, and forwards the sanitized snapshot. The service counts anything older
+ * than 30 minutes as unknown.
+ */
+const LIMITS_EVERY_MS = 60_000;
+let visible = true;
+async function forwardLimits(): Promise<void> {
+  if (!host.request) return;
+  const snapshot = await host.request('limits.get');
+  await host.service.request(SERVICE, 'route.limits', { snapshot });
+}
+function forwardQuietly(): void { if (visible) void forwardLimits().catch(() => undefined); }
+host.onVisibilityChange?.(next => { visible = next === 'visible'; if (visible) forwardQuietly(); });
+if (typeof setInterval === 'function') setInterval(forwardQuietly, LIMITS_EVERY_MS);
 
 /** Saves run one at a time, each on the settings the previous one left, so a quick second change keeps the first. */
 let saving: Promise<void> = Promise.resolve();
@@ -296,7 +320,13 @@ function render(): void {
       deleteSecret: key => host.secrets.delete(key),
       say,
       reload: () => { void load().catch(error => say(errorText(error))); }
-    }, autoView)] : [])
+    }, autoView)] : []),
+    ...(routeState ? [renderRouting(routeState, routeStrings, {
+      request: (method, params) => host.service.request(SERVICE, method, params),
+      forwardLimits,
+      say,
+      reload: () => { void load().catch(error => say(errorText(error))); }
+    })] : [])
   );
 }
 
@@ -304,6 +334,7 @@ host.onContext(({ appearance }) => {
   const locale = applyAppearance(appearance);
   t = locale === 'ru' ? STRINGS.ru : STRINGS.en;
   autoStrings = locale === 'ru' ? AUTO_PAGE_STRINGS.ru : AUTO_PAGE_STRINGS.en;
+  routeStrings = locale === 'ru' ? ROUTE_PAGE_STRINGS.ru : ROUTE_PAGE_STRINGS.en;
   render();
 });
 host.service.onEvent(({ serviceId, event, data }) => {
@@ -314,4 +345,4 @@ host.service.onEvent(({ serviceId, event, data }) => {
   say('error' in result ? result.error : result.added ? t.checkOk(result) : t.checkFail(result));
   void load();
 });
-load().catch(error => say(errorText(error)));
+void forwardLimits().catch(() => undefined).finally(() => load().catch(error => say(errorText(error))));

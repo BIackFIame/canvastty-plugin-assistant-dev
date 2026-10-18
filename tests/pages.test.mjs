@@ -331,3 +331,96 @@ test('decision models page: Auto from data — catalog freshness and refresh, mo
   assert.match(ru, /неизвестно/u);
   assert.doesNotMatch(ru, /Refresh now|Measured at|by score|best score|points below|allowed/u, 'no English left in the Auto rows');
 });
+
+test('decision models page: "Where agents run" — plans with windows and aliases, accounts, choices, pins, recent routes; limits forwarded; ru/en complete', async () => {
+  const { DEFAULT_ASSISTANT_SETTINGS } = await import('../src/shared/settings.ts');
+  const { DEFAULT_ROUTE_SETTINGS } = await import('../src/route/settings.ts');
+  globalThis.window ??= { CanvasTTYPlugin: {} }; // the strings module sits next to the page helpers
+  const { ROUTE_PAGE_STRINGS } = await import('../src/ui/routing.ts');
+  const at = Date.UTC(2026, 9, 18, 12, 0, 0);
+  const settings = { ...structuredClone(DEFAULT_ROUTE_SETTINGS), plans: [
+    { id: 'claude-max', cli: 'claude', kind: 'subscription', label: 'Max', models: ['opus', 'mystery'], reserve: 20, maxParallel: 2, allow: 'prefer', trust: 'D2' },
+    { id: 'glm-plan', cli: 'opencode', kind: 'coding-plan', label: 'GLM plan', models: ['zai-coding-plan/*'], reserve: 20, maxParallel: 2, allowance: 100, windowHours: 5, allow: 'allow', trust: 'unset' }
+  ], pins: { 'glm-5-3-flash': 'small' }, boosts: { 'claude-sonnet-5': 3 } };
+  const route = {
+    settings, readable: true, now: at, staleAfterMs: 1_800_000, aliases: { asOf: '2026-10-15', bundled: { claude: { opus: 'claude-opus-4-8' } } },
+    plans: [
+      { id: 'claude-max', models: [{ model: 'opus', identity: 'claude-opus-4-8', from: 'bundled' }, { model: 'mystery', identity: null, from: 'none' }], quota: { state: 'known', headroom: 39, pace: 0.8, window: { label: '5 h', usedPercent: 41, minutes: 300 }, readAt: at - 180_000, note: '', code: '' }, running: 1, launches: null },
+      { id: 'glm-plan', models: [], quota: null, running: 0, launches: 14 }
+    ],
+    limits: { receivedAt: at - 180_000, providers: [] },
+    accounts: { at: at - 720_000, rows: [{ provider: 'claude', accountId: 'zai-glm', account: 'Z.AI GLM', model: 'glm-5.3', endpoint: 'api.z.ai', state: 'ready' }] },
+    cooldowns: [{ signIn: 'plan:claude-max', until: at + 300_000, reason: 'it hit a usage limit' }],
+    recent: [{ id: 'd1', at, card: 'orch-123', type: 'research', level: 'medium', typeFrom: 'jev', confidence: 0.2, strategy: 'single-strong', cohort: 'aa', candidates: 9, dropped: 3, explored: false, preferred: false,
+      options: [{ key: 'k', cli: 'claude', kind: 'subscription', signIn: 'plan:claude-max', label: 'Max', model: 'opus', identity: 'claude-opus-4-8', effort: 'max', score: 41.8, scoreSource: 'measured', cost: 0, costBasis: 'free', estimate: '≈ 8% of the 5 h', estimateData: { kind: 'window', share: 8, window: '5 h', usedPercent: 41 }, scoreLabel: 'Artificial Analysis v4.3.2', below: 3, why: 'claude · opus@max … subscription: free' }],
+      outcome: { result: 'done', ok: true, by: 'orchestrator', at } }],
+    exploration: [{ identity: 'fresh-1', n: 20, ok: 18, incumbent: 0.9, verdict: 'use' }]
+  };
+  const forwarded = [];
+  const ui = page('settings/assistant.js', {
+    state: { settings: DEFAULT_ASSISTANT_SETTINGS, status: { enabled: false, backends: [] }, slots: {}, checks: {}, recent: [] },
+    'route.state': route, 'route.save': ({ settings: next }) => next, 'route.limits': ({ snapshot }) => { forwarded.push(snapshot); return { ok: true, providers: 1 }; }, 'route.feedback': () => ({ ok: true })
+  }, { secrets: { set: async () => undefined, delete: async () => undefined }, request: async method => { if (method !== 'limits.get') throw new Error(method); return { state: 'ready', snapshot: { fetchedAt: at, providers: [{ provider: 'claude', state: 'available', fetchedAt: at, windows: [] }] } }; } });
+  await settle();
+  assert.equal(forwarded.length, 1, 'the page forwards CanvasTTY\'s limit windows when it opens');
+  assert.equal(forwarded[0].state, 'ready');
+  ui.context('en', 'sage');
+  const text = ui.app.text();
+  assert.match(text, /Where agents run/u);
+  assert.match(text, /Limit windows: read 3 min ago/u);
+  assert.match(text, /Claude Code · subscription · Max/u);
+  assert.match(text, /5 h 41% used · headroom 39% · read 3 min ago · 1 routed running/u);
+  assert.match(text, /opus → claude-opus-4-8 \(alias table 2026-10-15\); mystery → no score/u);
+  assert.match(text, /14 of 100 launches counted in 5 h/u);
+  assert.match(text, /Z\.AI GLM · glm-5\.3 · Claude Code · ready/u);
+  assert.match(text, /fresh-1: 18 of 20 ok, others 90% · about as good: use it\?/u);
+  assert.match(text, /orch-123 · research\/medium · one strong .*claude · opus@max .*≈ 8% of the 5 h .*subscription: Max · score 41\.8 \(Artificial Analysis v4\.3\.2\), 3 below the best · free within the window/u);
+  const all = () => ui.app.all();
+  const byName = name => all().find(node => node.name === name);
+  // Declare a plan: the whole settings go to the service, which validates them.
+  byName('route-new-cli').value = 'codex';
+  byName('route-new-kind').value = 'subscription';
+  byName('route-new-name').value = 'Pro';
+  byName('route-new-models').value = 'gpt-5.5, gpt-5.4-mini';
+  byName('route-new-add').click();
+  await settle();
+  const saved = ui.requests.filter(r => r.method === 'route.save').at(-1).params.settings;
+  assert.deepEqual(saved.plans.at(-1), { id: 'codex-pro', cli: 'codex', kind: 'subscription', label: 'Pro', models: ['gpt-5.5', 'gpt-5.4-mini'], reserve: 20, maxParallel: 2, allow: 'allow', trust: 'unset' });
+  // Trust for an account address, Never for a CLI, the new-model policy, a pin.
+  byName('route-trust-api.z.ai').value = 'D1';
+  for (const listener of byName('route-trust-api.z.ai').listeners.change) listener();
+  await settle();
+  assert.deepEqual(ui.requests.filter(r => r.method === 'route.save').at(-1).params.settings.trust, { 'host:api.z.ai': 'D1' });
+  byName('route-never-cli').value = 'qwen';
+  byName('route-never-add').click();
+  await settle();
+  assert.equal(ui.requests.filter(r => r.method === 'route.save').at(-1).params.settings.allow['cli:qwen'], 'never');
+  const policy = byName('route-new-model-policy');
+  policy.value = 'explore';
+  for (const listener of policy.listeners.change) listener();
+  await settle();
+  assert.equal(ui.requests.filter(r => r.method === 'route.save').at(-1).params.settings.newModels, 'explore');
+  // Use an explored model (+5 boost), and the person's ✗ on a decision.
+  byName('route-use-fresh-1').click();
+  await settle();
+  assert.equal(ui.requests.filter(r => r.method === 'route.save').at(-1).params.settings.boosts['fresh-1'], 5);
+  byName('route-wrong-d1').click();
+  await settle();
+  assert.deepEqual(ui.requests.filter(r => r.method === 'route.feedback').at(-1).params, { id: 'd1', ok: false });
+  byName('route-limits-read').click();
+  await settle();
+  assert.equal(forwarded.length, 2, 'Read now forwards again');
+  // Russian: complete, nothing English left in the section.
+  ui.context('ru', 'night');
+  const ru = ui.app.all().find(node => node.dataset?.section === 'routing').text();
+  assert.match(ru, /Где работают агенты/u);
+  assert.match(ru, /Claude Code · подписка · Max/u);
+  assert.match(ru, /5 h: использовано 41% · запас 39% · прочитано 3 мин назад · запущено через route: 1/u);
+  assert.match(ru, /opus → claude-opus-4-8 \(таблица псевдонимов 2026-10-15\); mystery → без оценки/u);
+  assert.match(ru, /исследование\/средняя · одна сильная .*≈ 8% окна 5 h .*подписка: Max · оценка 41,8 \(Artificial Analysis v4\.3\.2\), на 3 ниже лучшей · бесплатно в пределах окна/u);
+  assert.match(ru, /Отдыхают после лимита: claude-max → /u);
+  assert.doesNotMatch(ru, /\b(?:subscription|coding plan|headroom|read \d|Where agents|Prefer|Allow|Never|launches|routed|score|below the best|free within|Remove|Add|Save)\b/u, 'no English left in the section');
+  // Both languages have the same keys.
+  const shape = value => typeof value === 'function' ? 'fn' : value && typeof value === 'object' ? Object.fromEntries(Object.keys(value).sort().map(key => [key, shape(value[key])])) : typeof value;
+  assert.deepEqual(shape(ROUTE_PAGE_STRINGS.ru), shape(ROUTE_PAGE_STRINGS.en));
+});
