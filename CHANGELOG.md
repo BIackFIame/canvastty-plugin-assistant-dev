@@ -1,5 +1,16 @@
 # Changelog
 
+## Next
+
+- **Model: Auto (Jev)** for OpenCode: a launch option (delegable) that points OpenCode at a router inside the
+  Assistant's service on 127.0.0.1 (a key per launch, hashes only, Origin/Host checks). One decision per user turn
+  (Jev's task triage within 2.5 s, else word rules), tool steps keep it, titles use the cheapest model; tiers and a
+  cheap/balanced/best preference over your own allow-list of OpenRouter or OpenAI-compatible models; failover before
+  the first byte with cooldowns; per-card and daily USD caps; a log without text. OpenCode Zen and other providers are
+  disabled for the card; a project config that picks models, containers and remote hosts are refused. `route` hands
+  Auto to OpenCode subagents of an orchestrator on Auto. Rows on the Decision models page (en/ru) and a model badge.
+- Tests check the manifest against a core without localized manifest strings by dropping only those keys.
+
 ## 0.2.0
 
 Runs on CanvasTTY 1.8 with the host APIs it has; nothing in the core is specific to this plugin.

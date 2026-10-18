@@ -19,13 +19,13 @@
   "coreFiles": [
     {
       "path": "README.md",
-      "bytes": 10585,
-      "sha256": "c254ee378fdcabae5e0fe500326c327df55e608b38cb9fa0f0031d114bcb5c07"
+      "bytes": 13793,
+      "sha256": "eefc9d1d535b4da47bf073d3a90acf47f308ddfa575e89351da4925d74d402a7"
     },
     {
       "path": "README.ru.md",
-      "bytes": 18132,
-      "sha256": "994071d5910a70417e6e2ecd21a27f5a8995b5b3203834ed7c8f6c64304120d5"
+      "bytes": 23950,
+      "sha256": "07236522ee16aed97a3eab0f26fb863c4b688063b4353ed61e18d5dff2e2ae52"
     },
     {
       "path": "services/assistant.mjs",

@@ -98,6 +98,41 @@ Keys are written from the settings page straight into the plugin's secrets and n
 reads them, at call time, bound to the address they were saved for, and CanvasTTY masks them in everything agents read.
 **Check** («Проверить») runs a fixed synthetic battery (no data of yours).
 
+## Model: Auto (Jev) (OpenCode)
+
+In the launcher, **Advanced → Use CanvasTTY Assistant → Model: Auto (Jev)** runs an OpenCode card on a model the
+Assistant picks for each new turn from your own allow-list. Leave the launcher's **Model** at Default and choose no
+model account (an account and Auto on one launch are refused: both configure OpenCode).
+
+- **Where it runs**: while a card uses Auto, the Assistant's service listens on **127.0.0.1 only** (a port it keeps
+  between restarts). Each launch gets its own random `sk-ctty-…` key; the service stores only its hash; the key stops
+  working when the card closes or restarts, and the port closes when no card uses Auto. Requests from web pages
+  (an `Origin` header) or for another host name are refused.
+- **OpenCode** gets a config file in the run's own folder: one provider pointing at that port, `model` and
+  `small_model` on it, and `enabled_providers` limited to it, so OpenCode Zen and any other provider in your own
+  config are not used. A project whose own OpenCode config chooses models or providers is refused instead (OpenCode
+  lets the project config win). Containers and remote hosts are refused (they cannot reach this computer's
+  127.0.0.1); other CLIs come later.
+- **Decision**: for each new user turn, Jev (task triage, while it is Suggest or Auto on the Decision models page)
+  judges the latest user text within 2.5 s; otherwise word rules decide. simple/normal/hard → small/medium/large,
+  shifted by your preference (cheap −1, best +1). Tool steps keep the turn's model; titles and summaries use the
+  cheapest model and ask nobody — about one decision per turn, not per model call.
+- **Upstreams** (Decision models page): OpenRouter (its own key or the Jev · OpenRouter key) and any OpenAI-compatible
+  base URL with a key and exact model ids, each with a tier, optional prices and your trust (D0–D2; D3 only for a
+  server on this computer). Keys are write-only, bound to the upstream's address. The request is passed on with only
+  `model` changed; a 404/408/409/425/429/5xx, a connect error or a timeout **before the first byte** moves to the next
+  model and cools the failed one down (429 honours `Retry-After`); a bad request (400) is returned; a stream that
+  fails midway ends with an error and is never replayed.
+- **Caps**: per card and per day in USD, held before each call so parallel calls cannot pass them; counted from the
+  cost the upstream reports (OpenRouter does) or your prices. A spent cap answers 402.
+- **Subagents**: `route` hands an orchestrator on Auto `launchOptions: {"canvastty-assistant": {"model": "auto"}}` for
+  OpenCode subagents; a subagent's data class is never below its parent's.
+- **Privacy**: prompts go only to the upstream that answers; Jev gets only the latest user text, through the same data
+  checks as everything else. The routing log keeps hashes, models, tiers, statuses, tokens and cost — no text. The
+  card's badge shows the current model when it changes (any other Assistant signal wins the badge).
+- **Known limit**: the agent's own shell can read its key and call the router itself; it then spends at most that
+  card's cap through the same allow-list.
+
 ## Limits
 
 - Budgets per minute, per day and in USD per day for cloud calls. A cloud call holds an upper estimate of its cost
