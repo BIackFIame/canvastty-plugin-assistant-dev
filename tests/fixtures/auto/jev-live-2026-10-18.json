@@ -1,0 +1,562 @@
+{
+ "description": "Live answers of Auto (Jev) on tests/fixtures/auto/jev-labelled-tasks.json, 2026-10-18: one OpenCode card on Auto, each task typed as a new user turn, a local stub upstream (no model calls). jev.level is what the router chose with the rule then in force (small only at confidence >= 0.9); confidence is Jev's probability of the two lowest difficulty levels (null: word rules). Labels and task texts live in jev-labelled-tasks.json.",
+ "run": "2026-10-18",
+ "smallRuleAtRun": 0.9,
+ "tasks": [
+  {
+   "id": "t01",
+   "lang": "en",
+   "label": {
+    "level": "small",
+    "type": "coding"
+   },
+   "jev": {
+    "source": "jev",
+    "level": "medium",
+    "type": "coding",
+    "confidence": 0.84
+   }
+  },
+  {
+   "id": "t02",
+   "lang": "en",
+   "label": {
+    "level": "small",
+    "type": "coding"
+   },
+   "jev": {
+    "source": "jev",
+    "level": "medium",
+    "type": "coding",
+    "confidence": 0.19
+   }
+  },
+  {
+   "id": "t03",
+   "lang": "en",
+   "label": {
+    "level": "small",
+    "type": "coding"
+   },
+   "jev": {
+    "source": "jev",
+    "level": "small",
+    "type": "coding",
+    "confidence": 0.9
+   }
+  },
+  {
+   "id": "t04",
+   "lang": "en",
+   "label": {
+    "level": "small",
+    "type": "writing"
+   },
+   "jev": {
+    "source": "jev",
+    "level": "medium",
+    "type": "writing",
+    "confidence": 0.86
+   }
+  },
+  {
+   "id": "t05",
+   "lang": "en",
+   "label": {
+    "level": "small",
+    "type": "coding"
+   },
+   "jev": {
+    "source": "jev",
+    "level": "medium",
+    "type": "coding",
+    "confidence": 0.57
+   }
+  },
+  {
+   "id": "t06",
+   "lang": "en",
+   "label": {
+    "level": "small",
+    "type": "writing"
+   },
+   "jev": {
+    "source": "jev",
+    "level": "medium",
+    "type": "writing",
+    "confidence": 0.31
+   }
+  },
+  {
+   "id": "t07",
+   "lang": "en",
+   "label": {
+    "level": "small",
+    "type": "coding"
+   },
+   "jev": {
+    "source": "jev",
+    "level": "medium",
+    "type": "coding",
+    "confidence": 0.72
+   }
+  },
+  {
+   "id": "t08",
+   "lang": "en",
+   "label": {
+    "level": "small",
+    "type": "coding"
+   },
+   "jev": {
+    "source": "jev",
+    "level": "medium",
+    "type": "coding",
+    "confidence": 0.6
+   }
+  },
+  {
+   "id": "t09",
+   "lang": "ru",
+   "label": {
+    "level": "small",
+    "type": "writing"
+   },
+   "jev": {
+    "source": "jev",
+    "level": "medium",
+    "type": "writing",
+    "confidence": 0.83
+   }
+  },
+  {
+   "id": "t10",
+   "lang": "ru",
+   "label": {
+    "level": "small",
+    "type": "coding"
+   },
+   "jev": {
+    "source": "jev",
+    "level": "small",
+    "type": "coding",
+    "confidence": 1
+   }
+  },
+  {
+   "id": "t11",
+   "lang": "ru",
+   "label": {
+    "level": "small",
+    "type": "coding"
+   },
+   "jev": {
+    "source": "jev",
+    "level": "small",
+    "type": "coding",
+    "confidence": 1
+   }
+  },
+  {
+   "id": "t12",
+   "lang": "ru",
+   "label": {
+    "level": "small",
+    "type": "coding"
+   },
+   "jev": {
+    "source": "jev",
+    "level": "medium",
+    "type": "coding",
+    "confidence": 0.9
+   }
+  },
+  {
+   "id": "t13",
+   "lang": "en",
+   "label": {
+    "level": "small",
+    "type": "research"
+   },
+   "jev": {
+    "source": "jev",
+    "level": "medium",
+    "type": "research",
+    "confidence": 0.24
+   }
+  },
+  {
+   "id": "t14",
+   "lang": "ru",
+   "label": {
+    "level": "small",
+    "type": "chat"
+   },
+   "jev": null
+  },
+  {
+   "id": "t15",
+   "lang": "en",
+   "label": {
+    "level": "medium",
+    "type": "coding"
+   },
+   "jev": {
+    "source": "jev",
+    "level": "medium",
+    "type": "coding",
+    "confidence": 0.28
+   }
+  },
+  {
+   "id": "t16",
+   "lang": "en",
+   "label": {
+    "level": "medium",
+    "type": "coding"
+   },
+   "jev": {
+    "source": "jev",
+    "level": "medium",
+    "type": "coding",
+    "confidence": 0.1
+   }
+  },
+  {
+   "id": "t17",
+   "lang": "en",
+   "label": {
+    "level": "medium",
+    "type": "review"
+   },
+   "jev": {
+    "source": "jev",
+    "level": "medium",
+    "type": "review",
+    "confidence": 0.03
+   }
+  },
+  {
+   "id": "t18",
+   "lang": "en",
+   "label": {
+    "level": "medium",
+    "type": "research"
+   },
+   "jev": {
+    "source": "jev",
+    "level": "medium",
+    "type": "research",
+    "confidence": 0.15
+   }
+  },
+  {
+   "id": "t19",
+   "lang": "en",
+   "label": {
+    "level": "medium",
+    "type": "writing"
+   },
+   "jev": {
+    "source": "jev",
+    "level": "medium",
+    "type": "writing",
+    "confidence": 0.17
+   }
+  },
+  {
+   "id": "t20",
+   "lang": "en",
+   "label": {
+    "level": "medium",
+    "type": "coding"
+   },
+   "jev": {
+    "source": "jev",
+    "level": "medium",
+    "type": "coding",
+    "confidence": 0
+   }
+  },
+  {
+   "id": "t21",
+   "lang": "ru",
+   "label": {
+    "level": "medium",
+    "type": "coding"
+   },
+   "jev": {
+    "source": "jev",
+    "level": "medium",
+    "type": "coding",
+    "confidence": 0.01
+   }
+  },
+  {
+   "id": "t22",
+   "lang": "ru",
+   "label": {
+    "level": "medium",
+    "type": "review"
+   },
+   "jev": {
+    "source": "jev",
+    "level": "medium",
+    "type": "review",
+    "confidence": 0.04
+   }
+  },
+  {
+   "id": "t23",
+   "lang": "ru",
+   "label": {
+    "level": "medium",
+    "type": "coding"
+   },
+   "jev": {
+    "source": "jev",
+    "level": "medium",
+    "type": "coding",
+    "confidence": 0
+   }
+  },
+  {
+   "id": "t24",
+   "lang": "ru",
+   "label": {
+    "level": "medium",
+    "type": "writing"
+   },
+   "jev": {
+    "source": "jev",
+    "level": "medium",
+    "type": "writing",
+    "confidence": 0.31
+   }
+  },
+  {
+   "id": "t25",
+   "lang": "ru",
+   "label": {
+    "level": "medium",
+    "type": "research"
+   },
+   "jev": {
+    "source": "jev",
+    "level": "large",
+    "type": "research",
+    "confidence": 0
+   }
+  },
+  {
+   "id": "t26",
+   "lang": "ru",
+   "label": {
+    "level": "medium",
+    "type": "coding"
+   },
+   "jev": {
+    "source": "jev",
+    "level": "medium",
+    "type": "coding",
+    "confidence": 0.4
+   }
+  },
+  {
+   "id": "t27",
+   "lang": "en",
+   "label": {
+    "level": "medium",
+    "type": "research"
+   },
+   "jev": {
+    "source": "jev",
+    "level": "medium",
+    "type": "writing",
+    "confidence": 0.05
+   }
+  },
+  {
+   "id": "t28",
+   "lang": "en",
+   "label": {
+    "level": "large",
+    "type": "coding"
+   },
+   "jev": {
+    "source": "jev",
+    "level": "large",
+    "type": "writing",
+    "confidence": 0
+   }
+  },
+  {
+   "id": "t29",
+   "lang": "en",
+   "label": {
+    "level": "large",
+    "type": "coding"
+   },
+   "jev": {
+    "source": "jev",
+    "level": "medium",
+    "type": "coding",
+    "confidence": 0
+   }
+  },
+  {
+   "id": "t30",
+   "lang": "en",
+   "label": {
+    "level": "large",
+    "type": "review"
+   },
+   "jev": {
+    "source": "jev",
+    "level": "large",
+    "type": "review",
+    "confidence": 0
+   }
+  },
+  {
+   "id": "t31",
+   "lang": "en",
+   "label": {
+    "level": "large",
+    "type": "coding"
+   },
+   "jev": {
+    "source": "jev",
+    "level": "medium",
+    "type": "coding",
+    "confidence": 0
+   }
+  },
+  {
+   "id": "t32",
+   "lang": "en",
+   "label": {
+    "level": "large",
+    "type": "coding"
+   },
+   "jev": {
+    "source": "jev",
+    "level": "large",
+    "type": "coding",
+    "confidence": 0
+   }
+  },
+  {
+   "id": "t33",
+   "lang": "en",
+   "label": {
+    "level": "large",
+    "type": "review"
+   },
+   "jev": {
+    "source": "jev",
+    "level": "large",
+    "type": "chat",
+    "confidence": 0
+   }
+  },
+  {
+   "id": "t34",
+   "lang": "en",
+   "label": {
+    "level": "large",
+    "type": "coding"
+   },
+   "jev": {
+    "source": "jev",
+    "level": "large",
+    "type": "chat",
+    "confidence": 0
+   }
+  },
+  {
+   "id": "t35",
+   "lang": "ru",
+   "label": {
+    "level": "large",
+    "type": "coding"
+   },
+   "jev": {
+    "source": "jev",
+    "level": "large",
+    "type": "coding",
+    "confidence": 0
+   }
+  },
+  {
+   "id": "t36",
+   "lang": "ru",
+   "label": {
+    "level": "large",
+    "type": "coding"
+   },
+   "jev": {
+    "source": "jev",
+    "level": "medium",
+    "type": "coding",
+    "confidence": 0
+   }
+  },
+  {
+   "id": "t37",
+   "lang": "ru",
+   "label": {
+    "level": "large",
+    "type": "review"
+   },
+   "jev": {
+    "source": "jev",
+    "level": "large",
+    "type": "review",
+    "confidence": 0
+   }
+  },
+  {
+   "id": "t38",
+   "lang": "ru",
+   "label": {
+    "level": "large",
+    "type": "research"
+   },
+   "jev": {
+    "source": "jev",
+    "level": "medium",
+    "type": "research",
+    "confidence": 0
+   }
+  },
+  {
+   "id": "t39",
+   "lang": "ru",
+   "label": {
+    "level": "large",
+    "type": "coding"
+   },
+   "jev": {
+    "source": "rules",
+    "level": "large",
+    "type": "coding",
+    "confidence": null
+   }
+  },
+  {
+   "id": "t40",
+   "lang": "en",
+   "label": {
+    "level": "large",
+    "type": "writing"
+   },
+   "jev": {
+    "source": "jev",
+    "level": "large",
+    "type": "writing",
+    "confidence": 0
+   }
+  }
+ ]
+}

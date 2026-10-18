@@ -8,8 +8,9 @@ import { AUTO_TIERS, type AutoPreference, type AutoTier } from './settings.ts';
  * How Auto (Jev) picks a model for a turn, from data:
  *
  * 1. The turn: its task type (coding, review, research, writing, chat) and difficulty level (small, medium, large),
- *    from Jev's task triage or, when Jev does not answer, from word rules. "Small" from Jev needs confidence ≥ 0.9
- *    (the probability of the two lowest difficulty levels); anything less is medium. Rules are never "confident".
+ *    from Jev's task triage or, when Jev does not answer, from word rules. "Small" from Jev needs confidence ≥
+ *    SMALL_CONFIDENCE (the probability of the two lowest difficulty levels); anything less is medium. Rules are
+ *    never "confident".
  * 2. Candidates: the models the person allows (all a configured upstream offers, minus the excluded ones) that are
  *    healthy now (not cooling down, trusted with the card's data class, context large enough, within the caps).
  * 3. A model with a manual tier answers turns of its tier first (the person's explicit choice wins over data).
@@ -25,7 +26,13 @@ import { AUTO_TIERS, type AutoPreference, type AutoTier } from './settings.ts';
  */
 
 export type Level = 'small' | 'medium' | 'large';
-export const SMALL_CONFIDENCE = 0.9;
+/**
+ * Jev's probability of the two lowest difficulty levels from which a turn is "small". Chosen on the 40 labelled
+ * tasks of the live run of 2026-10-18 (tests/fixtures/auto/jev-live-2026-10-18.json): it is the threshold with the
+ * best level accuracy (30 of 38 Jev answers, 0.789; 0.9 gave 0.632) among those that make no medium or large task
+ * small. The medium tasks reached at most 0.40 and the small ones Jev got right at least 0.57; 0.5 sits between.
+ */
+export const SMALL_CONFIDENCE = 0.5;
 /** Points (0–100) of score the preference may give up for price on a confidently small turn. */
 export const QUALITY_LOSS: Readonly<Record<AutoPreference, number>> = { best: 0, balanced: 3, cheap: 10 };
 
@@ -44,7 +51,7 @@ export interface TurnView {
   type: TaskType;
   typeFrom: 'jev' | 'rules';
   level: Level;
-  /** Jev, at ≥ 0.9: the only case where the preference may give up score for price. */
+  /** Jev's "small" (at ≥ SMALL_CONFIDENCE), not the rules'. */
   confident: boolean;
   confidence: number | null;
   difficulty: Difficulty;
@@ -81,12 +88,23 @@ export function ruleTaskType(text: string): TaskType {
   return 'chat';
 }
 
+const confidenceOf = (decision: TurnDecision, from: 'jev' | 'rules'): number | null =>
+  from === 'jev' && typeof decision.confidence === 'number' && Number.isFinite(decision.confidence) ? Math.max(0, Math.min(1, decision.confidence)) : null;
+
+/**
+ * The turn's level. Large: design-level work or a hard difficulty. Small: from Jev, its probability of the two lowest
+ * levels at `smallAt` or above (its own three-way difficulty is not needed: on the live set it called most small
+ * tasks "normal" at p 0.57–0.90); from the rules, their "simple". Else medium.
+ */
+export function levelOf(decision: TurnDecision, from: 'jev' | 'rules', smallAt = SMALL_CONFIDENCE): Level {
+  if (decision.strong || decision.difficulty === 'hard') return 'large';
+  if (from === 'rules') return decision.difficulty === 'simple' ? 'small' : 'medium';
+  return (confidenceOf(decision, from) ?? 0) >= smallAt ? 'small' : 'medium';
+}
+
 export function turnView(decision: TurnDecision, from: 'jev' | 'rules', text: string): TurnView {
-  const confidence = from === 'jev' && typeof decision.confidence === 'number' && Number.isFinite(decision.confidence) ? Math.max(0, Math.min(1, decision.confidence)) : null;
-  let level: Level;
-  if (decision.strong || decision.difficulty === 'hard') level = 'large';
-  else if (decision.difficulty === 'simple' && (from === 'rules' || (confidence ?? 0) >= SMALL_CONFIDENCE)) level = 'small';
-  else level = 'medium';
+  const confidence = confidenceOf(decision, from);
+  const level = levelOf(decision, from);
   const type = from === 'jev' && decision.type ? decision.type : ruleTaskType(text);
   return {
     type, typeFrom: from === 'jev' && decision.type ? 'jev' : 'rules', level,

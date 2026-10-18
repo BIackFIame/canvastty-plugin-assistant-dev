@@ -11012,7 +11012,7 @@ var upstreamSecret = (id) => `auto-upstream-${id}`;
 var JEV_OPENROUTER_SECRET = "assistant-openrouter";
 
 // src/auto/select.ts
-var SMALL_CONFIDENCE = 0.9;
+var SMALL_CONFIDENCE = 0.5;
 var QUALITY_LOSS = { best: 0, balanced: 3, cheap: 10 };
 var KIND_TYPE = {
   code_change: "coding",
@@ -11046,12 +11046,15 @@ function ruleTaskType(text6) {
   if (RESEARCH.test(sample)) return "research";
   return "chat";
 }
+var confidenceOf = (decision, from) => from === "jev" && typeof decision.confidence === "number" && Number.isFinite(decision.confidence) ? Math.max(0, Math.min(1, decision.confidence)) : null;
+function levelOf(decision, from, smallAt = SMALL_CONFIDENCE) {
+  if (decision.strong || decision.difficulty === "hard") return "large";
+  if (from === "rules") return decision.difficulty === "simple" ? "small" : "medium";
+  return (confidenceOf(decision, from) ?? 0) >= smallAt ? "small" : "medium";
+}
 function turnView(decision, from, text6) {
-  const confidence = from === "jev" && typeof decision.confidence === "number" && Number.isFinite(decision.confidence) ? Math.max(0, Math.min(1, decision.confidence)) : null;
-  let level;
-  if (decision.strong || decision.difficulty === "hard") level = "large";
-  else if (decision.difficulty === "simple" && (from === "rules" || (confidence ?? 0) >= SMALL_CONFIDENCE)) level = "small";
-  else level = "medium";
+  const confidence = confidenceOf(decision, from);
+  const level = levelOf(decision, from);
   const type = from === "jev" && decision.type ? decision.type : ruleTaskType(text6);
   return {
     type,

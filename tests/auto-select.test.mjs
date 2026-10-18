@@ -160,7 +160,8 @@ test('cooldowns and limits shape the candidates before scoring; the launch tells
   assert.equal(limitsFor(buildInventory(settings([direct([{ id: 'a', context: 64_000, output: 4_096 }, { id: 'b', context: 200_000 }])]), routingCatalog())).context, 64_000, 'a short list of your own: the smallest');
 });
 
-test('Jev\'s answers: type only inside its band, "small" needs ≥ 0.9 on the two lowest levels; parsing the real answer shape', () => {
+test('Jev\'s answers: type only inside its band, "small" needs ≥ SMALL_CONFIDENCE on the two lowest levels; parsing the real answer shape', () => {
+  assert.equal(SMALL_CONFIDENCE, 0.5);
   const answers = (kind, kindTop, probabilities) => {
     const labels = ['code_change', 'debug', 'review', 'research', 'writing', 'operations', 'other', 'unclear'];
     const vector = labels.map(label => label === kind ? kindTop : (1 - kindTop) / (labels.length - 1));
@@ -176,8 +177,15 @@ test('Jev\'s answers: type only inside its band, "small" needs ≥ 0.9 on the tw
   assert.equal(turnView(below, 'jev', 'x').typeFrom, 'rules');
   const hard = decide('debug', 0.95, [0.02, 0.08, 0.2, 0.7], { kind: 'auto', difficulty: 'auto' });
   assert.deepEqual([hard.type, hard.strong, turnView(hard, 'jev', '').level], ['coding', true, 'large']);
-  const operations = decide('operations', 0.9, [0.1, 0.5, 0.3, 0.1], { kind: 'auto', difficulty: 'verify' });
+  const operations = decide('operations', 0.9, [0.05, 0.3, 0.45, 0.2], { kind: 'auto', difficulty: 'verify' });
   assert.deepEqual([operations.type, operations.difficulty, turnView(operations, 'jev', '').level], ['coding', 'normal', 'medium']);
+  // Jev's own difficulty says "normal", but the two lowest levels hold 0.6: small (most small tasks live looked so).
+  const likely = decide('code_change', 0.9, [0.1, 0.5, 0.3, 0.1], { kind: 'auto', difficulty: 'verify' });
+  assert.deepEqual([likely.difficulty, likely.confidence, turnView(likely, 'jev', '').level, turnView(likely, 'jev', '').confident], ['normal', 0.6, 'small', true]);
+  assert.equal(turnView({ difficulty: 'normal', strong: false, type: 'chat', confidence: 0.49 }, 'jev', '').level, 'medium');
+  assert.equal(turnView({ difficulty: 'normal', strong: true, type: 'chat', confidence: 0.99 }, 'jev', '').level, 'large', 'design-level work stays large');
+  // The rules are never confident: their "simple" is small, but price may not cost score on it.
+  assert.deepEqual([turnView({ difficulty: 'simple', strong: false }, 'rules', 'fix a typo').level, turnView({ difficulty: 'simple', strong: false }, 'rules', 'fix a typo').confident], ['small', false]);
   // Jev says simple without probabilities: not confident → medium.
   assert.equal(turnView({ difficulty: 'simple', strong: false, type: 'chat' }, 'jev', '').level, 'medium');
 });
