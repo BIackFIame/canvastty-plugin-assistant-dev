@@ -67,7 +67,7 @@ export const AUTO_PAGE_STRINGS = {
     checkOk: (listed: number | null, missing: string[]) => `Works${listed !== null ? ` (${listed} models listed)` : ''}.${missing.length ? ` Not listed by it: ${missing.join(', ')}.` : ''}`,
     checkFail: (status: number | null) => status === null ? 'No answer, or no key saved.' : `It answered ${status}.`,
     choices: 'Choices', preference: 'Preference', pref: { cheap: 'Cheap', balanced: 'Balanced', best: 'Best' } as Record<string, string>,
-    prefHelp: 'Every turn takes the best score for its task type, and the cheaper model on a tie. Only a turn Jev calls small (≥ 0.5) may give up score for price: Cheap up to 10 points, Balanced 3, Best none. Unknown scores never beat known ones.',
+    prefHelp: 'Each turn takes the cheapest model whose score for its task type is within a few points of the best: Balanced 8 / 5 / 3 points on small / medium / large turns, Cheap 15 / 10 / 5, Best none. Within those points a lower reasoning effort is preferred too, except on large turns. "Small" needs Jev (≥ 0.5 on the two easiest levels). Unknown scores never beat known ones; each decision shows what it gave up.',
     cheaper: 'Manual tiers: if a tier has no usable model, a cheaper tier may answer (a stronger one is always tried first)',
     decider: 'Who judges a turn', deciderJev: 'Jev, word rules when it does not answer', deciderRules: 'Word rules only',
     daily: 'Daily cap, USD', perCard: 'Per card, USD', capsHelp: 'Counted from the cost the upstream reports, or from the catalog\'s prices. 0 stops Auto.',
@@ -76,7 +76,8 @@ export const AUTO_PAGE_STRINGS = {
     stats: (s: AutoState['stats']) => `${s.requests} model calls, Jev asked ${s.jevAsked} times (${s.jevAnswered} answered), ${s.leaseReuses} reused a turn's choice, ${s.failovers} failovers; today $${s.spentToday.toFixed(4)}; ${s.listening ? `listening for ${s.cards} card(s)` : 'not listening'}${s.hosts.length ? `; sent to ${s.hosts.join(', ')}` : ''}.`,
     kind: { turn: 'turn', continuation: 'tool step', small: 'title' } as Record<string, string>,
     sourceOf: { jev: 'Jev', rules: 'rules', lease: 'same turn', small: 'small rule' } as Record<string, string>,
-    why: { small_model: 'cheapest', manual_tier: 'your tier', best_score: 'best score', cheaper_tie: 'best score, cheaper', cheaper_within_loss: 'cheaper, within the allowed loss', kept_turn_model: 'turn\'s model', manual_tier_fallback: 'your tiers (nothing scored)', unknown_scores: 'no scores: middle price', no_model: 'no model' } as Record<string, string>,
+    why: { small_model: 'cheapest', manual_tier: 'your tier', best_score: 'best score', cheaper_tie: 'best score, cheaper', cheaper_within_loss: 'cheaper, within the allowed loss', lower_effort_within_loss: 'lower effort, within the allowed loss', kept_turn_model: 'turn\'s model', manual_tier_fallback: 'your tiers (nothing scored)', unknown_scores: 'no scores: middle price', no_model: 'no model' } as Record<string, string>,
+    tradeoff: (lost: string, best: string, score: string, cheaper: string | null, window: number) => `${lost} points below ${best} (${score})${cheaper ? `, ${cheaper}% cheaper` : ''}; allowed ${window}`,
     unreadable: 'The saved Auto (Jev) settings could not be read yet; nothing can be changed until they are.'
   },
   ru: {
@@ -107,7 +108,7 @@ export const AUTO_PAGE_STRINGS = {
     checkOk: (listed: number | null, missing: string[]) => `Работает${listed !== null ? ` (моделей в списке: ${listed})` : ''}.${missing.length ? ` Нет в его списке: ${missing.join(', ')}.` : ''}`,
     checkFail: (status: number | null) => status === null ? 'Нет ответа или не сохранён ключ.' : `Ответ: ${status}.`,
     choices: 'Выбор', preference: 'Предпочтение', pref: { cheap: 'Дешевле', balanced: 'Сбалансированно', best: 'Лучше' } as Record<string, string>,
-    prefHelp: 'Каждый ход получает лучшую оценку для своего типа задачи, при равенстве — более дешёвую модель. Пожертвовать оценкой ради цены можно только на ходе, который Jev считает простым (≥ 0,5): «Дешевле» — до 10 баллов, «Сбалансированно» — 3, «Лучше» — нисколько. Неизвестная оценка никогда не побеждает известную.',
+    prefHelp: 'Каждый ход получает самую дешёвую модель, чья оценка для его типа задачи не более чем на несколько баллов ниже лучшей: «Сбалансированно» — 8 / 5 / 3 балла на маленьком / среднем / большом ходе, «Дешевле» — 15 / 10 / 5, «Лучше» — нисколько. В этих пределах предпочитается и меньший уровень рассуждения, кроме больших ходов. «Маленький» ход определяет только Jev (≥ 0,5 на двух самых простых уровнях). Неизвестная оценка никогда не побеждает известную; каждое решение показывает, чем пожертвовало.',
     cheaper: 'Ручные уровни: если на уровне нет доступной модели, может ответить более дешёвый (сначала всегда пробуется более сильный)',
     decider: 'Кто оценивает ход', deciderJev: 'Jev, словесные правила, если он не ответил', deciderRules: 'Только словесные правила',
     daily: 'Предел в день, USD', perCard: 'На окно, USD', capsHelp: 'Считается по стоимости, которую сообщает поставщик, или по ценам каталога. 0 останавливает «Авто».',
@@ -116,7 +117,8 @@ export const AUTO_PAGE_STRINGS = {
     stats: (s: AutoState['stats']) => `Вызовов моделей: ${s.requests}, Jev спрошен ${s.jevAsked} раз (ответил ${s.jevAnswered}), решение хода повторно: ${s.leaseReuses}, переключений: ${s.failovers}; сегодня $${s.spentToday.toFixed(4)}; ${s.listening ? `слушает, окон: ${s.cards}` : 'не слушает'}${s.hosts.length ? `; отправлено на ${s.hosts.join(', ')}` : ''}.`,
     kind: { turn: 'ход', continuation: 'шаг инструмента', small: 'заголовок' } as Record<string, string>,
     sourceOf: { jev: 'Jev', rules: 'правила', lease: 'тот же ход', small: 'правило маленькой' } as Record<string, string>,
-    why: { small_model: 'самая дешёвая', manual_tier: 'ваш уровень', best_score: 'лучшая оценка', cheaper_tie: 'лучшая оценка, дешевле', cheaper_within_loss: 'дешевле, в пределах допустимой потери', kept_turn_model: 'модель хода', manual_tier_fallback: 'ваши уровни (оценок нет)', unknown_scores: 'оценок нет: средняя цена', no_model: 'нет модели' } as Record<string, string>,
+    why: { small_model: 'самая дешёвая', manual_tier: 'ваш уровень', best_score: 'лучшая оценка', cheaper_tie: 'лучшая оценка, дешевле', cheaper_within_loss: 'дешевле, в пределах допустимой потери', lower_effort_within_loss: 'меньше рассуждения, в пределах допустимой потери', kept_turn_model: 'модель хода', manual_tier_fallback: 'ваши уровни (оценок нет)', unknown_scores: 'оценок нет: средняя цена', no_model: 'нет модели' } as Record<string, string>,
+    tradeoff: (lost: string, best: string, score: string, cheaper: string | null, window: number) => `на ${lost} балла ниже ${best} (${score})${cheaper ? `, дешевле на ${cheaper}%` : ''}; допустимо ${window}`,
     unreadable: 'Сохранённые настройки «Авто (Jev)» ещё не прочитаны; пока их нельзя менять.'
   }
 };
@@ -180,6 +182,17 @@ export function renderAuto(state: AutoState, t: Strings, page: AutoPageHost, vie
   return section;
 }
 
+/** What a decision gave up against the best-scored model for its type, when it took another one. */
+function tradeoffText(record: DecisionRecord, t: Strings): string | null {
+  const trade = record.tradeoff;
+  if (!trade || !record.model || typeof record.score !== 'number') return null;
+  if (trade.bestModel === record.model && trade.bestEffort === record.effort) return null;
+  const blend = (priceIn: number | null, priceOut: number | null): number | null => priceIn === null && priceOut === null ? null : (priceIn ?? 0) + (priceOut ?? 0) * 3;
+  const chosen = blend(record.priceIn, record.priceOut), best = blend(trade.bestPriceIn, trade.bestPriceOut);
+  const cheaper = chosen !== null && best !== null && best > 0 && chosen < best ? String(Math.round((1 - chosen / best) * 100)) : null;
+  return t.tradeoff(Math.max(0, trade.bestScore - record.score).toFixed(1), `${trade.bestModel}${trade.bestEffort ? `@${trade.bestEffort}` : ''}`, trade.bestScore.toFixed(1), cheaper, trade.window);
+}
+
 /** One decision: time · card · kind · type · difficulty (confidence) · model (effort) · score (source) · price · why · status · failovers · cost. */
 function recentRow(record: DecisionRecord, t: Strings): HTMLLIElement {
   const time = new Date(record.at).toLocaleTimeString(document.documentElement.lang || 'en', { hour: '2-digit', minute: '2-digit', second: '2-digit', hourCycle: 'h23' });
@@ -192,6 +205,8 @@ function recentRow(record: DecisionRecord, t: Strings): HTMLLIElement {
   else if (record.model && record.why) tail.push(t.unknown);
   if (typeof record.priceIn === 'number' || typeof record.priceOut === 'number') tail.push(`$${usd(record.priceIn ?? null)}/$${usd(record.priceOut ?? null)}`);
   tail.push(`${t.sourceOf[record.source] ?? record.source} (${record.why ? t.why[record.why] ?? record.why : record.reason})`);
+  const trade = tradeoffText(record, t);
+  if (trade) tail.push(trade);
   tail.push(String(record.status));
   if (record.failovers.length) tail.push(`↷${record.failovers.length}`);
   if (record.costUsd !== null) tail.push(`$${record.costUsd.toFixed(5)}`);

@@ -14,10 +14,10 @@ import { AUTO_TIERS, type AutoPreference, type AutoTier } from './settings.ts';
  * 2. Candidates: the models the person allows (all a configured upstream offers, minus the excluded ones) that are
  *    healthy now (not cooling down, trusted with the card's data class, context large enough, within the caps).
  * 3. A model with a manual tier answers turns of its tier first (the person's explicit choice wins over data).
- * 4. The others by score: the catalog score for the turn's task type, in one comparable cohort. The preference sets
- *    how many points of score may be given up for a lower price, and only on a confidently small turn
- *    (cheap 10, balanced 3, best 0); every other turn takes the best score. Within what is allowed: the cheaper one,
- *    then the lower effort, then the higher score. Ties are equal scores: the cheaper one wins.
+ * 4. The others by score: the catalog score for the turn's task type, in one comparable cohort. The preference and
+ *    the turn's level set how many points of score may be given up for a lower price (QUALITY_WINDOW: balanced 8 /
+ *    5 / 3 on small / medium / large, cheap 15 / 10 / 5, best 0). Within the window: the cheaper one, then (not on
+ *    large turns) the lower effort, then the higher score. Ties are equal scores: the cheaper one wins.
  * 5. Unknown scores never compete with known ones. When nothing is scored: manual tiers, else the known model of
  *    middle price (the catalog knows the model and its price), never simply the cheapest.
  *
@@ -33,8 +33,22 @@ export type Level = 'small' | 'medium' | 'large';
  * small. The medium tasks reached at most 0.40 and the small ones Jev got right at least 0.57; 0.5 sits between.
  */
 export const SMALL_CONFIDENCE = 0.5;
-/** Points (0–100) of score the preference may give up for price on a confidently small turn. */
-export const QUALITY_LOSS: Readonly<Record<AutoPreference, number>> = { best: 0, balanced: 3, cheap: 10 };
+/**
+ * Points (0–100) of score the preference may give up for a lower price, by the turn's level: the cheapest model
+ * within this many points of the best one for the turn's task type answers. Large turns stay close to the best, and
+ * there a lower effort is never chosen for its own sake (quality first). A small turn from the word rules (not Jev)
+ * counts as medium here.
+ */
+export const QUALITY_WINDOW: Readonly<Record<AutoPreference, Readonly<Record<Level, number>>>> = {
+  best: { small: 0, medium: 0, large: 0 },
+  balanced: { small: 8, medium: 5, large: 3 },
+  cheap: { small: 15, medium: 10, large: 5 }
+};
+
+/** The points a turn may give up for price. */
+export function qualityWindow(view: Pick<TurnView, 'level' | 'confident'>, preference: AutoPreference): number {
+  return QUALITY_WINDOW[preference][view.level === 'small' && !view.confident ? 'medium' : view.level];
+}
 
 /** Jev's (or the rules') view of one turn. */
 export interface TurnDecision {
@@ -152,7 +166,7 @@ export function manualOrder(entries: readonly InventoryEntry[], tier: AutoTier, 
   return order.flatMap(ofTier);
 }
 
-export type SelectionReason = 'small_model' | 'manual_tier' | 'best_score' | 'cheaper_tie' | 'cheaper_within_loss' | 'kept_turn_model' | 'manual_tier_fallback' | 'unknown_scores' | 'no_model';
+export type SelectionReason = 'small_model' | 'manual_tier' | 'best_score' | 'cheaper_tie' | 'cheaper_within_loss' | 'lower_effort_within_loss' | 'kept_turn_model' | 'manual_tier_fallback' | 'unknown_scores' | 'no_model';
 
 export interface Plan {
   list: InventoryEntry[];
@@ -160,7 +174,10 @@ export interface Plan {
   /** The task type whose scores were compared (the turn's, or "chat" when nothing had one for it). */
   scoredAs: TaskType | null;
   best: number | null;
+  /** Points of score the turn could give up for price. */
   loss: number;
+  /** The best-scored model (the cheaper one on a tie): what the choice is measured against. */
+  bestEntry: InventoryEntry | null;
 }
 
 /** The known-good model of middle price first: the catalog knows it and its price; then the rest by price. */
@@ -177,11 +194,11 @@ function conservative(entries: readonly InventoryEntry[]): InventoryEntry[] {
  * only candidates that may take this request now (enabled, not excluded, trusted, not cooling down, large enough).
  */
 export function plan(usable: readonly InventoryEntry[], request: { kind: 'small' } | { kind: 'turn' | 'continuation'; view: TurnView; preferred: string | null }, options: { preference: AutoPreference; cheaperFallback: boolean }): Plan {
-  if (!usable.length) return { list: [], why: 'no_model', scoredAs: null, best: null, loss: 0 };
+  if (!usable.length) return { list: [], why: 'no_model', scoredAs: null, best: null, loss: 0, bestEntry: null };
   if (request.kind === 'small') {
     // Titles and summaries: the cheapest priced model at its default (or lowest) effort, no Jev.
     const list = [...usable].sort((a, b) => comparePrice(a, b) || effortRank(a) - effortRank(b) || a.key.localeCompare(b.key));
-    return { list, why: 'small_model', scoredAs: null, best: null, loss: 0 };
+    return { list, why: 'small_model', scoredAs: null, best: null, loss: 0, bestEntry: null };
   }
   const { view } = request;
   const manual = usable.filter(entry => entry.tier !== null);
@@ -194,14 +211,19 @@ export function plan(usable: readonly InventoryEntry[], request: { kind: 'small'
   const scored = auto.filter(entry => entry.scores[scoredAs]);
   const value = (entry: InventoryEntry): number => entry.scores[scoredAs]!.value;
   const best = scored.length ? Math.max(...scored.map(value)) : null;
-  const loss = view.level === 'small' && view.confident ? QUALITY_LOSS[options.preference] : 0;
+  const loss = qualityWindow(view, options.preference);
+  // Large turns: among equal prices the higher score, never a lower effort for its own sake.
+  const lowerEffort = view.level !== 'large';
   const eligible = best === null ? [] : scored.filter(entry => value(entry) >= best - loss - 1e-9)
-    .sort((a, b) => comparePrice(a, b) || effortRank(a) - effortRank(b) || value(b) - value(a) || a.key.localeCompare(b.key));
+    .sort((a, b) => comparePrice(a, b) || (lowerEffort ? effortRank(a) - effortRank(b) : 0) || value(b) - value(a) || effortRank(a) - effortRank(b) || a.key.localeCompare(b.key));
+  const bestEntry = best === null ? null : scored.filter(entry => value(entry) >= best - 1e-9)
+    .sort((a, b) => comparePrice(a, b) || effortRank(a) - effortRank(b) || a.key.localeCompare(b.key))[0] ?? null;
   const others = scored.filter(entry => !eligible.includes(entry)).sort((a, b) => value(b) - value(a) || comparePrice(a, b) || a.key.localeCompare(b.key));
   const unknown = conservative(auto.filter(entry => !entry.scores[scoredAs]));
   let list = [...manualFirst, ...eligible, ...others, ...manualRest, ...unknown];
   let why: SelectionReason = manualFirst.length ? 'manual_tier'
-    : eligible.length ? (value(eligible[0]!) >= best! - 1e-9 ? (eligible.filter(entry => value(entry) >= best! - 1e-9).length > 1 ? 'cheaper_tie' : 'best_score') : 'cheaper_within_loss')
+    : eligible.length ? (value(eligible[0]!) >= best! - 1e-9 ? (eligible.filter(entry => value(entry) >= best! - 1e-9).length > 1 ? 'cheaper_tie' : 'best_score')
+      : bestEntry && comparePrice(eligible[0]!, bestEntry) === 0 && effortRank(eligible[0]!) < effortRank(bestEntry) ? 'lower_effort_within_loss' : 'cheaper_within_loss')
       : manualRest.length ? 'manual_tier_fallback' : 'unknown_scores';
   // The turn's model stays for its tool steps (and a new turn of the same kind keeps the upstream's prompt cache warm
   // when that model is among the first choices anyway).
@@ -213,5 +235,5 @@ export function plan(usable: readonly InventoryEntry[], request: { kind: 'small'
       list = [kept, ...list.filter(entry => entry !== kept)];
     }
   }
-  return { list, why, scoredAs: scored.length ? scoredAs : null, best, loss };
+  return { list, why, scoredAs: scored.length ? scoredAs : null, best, loss, bestEntry };
 }

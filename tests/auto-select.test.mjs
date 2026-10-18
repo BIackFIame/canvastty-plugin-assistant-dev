@@ -14,7 +14,7 @@ import { BenchmarkIndex, bareModelId, effectiveEffort, variantScores } from '../
 import { buildInventory } from '../src/auto/inventory.ts';
 import { limitsFor } from '../src/auto/launch.ts';
 import { AutoRouter } from '../src/auto/router.ts';
-import { decisionFromTriage, plan, ruleTaskType, turnView, QUALITY_LOSS, SMALL_CONFIDENCE } from '../src/auto/select.ts';
+import { decisionFromTriage, plan, qualityWindow, ruleTaskType, turnView, QUALITY_WINDOW, SMALL_CONFIDENCE } from '../src/auto/select.ts';
 import { validateAutoSettings } from '../src/auto/settings.ts';
 import { readTriage } from '../src/triage/triage.ts';
 import { scoreAnswer, choiceAnswer } from '../src/shared/systemOne.ts';
@@ -100,27 +100,71 @@ test('inventory: OpenRouter\'s suitable models with list prices and limits, effo
   assert.deepEqual(buildInventory(s, routingCatalog({ openRouter: false })).waitingForList, ['or']);
 });
 
-test('selection by preference: best score always; price may cost score only on a confidently small turn (cheap 10, balanced 3, best 0)', () => {
+test('selection by preference: the cheapest model within the window of the best score for the turn (by level), best none', () => {
   const inventory = buildInventory(settings([openRouter({ excluded: ['vendor/delta-4'] })]), routingCatalog());
-  assert.deepEqual(QUALITY_LOSS, { best: 0, balanced: 3, cheap: 10 });
-  for (const preference of ['cheap', 'balanced', 'best']) {
-    assert.equal(first(inventory, { view: view('coding', 'large') }, preference).key, 'or|vendor/alpha-1|high', `${preference}: a large turn takes the best score`);
-    assert.equal(first(inventory, { view: view('coding', 'medium') }, preference).key, 'or|vendor/alpha-1|high', `${preference}: so does a medium one`);
+  assert.deepEqual(QUALITY_WINDOW, { best: { small: 0, medium: 0, large: 0 }, balanced: { small: 8, medium: 5, large: 3 }, cheap: { small: 15, medium: 10, large: 5 } });
+  // Coding: alpha@high 57.5 ($13 blended) vs beta 55 ($6.5): 2.5 points for half the price.
+  for (const level of ['medium', 'large']) {
+    assert.deepEqual(Object.values(first(inventory, { view: view('coding', level) }, 'best')).slice(0, 2), ['or|vendor/alpha-1|high', 'best_score'], `best, ${level}`);
+    for (const preference of ['balanced', 'cheap']) assert.deepEqual(Object.values(first(inventory, { view: view('coding', level) }, preference)).slice(0, 2), ['or|vendor/beta-2|', 'cheaper_within_loss'], `${preference}, ${level}`);
   }
-  // A confidently small coding turn: alpha@high 57.5 ($13 blended) vs beta 55 ($6.5).
   const small = view('coding', 'small', 0.95);
-  assert.equal(small.level, 'small'); assert.equal(small.confident, true);
-  assert.deepEqual(Object.values(first(inventory, { view: small }, 'cheap')).slice(0, 2), ['or|vendor/beta-2|', 'cheaper_within_loss']);
-  assert.deepEqual(Object.values(first(inventory, { view: small }, 'balanced')).slice(0, 2), ['or|vendor/beta-2|', 'cheaper_within_loss'], '2.5 points ≤ 3');
-  assert.deepEqual(Object.values(first(inventory, { view: small }, 'best')).slice(0, 2), ['or|vendor/alpha-1|high', 'best_score']);
-  // Not confident enough: "small" becomes medium, no loss allowed.
+  assert.deepEqual([small.level, small.confident], ['small', true]);
+  assert.equal(first(inventory, { view: small }, 'balanced').key, 'or|vendor/beta-2|');
+  assert.equal(first(inventory, { view: small }, 'best').key, 'or|vendor/alpha-1|high');
+  // Below Jev's "small" the turn is medium: balanced still allows 5 points there.
   const unsure = view('coding', 'small', SMALL_CONFIDENCE - 0.01);
   assert.equal(unsure.level, 'medium');
-  assert.equal(first(inventory, { view: unsure }, 'cheap').key, 'or|vendor/alpha-1|high');
-  // Rules: a "simple" turn is small but never confident: no loss either.
+  assert.equal(qualityWindow(unsure, 'balanced'), 5);
+  // Rules: a "simple" turn is small but not Jev's: it gets the medium window.
   const rules = turnView({ difficulty: 'simple', strong: false }, 'rules', 'Fix a typo in the README');
-  assert.deepEqual([rules.level, rules.confident, rules.type], ['small', false, 'writing']);
+  assert.deepEqual([rules.level, rules.confident, rules.type, qualityWindow(rules, 'cheap'), qualityWindow(small, 'cheap')], ['small', false, 'writing', 10, 15]);
   assert.equal(first(inventory, { view: rules }, 'cheap').key, 'or|vendor/beta-2|', 'writing compares in LiveBench (Artificial Analysis has no writing): beta 82.5 over alpha@high 72.5');
+});
+
+/**
+ * A catalog shaped like the live one (2026-10-18): OpenRouter list prices ($/M in/out) and one cohort of coding
+ * scores per model and effort. Built as inventory entries directly, so the numbers are visible here.
+ */
+const LIVE_LIKE = [
+  ['anthropic/claude-opus-4.8', 'xhigh', 5, 25, 66.9], ['anthropic/claude-opus-4.8', 'high', 5, 25, 65.2],
+  ['openai/gpt-5.4', 'xhigh', 2.5, 15, 64.9], ['openai/gpt-5.4', 'medium', 2.5, 15, 61.0],
+  ['anthropic/claude-sonnet-5', 'xhigh', 2, 10, 64.1], ['anthropic/claude-sonnet-5', 'high', 2, 10, 62.4],
+  ['google/gemini-3.1-pro-preview', 'high', 2, 12, 63.3],
+  ['z-ai/glm-5.3', 'max', 0.6, 2.2, 60.8],
+  ['minimax/minimax-m3', null, 0.3, 1.2, 55.4],
+  ['openai/gpt-5.4-mini', 'high', 0.25, 2, 52.0]
+].map(([model, effort, priceIn, priceOut, value]) => ({
+  key: `or|${model}|${effort ?? ''}`, upstream: { id: 'or', enabled: true }, model, effort, sendEffort: effort !== null, tier: null, listed: false, fromList: true, excluded: false,
+  priceIn, priceOut, priceSource: 'openrouter', context: 400_000, output: 64_000, known: true, measuredEfforts: [],
+  scores: { coding: { value, cohort: 'livebench', label: 'LiveBench 2026-06-25', rowId: `${model}@${effort}`, historical: false, effort } }
+}));
+
+test('cost-aware selection on a live-like catalog: per preference and level, lower effort within the window, large stays near the best', () => {
+  const pick = (level, preference) => {
+    const chosen = plan(LIVE_LIKE, { kind: 'turn', view: view('coding', level, level === 'small' ? 0.95 : 0.1), preferred: null }, { preference, cheaperFallback: false });
+    return { key: chosen.list[0].key, why: chosen.why, window: chosen.loss, best: chosen.bestEntry?.key };
+  };
+  // Best: always the top score, whatever it costs.
+  for (const level of ['small', 'medium', 'large']) assert.deepEqual(pick(level, 'best'), { key: 'or|anthropic/claude-opus-4.8|xhigh', why: 'best_score', window: 0, best: 'or|anthropic/claude-opus-4.8|xhigh' }, level);
+  // Balanced, medium (5 points: ≥ 61.9): GLM-5.3 at 60.8 is out; Sonnet 5 @high 62.4 ($2/$10) is the cheapest in.
+  assert.deepEqual(pick('medium', 'balanced'), { key: 'or|anthropic/claude-sonnet-5|high', why: 'cheaper_within_loss', window: 5, best: 'or|anthropic/claude-opus-4.8|xhigh' });
+  // Balanced, large (3 points: ≥ 63.9): Sonnet 5, but at xhigh — no lower effort for its own sake on a large turn.
+  assert.deepEqual(pick('large', 'balanced'), { key: 'or|anthropic/claude-sonnet-5|xhigh', why: 'cheaper_within_loss', window: 3, best: 'or|anthropic/claude-opus-4.8|xhigh' });
+  // Balanced, small (8 points: ≥ 58.9): GLM-5.3 ($0.6/$2.2).
+  assert.equal(pick('small', 'balanced').key, 'or|z-ai/glm-5.3|max');
+  // Cheap: wider windows. Medium 10 (≥ 56.9): GLM-5.3; small 15 (≥ 51.9): MiniMax M3 ($3.9 blended, below GPT-5.4 mini's $6.25); large 5 (≥ 61.9): Sonnet 5 @xhigh.
+  assert.equal(pick('medium', 'cheap').key, 'or|z-ai/glm-5.3|max');
+  assert.equal(pick('small', 'cheap').key, 'or|minimax/minimax-m3|');
+  assert.equal(pick('large', 'cheap').key, 'or|anthropic/claude-sonnet-5|xhigh');
+  // Lower effort at the same price: only Opus in reach (window 2 by hand): Opus @high (65.2) on medium, @xhigh on large.
+  const opusOnly = LIVE_LIKE.filter(entry => entry.model === 'anthropic/claude-opus-4.8');
+  const only = level => plan(opusOnly, { kind: 'turn', view: view('coding', level), preferred: null }, { preference: 'balanced', cheaperFallback: false });
+  assert.deepEqual([only('medium').list[0].key, only('medium').why], ['or|anthropic/claude-opus-4.8|high', 'lower_effort_within_loss']);
+  assert.deepEqual([only('large').list[0].key, only('large').why], ['or|anthropic/claude-opus-4.8|xhigh', 'best_score']);
+  // The failover order after the choice: the rest of the window by price, then by score.
+  const medium = plan(LIVE_LIKE, { kind: 'turn', view: view('coding', 'medium'), preferred: null }, { preference: 'balanced', cheaperFallback: false });
+  assert.deepEqual(medium.list.map(entry => entry.key).slice(0, 6), ['or|anthropic/claude-sonnet-5|high', 'or|anthropic/claude-sonnet-5|xhigh', 'or|google/gemini-3.1-pro-preview|high', 'or|openai/gpt-5.4|xhigh', 'or|anthropic/claude-opus-4.8|high', 'or|anthropic/claude-opus-4.8|xhigh']);
 });
 
 test('ties go to the cheaper model; a lower effort wins among equals; the failover list continues by score, then unknowns', () => {
@@ -146,7 +190,7 @@ test('unknown scores: never ahead of known ones; with none known, manual tiers f
   // A manual tier: the person's choice answers its tier first, whatever the scores say.
   const tiered = buildInventory(settings([openRouter({ models: [{ id: 'vendor/gamma-3', tier: 'medium' }] })]), routingCatalog());
   assert.deepEqual(Object.values(first(tiered, { view: view('coding', 'medium') })).slice(0, 2), ['or|vendor/gamma-3|', 'manual_tier']);
-  assert.equal(first(tiered, { view: view('coding', 'large') }).key, 'or|vendor/alpha-1|high', 'other tiers still go by score');
+  assert.equal(first(tiered, { view: view('coding', 'large') }, 'best').key, 'or|vendor/alpha-1|high', 'other tiers still go by score');
   // Titles: the cheapest priced model, no matter the score.
   assert.equal(plan(healthy(tiered), { kind: 'small' }, { preference: 'best', cheaperFallback: false }).list[0].key, 'or|vendor/delta-4|');
 });
@@ -240,9 +284,19 @@ test('router: the best coding score with its effort sent to OpenRouter; the deci
     ['coding', 'large', 'vendor/alpha-1', 'high', 57.5, 'best_score', 1, 4]);
   assert.match(record.scoreSource, /^Artificial Analysis v4\.3\.2/u);
   assert.ok(!JSON.stringify(router.recent()).includes('MARKER-SELECT-91'));
+  assert.deepEqual(record.tradeoff, { window: 0, bestModel: 'vendor/alpha-1', bestEffort: 'high', bestScore: 57.5, bestPriceIn: 1, bestPriceOut: 4 });
   // The CLI's own effort is never overridden.
   await (await ask('Another redesign', { reasoning: { effort: 'low' } })).text();
   assert.deepEqual(upstream.posts().at(-1).json.reasoning, { effort: 'low' });
+});
+
+test('router, balanced: a large turn takes a cheaper model within 3 points and the decision records what it gave up', async t => {
+  const { upstream, router, ask } = await routerWith(t, { extra: { preference: 'balanced' } });
+  await (await ask('Redesign the storage layer')).text();
+  assert.equal(upstream.posts().at(-1).json.model, 'vendor/beta-2');
+  const record = router.recent()[0];
+  assert.deepEqual([record.difficulty, record.model, record.score, record.why], ['large', 'vendor/beta-2', 55, 'cheaper_within_loss']);
+  assert.deepEqual(record.tradeoff, { window: 3, bestModel: 'vendor/alpha-1', bestEffort: 'high', bestScore: 57.5, bestPriceIn: 1, bestPriceOut: 4 });
 });
 
 test('router: a failing best model cools down (all its variants) and the next best answers; a cap skips an expensive model for one that fits', async t => {

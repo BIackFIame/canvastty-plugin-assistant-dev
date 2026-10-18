@@ -323,7 +323,7 @@ test('the decision log has hashes, models and numbers only: no prompt, no key, n
   await call(port, { token, body: userTurn(`Please handle ${MARKER} carefully`) });
   await call(port, { token, body: continuation(`Please handle ${MARKER} carefully`, 2) });
   const record = router.recent()[1];
-  assert.deepEqual(Object.keys(record).sort(), ['at', 'attempts', 'confidence', 'conversation', 'costUsd', 'difficulty', 'effort', 'failovers', 'kind', 'model', 'priceIn', 'priceOut', 'reason', 'score', 'scoreSource', 'session', 'source', 'status', 'taskType', 'tier', 'tokensIn', 'tokensOut', 'totalMs', 'ttfbMs', 'turn', 'upstream', 'why'].sort());
+  assert.deepEqual(Object.keys(record).sort(), ['at', 'attempts', 'confidence', 'conversation', 'costUsd', 'difficulty', 'effort', 'failovers', 'kind', 'model', 'priceIn', 'priceOut', 'reason', 'score', 'scoreSource', 'session', 'source', 'status', 'taskType', 'tier', 'tokensIn', 'tokensOut', 'totalMs', 'tradeoff', 'ttfbMs', 'turn', 'upstream', 'why'].sort());
   assert.deepEqual([record.taskType, record.difficulty, record.why], ['coding', 'medium', 'manual_tier']);
   assert.equal(record.session, 'card-000');
   assert.equal(record.tokensIn, 120);

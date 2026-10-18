@@ -11013,7 +11013,14 @@ var JEV_OPENROUTER_SECRET = "assistant-openrouter";
 
 // src/auto/select.ts
 var SMALL_CONFIDENCE = 0.5;
-var QUALITY_LOSS = { best: 0, balanced: 3, cheap: 10 };
+var QUALITY_WINDOW = {
+  best: { small: 0, medium: 0, large: 0 },
+  balanced: { small: 8, medium: 5, large: 3 },
+  cheap: { small: 15, medium: 10, large: 5 }
+};
+function qualityWindow(view, preference) {
+  return QUALITY_WINDOW[preference][view.level === "small" && !view.confident ? "medium" : view.level];
+}
 var KIND_TYPE = {
   code_change: "coding",
   debug: "coding",
@@ -11102,10 +11109,10 @@ function conservative(entries) {
   return [...ordered, ...entries.filter((entry) => !ordered.includes(entry)).sort((a, b) => comparePrice(a, b) || a.key.localeCompare(b.key))];
 }
 function plan(usable2, request, options) {
-  if (!usable2.length) return { list: [], why: "no_model", scoredAs: null, best: null, loss: 0 };
+  if (!usable2.length) return { list: [], why: "no_model", scoredAs: null, best: null, loss: 0, bestEntry: null };
   if (request.kind === "small") {
     const list2 = [...usable2].sort((a, b) => comparePrice(a, b) || effortRank(a) - effortRank(b) || a.key.localeCompare(b.key));
-    return { list: list2, why: "small_model", scoredAs: null, best: null, loss: 0 };
+    return { list: list2, why: "small_model", scoredAs: null, best: null, loss: 0, bestEntry: null };
   }
   const { view } = request;
   const manual = usable2.filter((entry) => entry.tier !== null);
@@ -11118,12 +11125,14 @@ function plan(usable2, request, options) {
   const scored = auto.filter((entry) => entry.scores[scoredAs]);
   const value = (entry) => entry.scores[scoredAs].value;
   const best = scored.length ? Math.max(...scored.map(value)) : null;
-  const loss = view.level === "small" && view.confident ? QUALITY_LOSS[options.preference] : 0;
-  const eligible = best === null ? [] : scored.filter((entry) => value(entry) >= best - loss - 1e-9).sort((a, b) => comparePrice(a, b) || effortRank(a) - effortRank(b) || value(b) - value(a) || a.key.localeCompare(b.key));
+  const loss = qualityWindow(view, options.preference);
+  const lowerEffort = view.level !== "large";
+  const eligible = best === null ? [] : scored.filter((entry) => value(entry) >= best - loss - 1e-9).sort((a, b) => comparePrice(a, b) || (lowerEffort ? effortRank(a) - effortRank(b) : 0) || value(b) - value(a) || effortRank(a) - effortRank(b) || a.key.localeCompare(b.key));
+  const bestEntry = best === null ? null : scored.filter((entry) => value(entry) >= best - 1e-9).sort((a, b) => comparePrice(a, b) || effortRank(a) - effortRank(b) || a.key.localeCompare(b.key))[0] ?? null;
   const others = scored.filter((entry) => !eligible.includes(entry)).sort((a, b) => value(b) - value(a) || comparePrice(a, b) || a.key.localeCompare(b.key));
   const unknown = conservative(auto.filter((entry) => !entry.scores[scoredAs]));
   let list = [...manualFirst, ...eligible, ...others, ...manualRest, ...unknown];
-  let why = manualFirst.length ? "manual_tier" : eligible.length ? value(eligible[0]) >= best - 1e-9 ? eligible.filter((entry) => value(entry) >= best - 1e-9).length > 1 ? "cheaper_tie" : "best_score" : "cheaper_within_loss" : manualRest.length ? "manual_tier_fallback" : "unknown_scores";
+  let why = manualFirst.length ? "manual_tier" : eligible.length ? value(eligible[0]) >= best - 1e-9 ? eligible.filter((entry) => value(entry) >= best - 1e-9).length > 1 ? "cheaper_tie" : "best_score" : bestEntry && comparePrice(eligible[0], bestEntry) === 0 && effortRank(eligible[0]) < effortRank(bestEntry) ? "lower_effort_within_loss" : "cheaper_within_loss" : manualRest.length ? "manual_tier_fallback" : "unknown_scores";
   if (request.preferred) {
     const kept = list.find((entry) => entry.key === request.preferred);
     const firstGroup = manualFirst.length ? manualFirst : eligible.length ? eligible : list;
@@ -11132,7 +11141,7 @@ function plan(usable2, request, options) {
       list = [kept, ...list.filter((entry) => entry !== kept)];
     }
   }
-  return { list, why, scoredAs: scored.length ? scoredAs : null, best, loss };
+  return { list, why, scoredAs: scored.length ? scoredAs : null, best, loss, bestEntry };
 }
 
 // src/auto/classify.ts
@@ -11852,6 +11861,7 @@ var AutoRouter = class {
       difficulty: null,
       confidence: null,
       why: null,
+      tradeoff: null,
       upstream: null,
       model: null,
       effort: null,
@@ -11912,6 +11922,10 @@ var AutoRouter = class {
       }
       const chosen = plan(this.usable(grant, Math.ceil(raw.length / 4), body.max_tokens), request2, { preference: settings.preference, cheaperFallback: settings.cheaperFallback });
       record4.why = chosen.why;
+      if (chosen.bestEntry && chosen.best !== null) {
+        const top = chosen.bestEntry;
+        record4.tradeoff = { window: chosen.loss, bestModel: top.model, bestEffort: top.effort, bestScore: Math.round(chosen.best * 1e3) / 1e3, bestPriceIn: top.priceIn, bestPriceOut: top.priceOut };
+      }
       record4.tier = request2.kind === "small" ? "small" : request2.view.level;
       const list = chosen.list;
       if (!list.length) throw new HttpError(503, "no_model", "Auto (Jev): no allowed model is available now (all are off, excluded, cooling down or not allowed for this card's data class).");

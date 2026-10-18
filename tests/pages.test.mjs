@@ -284,7 +284,10 @@ test('decision models page: Auto from data — catalog freshness and refresh, mo
       { id: 'vendor/gamma-3', listed: false, fromList: true, excluded: true, tier: null, effort: null, priceIn: 0.2, priceOut: 0.8, priceSource: 'openrouter', context: 64_000, known: true, measuredEfforts: [], scores: {} }
     ] },
     waitingForList: [],
-    recent: [{ at, session: 'abcd1234', conversation: 'c', turn: 't', kind: 'turn', source: 'jev', tier: 'large', taskType: 'coding', difficulty: 'large', confidence: 0.05, why: 'best_score', upstream: 'or', model: 'vendor/alpha-1', effort: 'high', score: 57.5, scoreSource: 'Artificial Analysis v4.3.2', priceIn: 1, priceOut: 4, attempts: 1, failovers: [], status: 200, reason: 'jev', ttfbMs: 300, totalMs: 900, tokensIn: 10, tokensOut: 2, costUsd: 0.00012 }],
+    recent: [{ at, session: 'abcd1234', conversation: 'c', turn: 't', kind: 'turn', source: 'jev', tier: 'large', taskType: 'coding', difficulty: 'large', confidence: 0.05, why: 'best_score', upstream: 'or', model: 'vendor/alpha-1', effort: 'high', score: 57.5, scoreSource: 'Artificial Analysis v4.3.2', priceIn: 1, priceOut: 4, attempts: 1, failovers: [], status: 200, reason: 'jev', ttfbMs: 300, totalMs: 900, tokensIn: 10, tokensOut: 2, costUsd: 0.00012,
+      tradeoff: { window: 0, bestModel: 'vendor/alpha-1', bestEffort: 'high', bestScore: 57.5, bestPriceIn: 1, bestPriceOut: 4 } },
+    { at, session: 'abcd1234', conversation: 'c', turn: 't2', kind: 'turn', source: 'jev', tier: 'medium', taskType: 'coding', difficulty: 'medium', confidence: 0.1, why: 'cheaper_within_loss', upstream: 'or', model: 'vendor/beta-2', effort: null, score: 55, scoreSource: 'Artificial Analysis v4.3.2', priceIn: 0.5, priceOut: 2, attempts: 1, failovers: [], status: 200, reason: 'jev', ttfbMs: 300, totalMs: 900, tokensIn: 10, tokensOut: 2, costUsd: 0.00005,
+      tradeoff: { window: 5, bestModel: 'vendor/alpha-1', bestEffort: 'high', bestScore: 57.5, bestPriceIn: 1, bestPriceOut: 4 } }],
     stats: { requests: 1, turns: 1, continuations: 0, small: 0, jevAsked: 1, jevAnswered: 1, rules: 0, leaseReuses: 0, failovers: 0, hosts: ['openrouter.ai'], spentToday: 0.0001, listening: true, cards: 1 }
   };
   const ui = page('settings/assistant.js', {
@@ -299,6 +302,8 @@ test('decision models page: Auto from data — catalog freshness and refresh, mo
   assert.match(text, /vendor\/alpha-1 400k 1\.00 · 4\.00 \(OpenRouter\) 57\.5 @high · Artificial Analysis v4\.3\.2 · old high, low/u);
   assert.match(text, /vendor\/gamma-3 64k 0\.2 · 0\.8 \(OpenRouter\) unknown/u);
   assert.match(text, /abcd1234 · turn · coding · large \(0\.05\) · vendor\/alpha-1@high · 57\.5 Artificial Analysis v4\.3\.2 · \$1\.00\/\$4\.00 · Jev \(best score\) · 200/u);
+  assert.match(text, /vendor\/beta-2 · 55\.0 Artificial Analysis v4\.3\.2 · \$0\.5\/\$2\.00 · Jev \(cheaper, within the allowed loss\) · 2\.5 points below vendor\/alpha-1@high \(57\.5\), 50% cheaper; allowed 5 · 200/u);
+  assert.doesNotMatch(text, /alpha-1@high · 57\.5 Artificial Analysis v4\.3\.2 · \$1\.00\/\$4\.00 · Jev \(best score\) · [^2]/u, 'no trade-off shown for the best model itself');
   const all = ui.app.all();
   const byName = name => all.find(node => node.name === name);
   assert.equal(byName('auto-use-or-vendor/gamma-3').checked, false, 'the excluded model is unticked');
@@ -322,6 +327,7 @@ test('decision models page: Auto from data — catalog freshness and refresh, mo
   assert.match(ru, /Обновить сейчас/u);
   assert.match(ru, /загружено .*v4\.3\.2, измерено 221 строк из 690 — устарело/u);
   assert.match(ru, /ход · код · большая \(0\.05\) · vendor\/alpha-1@high · 57\.5 Artificial Analysis v4\.3\.2 · \$1\.00\/\$4\.00 · Jev \(лучшая оценка\) · 200/u);
+  assert.match(ru, /Jev \(дешевле, в пределах допустимой потери\) · на 2\.5 балла ниже vendor\/alpha-1@high \(57\.5\), дешевле на 50%; допустимо 5 · 200/u);
   assert.match(ru, /неизвестно/u);
-  assert.doesNotMatch(ru, /Refresh now|Measured at|by score|best score/u, 'no English left in the Auto rows');
+  assert.doesNotMatch(ru, /Refresh now|Measured at|by score|best score|points below|allowed/u, 'no English left in the Auto rows');
 });

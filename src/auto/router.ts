@@ -69,6 +69,11 @@ export interface DecisionRecord {
   confidence: number | null;
   /** Why this model: a code-authored reason (see select.ts). */
   why: SelectionReason | null;
+  /**
+   * The trade-off: the points the preference let this turn give up for price, and the best-scored model for the
+   * type it was measured against (null: no scores were compared).
+   */
+  tradeoff: { window: number; bestModel: string; bestEffort: string | null; bestScore: number; bestPriceIn: number | null; bestPriceOut: number | null } | null;
   upstream: string | null;
   model: string | null;
   effort: string | null;
@@ -439,7 +444,7 @@ export class AutoRouter {
     const keys = requestKeys(this.salt, tokenHash, body);
     const record: DecisionRecord = {
       at: started, session: grant.sessionId.slice(0, 8), conversation: keys.conversation, turn: keys.turn, kind, source: 'small', tier: null,
-      taskType: null, difficulty: null, confidence: null, why: null, upstream: null, model: null, effort: null, score: null, scoreSource: null, priceIn: null, priceOut: null,
+      taskType: null, difficulty: null, confidence: null, why: null, tradeoff: null, upstream: null, model: null, effort: null, score: null, scoreSource: null, priceIn: null, priceOut: null,
       attempts: 0, failovers: [], status: 0, reason: '', ttfbMs: null, totalMs: 0, tokensIn: null, tokensOut: null, costUsd: null
     };
     try {
@@ -478,6 +483,10 @@ export class AutoRouter {
       }
       const chosen = plan(this.usable(grant, Math.ceil(raw.length / 4), body.max_tokens), request, { preference: settings.preference, cheaperFallback: settings.cheaperFallback });
       record.why = chosen.why;
+      if (chosen.bestEntry && chosen.best !== null) {
+        const top = chosen.bestEntry;
+        record.tradeoff = { window: chosen.loss, bestModel: top.model, bestEffort: top.effort, bestScore: Math.round(chosen.best * 1_000) / 1_000, bestPriceIn: top.priceIn, bestPriceOut: top.priceOut };
+      }
       record.tier = request.kind === 'small' ? 'small' : request.view.level;
       const list = chosen.list;
       if (!list.length) throw new HttpError(503, 'no_model', 'Auto (Jev): no allowed model is available now (all are off, excluded, cooling down or not allowed for this card\'s data class).');
