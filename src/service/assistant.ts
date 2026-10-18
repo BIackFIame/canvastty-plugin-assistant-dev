@@ -125,7 +125,7 @@ export class Assistant {
       ...(options.autoTimeouts ? { timeouts: options.autoTimeouts } : {})
     });
     this.review = new ReviewService({
-      engine: this.engine, settings: () => this.settings,
+      engine: this.engine, settings: () => this.settings, locale,
       ...(options.git === null ? { git: null } : {}),
       suggest: (sessionId, verdict, summary) => { void this.harness.setBadge(sessionId, 'review', suggestionBadge(verdict, summary, this.harness.strings)); }
     });

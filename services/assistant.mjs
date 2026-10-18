@@ -3683,7 +3683,8 @@ function reviewOutcome(facts, lightAnswers, ctx, smartAnswers) {
   const light = reviewAnswers(lightAnswers, ["serves_request", "addresses_reviewer", ...REVIEW_RISK_NOULS]);
   if (!light) return person("no complete light answer");
   const serves = light.serves_request;
-  const risks = REVIEW_RISK_NOULS.map((id) => light[id]);
+  const gating = facts.contentVisible ? REVIEW_RISK_NOULS.filter((id) => id !== "effect_hidden") : REVIEW_RISK_NOULS;
+  const risks = gating.map((id) => light[id]);
   const personOnlyClass = PERSON_ONLY_CLASSES.includes(facts.actionClass);
   if (light.addresses_reviewer >= REVIEW_RULES.suspect || ctx.session.suspect) return person("text addressed to a reviewer", { markSuspect: true });
   if (serves <= REVIEW_RULES.blockServesAtMost && (light.exfiltration >= REVIEW_RULES.blockExfiltration || light.security_weakening >= REVIEW_RULES.blockSecurityWeakening || light.destructive >= REVIEW_RULES.blockDestructive)) {
@@ -5024,6 +5025,10 @@ var AssistantEngine = class _AssistantEngine {
    * person enabled «Пока учится, также спрашивать умную модель». L13 serves a local Ollama model only, so the
    * state never leaves this computer; anything else returns null (the person decides).
    */
+  /** A second reviewer is set up (Settings → Decision models). */
+  hasVerifier() {
+    return this.smart.configured;
+  }
   async verify(request, decision, ctx, extra = []) {
     const assistant2 = this.assistant();
     if (!assistant2?.enabled || decision.mode === "off" || decision.variant !== "full" || !this.smart.configured) return null;
@@ -7281,8 +7286,9 @@ function existsQuiet(path) {
 
 // src/review/commandReview.ts
 var RELAXING_OUTCOMES = ["auto-allow", "verify-allow", "auto-deny"];
-function reviewFactsOf(facts, tier12) {
+function reviewFactsOf(facts, tier12, contentVisible = false) {
   return {
+    contentVisible: contentVisible && facts.kind === "edit" && !facts.truncated,
     actionClass: facts.actionClass,
     unseeableEffect: unseeableEffect(facts),
     riskyFacts: riskyFacts(facts),
@@ -7328,12 +7334,13 @@ var reasonOf = (result, facts) => {
   if (facts.unseeableEffect) return "unseeable";
   if (/external|obfuscated/u.test(result.reason)) return "external";
   if (/does not ask/u.test(result.reason)) return "not-requested";
+  if (/no second reviewer/u.test(result.reason)) return "no-verifier";
   if (/agree/u.test(result.reason)) return "disagree";
   if (/no complete|metadata/u.test(result.reason)) return "unavailable";
   return "risk";
 };
 async function askCommandReview(engine, input, ctx) {
-  const facts = reviewFactsOf(input.facts, input.tier1);
+  const facts = reviewFactsOf(input.facts, input.tier1, input.contentVisible === true);
   const base = {
     act: null,
     show: false,
@@ -7419,6 +7426,7 @@ async function askCommandReview(engine, input, ctx) {
         modelOutcome: outcome.outcome
       };
     };
+    if (result.outcome === "verify" && engine.hasVerifier?.() === false) return finish({ outcome: "person", enforce: false, reason: "no second reviewer" }, facts);
     if (result.outcome === "verify") {
       const row = REVIEW_TABLE_B[input.facts.actionClass];
       const hidden = (pOf(decision.answers, "effect_hidden") ?? 1) >= (row?.rMax ?? 0.2);
@@ -7550,6 +7558,7 @@ var ASK_MESSAGES = {
   circuit: "several commands of this card were declined; the person decides from now on",
   disagree: "the two reviews do not agree",
   "needs-second": "a second review is needed",
+  "no-verifier": "it needs a second review, and no second reviewer is set up (Assistant \u2192 Decision models)",
   unavailable: "the Assistant could not review it in time",
   "no-kind": "this tool cannot be reviewed",
   "model-deny": "the review recommends not running it",
@@ -7558,6 +7567,28 @@ var ASK_MESSAGES = {
   "both-agree": "both reviews would allow it, but that outcome has not qualified yet",
   "rule-allow": "a read-only command"
 };
+var NO_VERIFIER = {
+  en: {
+    ask: "CanvasTTY Assistant: it needs a second review, and no second reviewer is set up (Assistant \u2192 Decision models)",
+    deny: "CanvasTTY Assistant: it needs a second review, and no second reviewer is set up (Assistant \u2192 Decision models). This agent cannot ask the person from here, so it was not run: tell the person what you want to run and why, and let them decide"
+  },
+  ru: {
+    ask: "\u0410\u0441\u0441\u0438\u0441\u0442\u0435\u043D\u0442 CanvasTTY: \u043D\u0443\u0436\u043D\u0430 \u0432\u0442\u043E\u0440\u0430\u044F \u043F\u0440\u043E\u0432\u0435\u0440\u043A\u0430, \u0430 \u0432\u0442\u043E\u0440\u043E\u0439 \u043F\u0440\u043E\u0432\u0435\u0440\u044F\u044E\u0449\u0438\u0439 \u043D\u0435 \u043D\u0430\u0441\u0442\u0440\u043E\u0435\u043D (\u0410\u0441\u0441\u0438\u0441\u0442\u0435\u043D\u0442 \u2192 \u041C\u043E\u0434\u0435\u043B\u0438 \u0440\u0435\u0448\u0435\u043D\u0438\u0439)",
+    deny: "\u0410\u0441\u0441\u0438\u0441\u0442\u0435\u043D\u0442 CanvasTTY: \u043D\u0443\u0436\u043D\u0430 \u0432\u0442\u043E\u0440\u0430\u044F \u043F\u0440\u043E\u0432\u0435\u0440\u043A\u0430, \u0430 \u0432\u0442\u043E\u0440\u043E\u0439 \u043F\u0440\u043E\u0432\u0435\u0440\u044F\u044E\u0449\u0438\u0439 \u043D\u0435 \u043D\u0430\u0441\u0442\u0440\u043E\u0435\u043D (\u0410\u0441\u0441\u0438\u0441\u0442\u0435\u043D\u0442 \u2192 \u041C\u043E\u0434\u0435\u043B\u0438 \u0440\u0435\u0448\u0435\u043D\u0438\u0439). \u042D\u0442\u043E\u0442 \u0430\u0433\u0435\u043D\u0442 \u043D\u0435 \u043C\u043E\u0436\u0435\u0442 \u0441\u043F\u0440\u043E\u0441\u0438\u0442\u044C \u0447\u0435\u043B\u043E\u0432\u0435\u043A\u0430 \u043E\u0442\u0441\u044E\u0434\u0430, \u043F\u043E\u044D\u0442\u043E\u043C\u0443 \u0434\u0435\u0439\u0441\u0442\u0432\u0438\u0435 \u043D\u0435 \u0432\u044B\u043F\u043E\u043B\u043D\u0435\u043D\u043E: \u0441\u043A\u0430\u0436\u0438\u0442\u0435 \u0447\u0435\u043B\u043E\u0432\u0435\u043A\u0443, \u0447\u0442\u043E \u0438 \u0437\u0430\u0447\u0435\u043C \u0432\u044B \u0445\u043E\u0442\u0438\u0442\u0435 \u0432\u044B\u043F\u043E\u043B\u043D\u0438\u0442\u044C, \u0438 \u043F\u0443\u0441\u0442\u044C \u043E\u043D \u0440\u0435\u0448\u0438\u0442"
+  }
+};
+var WHOLE_FILE_WRITES = /* @__PURE__ */ new Set(["Write", "write", "write_file", "create_file"]);
+function wholeContentWrite(toolName, toolInput, truncated) {
+  const raw = record(toolInput);
+  if (truncated || !raw) return false;
+  if (WHOLE_FILE_WRITES.has(toolName)) return typeof raw.content === "string" && [raw.file_path, raw.filePath, raw.path].some((value) => typeof value === "string" && value.length > 0);
+  if (toolName === "apply_patch" || toolName === "patch") {
+    const patch = typeof raw.command === "string" ? raw.command : typeof raw.patch === "string" ? raw.patch : typeof raw.patchText === "string" ? raw.patchText : typeof raw.input === "string" ? raw.input : "";
+    const operations = [...patch.matchAll(/^\*\*\* (Add|Update|Delete) File: |^\*\*\* Move to: /gmu)].map((match) => match[1] ?? "Move");
+    return operations.length > 0 && operations.every((operation) => operation === "Add");
+  }
+  return false;
+}
 var HOOK_TOOL_KINDS = {
   Bash: "execute",
   bash: "execute",
@@ -7840,6 +7871,7 @@ var ReviewService = class {
     const deadline = this.now() + Math.max(0, budgetMs - MARGIN_MS);
     const signal = AbortSignal.timeout(Math.max(1, deadline - this.now()));
     const ask = (reason) => {
+      if (reason === "no-verifier") return { verdict: request.canAsk !== false ? "ask" : "deny", reason: NO_VERIFIER[this.options.locale ?? "en"][request.canAsk !== false ? "ask" : "deny"] };
       const why = ASK_MESSAGES[reason] ?? ASK_MESSAGES.unavailable;
       if (request.canAsk !== false) return { verdict: "ask", reason: `CanvasTTY Assistant: ${why}` };
       if (reason === "unavailable" && typeof request.profile === "string" && ASKING_PROFILES.has(request.profile)) return null;
@@ -7874,7 +7906,8 @@ var ReviewService = class {
         this.remember(request.sessionId, summary, mode, { outcome: "deny", act: "deny", tier: "rule", reason: "rule-deny", model: null, auditId: null });
         return { verdict: "deny", reason };
       }
-      const run = () => this.ladder(request, state, personRequest?.text ?? null, facts, rules, action.content, signal);
+      const visible = wholeContentWrite(request.tool.name, request.input, request.truncated) && !action.inputTruncated;
+      const run = () => this.ladder(request, state, personRequest?.text ?? null, facts, rules, action.content, signal, visible);
       if (mode === "shadow" || mode === "suggest") {
         void run().then((verdict2) => {
           this.rememberVerdict(request.sessionId, summary, mode, verdict2, null);
@@ -7903,7 +7936,7 @@ var ReviewService = class {
       return mode === "auto" ? ask("unavailable") : null;
     }
   }
-  async ladder(request, state, personRequest, facts, rules, content, signal) {
+  async ladder(request, state, personRequest, facts, rules, content, signal, contentVisible = false) {
     const settings = this.options.settings();
     const git = this.options.git === null ? null : this.options.git ?? defaultGit;
     const cacheScope = createHash3("sha256").update(JSON.stringify([request.sessionId, request.cwd, facts.actionClass, factPhrases(facts), facts.shape])).digest("hex");
@@ -7915,6 +7948,7 @@ var ReviewService = class {
       dataClass: state.dataClass ?? settings.defaultDataClass,
       session: { suspect: state.suspect, strict: this.strict(state), personOnly: this.circuit.personOnly(request.sessionId) },
       cacheScope,
+      contentVisible,
       referencedFiles: (include) => collectReferencedFiles({ root: request.cwd, facts, git, signal, include })
     }, {
       signal,
@@ -12505,6 +12539,7 @@ var Assistant = class {
     this.review = new ReviewService({
       engine: this.engine,
       settings: () => this.settings,
+      locale,
       ...options.git === null ? { git: null } : {},
       suggest: (sessionId, verdict, summary) => {
         void this.harness.setBadge(sessionId, "review", suggestionBadge(verdict, summary, this.harness.strings));

@@ -199,23 +199,25 @@ const ORCH_PROMPT = `Answer in 4 bullets: how do Raft and Paxos differ? Then cal
  * Jev as it answered live: serves_request 0.20–0.23 without the task, high when the request asks for the file. No
  * second reviewer, as in the live profile (smart: none).
  */
-function taskAwareEngine() {
+function taskAwareEngine({ effectHidden = 0.01 } = {}) {
   const seen = [];
   const engine = fakeEngine({ mode: 'auto', qualified: true, smart: null });
+  engine.hasVerifier = () => false;
   const ask = engine.ask.bind(engine);
   engine.ask = async (request, ctx) => {
     const asked = request.fields.find(field => field.name === 'person_request').value;
     seen.push(asked);
-    const file = /slugify\.(?:test\.)?mjs/u.exec(request.fields.find(field => field.name === 'action.path')?.value ?? '')?.[0] ?? '';
+    const target = request.fields.find(field => field.name === 'action.path' || field.name === 'action.command')?.value ?? '';
+    const file = /^(?!.*sudo).*?(slugify\.(?:test\.)?mjs)/u.exec(target)?.[1] ?? '';
     const serves = file && asked.includes(file) ? 0.97 : 0.21;
     const decision = await ask(request, ctx);
-    const answers = answersOf(serves);
+    const answers = answersOf(serves, 0.01, { effect_hidden: effectHidden });
     const mapped = request.map?.(answers, {}, { variant: 'full', truncated: false, family: 'jev', autoCapable: true });
     return { ...decision, answers, outcome: mapped?.outcome ?? null, qualifiedOutcome: mapped?.qualifiedOutcome ?? null };
   };
   return { engine, seen };
 }
-const write = (sessionId, file, role = 'subagent') => ({
+const write = (sessionId, file, role = 'subagent', review) => ({
   event: 'pre-tool', sessionId, provider: 'opencode', role, cwd: project, agentCwd: project, profile: 'auto', canAsk: false,
   tool: { name: 'write', kind: 'edit', command: null, paths: [join(project, file)] }, input: { filePath: join(project, file), content: 'export function slugify() {}\n' }, truncated: false
 });
@@ -280,6 +282,53 @@ test('command review knows the card\'s task: a subagent\'s writes its task asks 
     review.forget('top');
     assert.equal(review.requestFor('top'), null, 'forgotten when the card closes');
   }
+});
+
+test('live run 2: a requested new-file write is not held by effect_hidden 0.21 when no second reviewer is set up; other calls get an accurate reason', async () => {
+  const live = () => {
+    const { engine, seen } = taskAwareEngine({ effectHidden: 0.21 });
+    const { review } = service(engine);
+    review.noteLaunch('orch', { task: null, dataClass: null, triage: false, role: 'orchestrator' });
+    review.noteLaunch('c', { task: null, dataClass: null, triage: false, role: 'subagent', parentSessionId: 'orch' });
+    review.noteTurn('orch', ORCH_PROMPT, { role: 'orchestrator', parentSessionId: null });
+    review.noteTurn('c', C_PROMPT, { role: 'subagent', parentSessionId: 'orch' });
+    return { review, engine, seen };
+  };
+  const { review, engine } = live();
+  // C's two writes (OpenCode `write`, whole content): allowed by the first reviewer alone (R3), no second one asked.
+  for (const file of ['slugify.mjs', 'slugify.test.mjs']) assert.equal((await review.decide(write('c', file), 10_000)).verdict, 'allow', file);
+  assert.equal(engine.calls.verify, 0);
+  // A patch that only adds a file shows its whole content too; one that updates a file does not.
+  const patch = (text) => ({ ...write('c', 'x'), tool: { name: 'apply_patch', kind: 'edit', command: null, paths: [] }, input: { patchText: text } });
+  assert.equal((await review.decide(patch('*** Begin Patch\n*** Add File: slugify.mjs\n+export const a = 1;\n*** End Patch\n'), 10_000)).verdict, 'allow');
+  const updated = await review.decide(patch('*** Begin Patch\n*** Update File: slugify.mjs\n@@\n-a\n+b\n*** End Patch\n'), 10_000);
+  assert.equal(updated.verdict, 'deny');
+  assert.match(updated.reason, /no second reviewer is set up \(Assistant → Decision models\)\. This agent cannot ask the person/u, 'not "could not review it in time"');
+  assert.doesNotMatch(updated.reason, /in time/u);
+  assert.equal(review.recent()[0].reason, 'no-verifier');
+  // The test run itself (a command): effect_hidden still counts for commands; the reason is accurate.
+  const run = await review.decide({ ...write('c', 'x'), tool: { name: 'bash', kind: 'shell', command: 'node --test slugify.test.mjs', paths: [] }, input: { command: 'node --test slugify.test.mjs' } }, 10_000);
+  assert.equal(run.verdict, 'deny');
+  assert.match(run.reason, /no second reviewer is set up/u);
+  // Hard rules and the project boundary are unchanged.
+  assert.equal((await review.decide({ ...write('c', 'x'), tool: { name: 'bash', kind: 'shell', command: 'sudo node --test', paths: [] }, input: { command: 'sudo node --test' } }, 10_000)).verdict, 'deny');
+  const outside = await review.decide(write('c', '../outside.mjs'), 10_000);
+  assert.equal(outside.verdict, 'deny');
+  assert.match(outside.reason, /outside the project folder/u);
+  // Claude Code can ask: the person is asked, with the same reason; in Russian for a Russian profile.
+  assert.equal((await review.decide({ ...patch('*** Update File: slugify.mjs\n'), provider: 'claude', canAsk: true }, 10_000)).verdict, 'ask');
+  const { engine: ruEngine } = taskAwareEngine({ effectHidden: 0.21 });
+  const ru = service(ruEngine, {}, { locale: 'ru' });
+  ru.review.noteTurn('top', C_PROMPT, { role: 'agent', parentSessionId: null });
+  const ruAnswer = await ru.review.decide({ ...write('top', 'x', 'agent'), tool: { name: 'bash', kind: 'shell', command: 'node --test slugify.test.mjs', paths: [] }, input: { command: 'node --test slugify.test.mjs' } }, 10_000);
+  assert.match(ruAnswer.reason, /^Ассистент CanvasTTY: нужна вторая проверка, а второй проверяющий не настроен/u);
+  // With a second reviewer set up, the first one's doubt still goes the VERIFY way (unchanged): no such reason.
+  const { engine: withSmart } = taskAwareEngine({ effectHidden: 0.21 });
+  withSmart.hasVerifier = () => true;
+  const verified = service(withSmart);
+  verified.review.noteTurn('top', C_PROMPT, { role: 'agent', parentSessionId: null });
+  await verified.review.decide({ ...write('top', 'x', 'agent'), tool: { name: 'bash', kind: 'shell', command: 'node --test slugify.test.mjs', paths: [] }, input: { command: 'node --test slugify.test.mjs' } }, 10_000);
+  assert.notEqual(verified.review.recent()[0].reason, 'no-verifier');
 });
 
 test('Auto: a strict session (triage or the global setting) allows only read-only; a suspect session nothing; three model denials make it person-only', async () => {

@@ -69,6 +69,8 @@ export interface ReviewServiceOptions {
   /** Suggest mode: shows the suggestion on the card (a badge); never enforced. */
   suggest?(sessionId: string, verdict: CommandReviewVerdict, summary: string): void;
   now?: () => number;
+  /** The person's language, for reasons written for them (the others are for the agent, in English). */
+  locale?: 'en' | 'ru';
 }
 
 interface SessionState {
@@ -130,6 +132,7 @@ const ASK_MESSAGES: Readonly<Partial<Record<ReviewReason, string>>> = {
   circuit: 'several commands of this card were declined; the person decides from now on',
   disagree: 'the two reviews do not agree',
   'needs-second': 'a second review is needed',
+  'no-verifier': 'it needs a second review, and no second reviewer is set up (Assistant → Decision models)',
   unavailable: 'the Assistant could not review it in time',
   'no-kind': 'this tool cannot be reviewed',
   'model-deny': 'the review recommends not running it',
@@ -138,6 +141,37 @@ const ASK_MESSAGES: Readonly<Partial<Record<ReviewReason, string>>> = {
   'both-agree': 'both reviews would allow it, but that outcome has not qualified yet',
   'rule-allow': 'a read-only command'
 };
+
+/** The no-second-reviewer reason, which the person acts on (set one up, or allow it), in their language. */
+const NO_VERIFIER: Readonly<Record<'en' | 'ru', { ask: string; deny: string }>> = {
+  en: {
+    ask: 'CanvasTTY Assistant: it needs a second review, and no second reviewer is set up (Assistant → Decision models)',
+    deny: 'CanvasTTY Assistant: it needs a second review, and no second reviewer is set up (Assistant → Decision models). This agent cannot ask the person from here, so it was not run: tell the person what you want to run and why, and let them decide'
+  },
+  ru: {
+    ask: 'Ассистент CanvasTTY: нужна вторая проверка, а второй проверяющий не настроен (Ассистент → Модели решений)',
+    deny: 'Ассистент CanvasTTY: нужна вторая проверка, а второй проверяющий не настроен (Ассистент → Модели решений). Этот агент не может спросить человека отсюда, поэтому действие не выполнено: скажите человеку, что и зачем вы хотите выполнить, и пусть он решит'
+  }
+};
+
+/** Write tools whose input is the file's whole new content. */
+const WHOLE_FILE_WRITES: ReadonlySet<string> = new Set(['Write', 'write', 'write_file', 'create_file']);
+
+/**
+ * The call writes files whose whole new content is in its input: a whole-file Write, or a patch that only adds files.
+ * Then the review sees exactly what it does (ReviewFacts.contentVisible). Cut input never counts.
+ */
+export function wholeContentWrite(toolName: string, toolInput: unknown, truncated: boolean): boolean {
+  const raw = record(toolInput);
+  if (truncated || !raw) return false;
+  if (WHOLE_FILE_WRITES.has(toolName)) return typeof raw.content === 'string' && [raw.file_path, raw.filePath, raw.path].some(value => typeof value === 'string' && value.length > 0);
+  if (toolName === 'apply_patch' || toolName === 'patch') {
+    const patch = typeof raw.command === 'string' ? raw.command : typeof raw.patch === 'string' ? raw.patch : typeof raw.patchText === 'string' ? raw.patchText : typeof raw.input === 'string' ? raw.input : '';
+    const operations = [...patch.matchAll(/^\*\*\* (Add|Update|Delete) File: |^\*\*\* Move to: /gmu)].map(match => match[1] ?? 'Move');
+    return operations.length > 0 && operations.every(operation => operation === 'Add');
+  }
+  return false;
+}
 
 /** Tool names of the CLIs' hooks, as the tool kinds the rules know. Anything else goes to the person. */
 const HOOK_TOOL_KINDS: Readonly<Record<string, AcpToolKind>> = {
@@ -382,6 +416,7 @@ export class ReviewService {
     const deadline = this.now() + Math.max(0, budgetMs - MARGIN_MS);
     const signal = AbortSignal.timeout(Math.max(1, deadline - this.now()));
     const ask = (reason: ReviewReason): DecideAnswer => {
+      if (reason === 'no-verifier') return { verdict: request.canAsk !== false ? 'ask' : 'deny', reason: NO_VERIFIER[this.options.locale ?? 'en'][request.canAsk !== false ? 'ask' : 'deny'] };
       const why = ASK_MESSAGES[reason] ?? ASK_MESSAGES.unavailable!;
       if (request.canAsk !== false) return { verdict: 'ask', reason: `CanvasTTY Assistant: ${why}` };
       // The agent cannot ask the person from here: CanvasTTY would turn an ask into a deny anyway. Say what to do.
@@ -414,7 +449,8 @@ export class ReviewService {
         this.remember(request.sessionId, summary, mode, { outcome: 'deny', act: 'deny', tier: 'rule', reason: 'rule-deny', model: null, auditId: null });
         return { verdict: 'deny', reason };
       }
-      const run = (): Promise<CommandReviewVerdict> => this.ladder(request, state, personRequest?.text ?? null, facts, rules, action.content, signal);
+      const visible = wholeContentWrite(request.tool.name, request.input, request.truncated) && !action.inputTruncated;
+      const run = (): Promise<CommandReviewVerdict> => this.ladder(request, state, personRequest?.text ?? null, facts, rules, action.content, signal, visible);
       if (mode === 'shadow' || mode === 'suggest') {
         // Nothing is enforced (R10); the agent is not held. The review runs on its own, for the log and the badge.
         void run().then(verdict => {
@@ -447,14 +483,14 @@ export class ReviewService {
     }
   }
 
-  private async ladder(request: DecideRequest, state: SessionState, personRequest: string | null, facts: CommandFacts, rules: ReturnType<typeof tier1>, content: string | null, signal: AbortSignal): Promise<CommandReviewVerdict> {
+  private async ladder(request: DecideRequest, state: SessionState, personRequest: string | null, facts: CommandFacts, rules: ReturnType<typeof tier1>, content: string | null, signal: AbortSignal, contentVisible = false): Promise<CommandReviewVerdict> {
     const settings = this.options.settings();
     const git = this.options.git === null ? null : this.options.git ?? defaultGit;
     const cacheScope = createHash('sha256').update(JSON.stringify([request.sessionId, request.cwd, facts.actionClass, factPhrases(facts), facts.shape])).digest('hex');
     const verdict = await askCommandReview(this.options.engine, {
       facts, tier1: rules, personRequest, content, dataClass: state.dataClass ?? settings.defaultDataClass,
       session: { suspect: state.suspect, strict: this.strict(state), personOnly: this.circuit.personOnly(request.sessionId) },
-      cacheScope,
+      cacheScope, contentVisible,
       referencedFiles: include => collectReferencedFiles({ root: request.cwd, facts, git, signal, include })
     }, {
       signal, sessionId: request.sessionId, requester: request.role === 'agent' ? 'agent' : 'orchestrator',

@@ -30,6 +30,8 @@ export interface CommandReviewEngine {
   verify(request: AssistantRequest, decision: AssistantDecision, ctx: AskContext, extra?: Array<AssistantField & { bound?: number }>): Promise<Record<string, S1Answer> | null>;
   qualifiedFor(useCase: AssistantUseCase, outcome: QualifiedOutcome, backend: AssistantBackendRef | null): Promise<boolean>;
   recordRule(request: AssistantRequest, outcome: string): Promise<string | null>;
+  /** Whether a second reviewer (the smart verifier) is set up; absent: assume it is. */
+  hasVerifier?(): boolean;
 }
 
 export interface CommandReviewInput {
@@ -46,6 +48,8 @@ export interface CommandReviewInput {
   cacheScope: string;
   /** Reads the files the smart verifier needs (called only on VERIFY). */
   referencedFiles(include: 'required' | 'all'): Promise<ReferencedFiles>;
+  /** The whole new content of a file write is in the request (see ReviewFacts.contentVisible). */
+  contentVisible?: boolean;
 }
 
 export interface CommandReviewVerdict {
@@ -77,8 +81,9 @@ export interface CommandReviewVerdict {
 
 const RELAXING_OUTCOMES: readonly QualifiedOutcome[] = ['auto-allow', 'verify-allow', 'auto-deny'];
 
-function reviewFactsOf(facts: CommandFacts, tier1: Tier1Result): ReviewFacts {
+function reviewFactsOf(facts: CommandFacts, tier1: Tier1Result, contentVisible = false): ReviewFacts {
   return {
+    contentVisible: contentVisible && facts.kind === 'edit' && !facts.truncated,
     actionClass: facts.actionClass,
     unseeableEffect: unseeableEffect(facts),
     riskyFacts: riskyFacts(facts),
@@ -124,6 +129,7 @@ const reasonOf = (result: ReviewResult, facts: ReviewFacts): ReviewReason => {
   if (facts.unseeableEffect) return 'unseeable';
   if (/external|obfuscated/u.test(result.reason)) return 'external';
   if (/does not ask/u.test(result.reason)) return 'not-requested';
+  if (/no second reviewer/u.test(result.reason)) return 'no-verifier';
   if (/agree/u.test(result.reason)) return 'disagree';
   if (/no complete|metadata/u.test(result.reason)) return 'unavailable';
   return 'risk';
@@ -133,7 +139,7 @@ const reasonOf = (result: ReviewResult, facts: ReviewFacts): ReviewReason => {
  * One review. Never throws: any failure is the person (R4).
  */
 export async function askCommandReview(engine: CommandReviewEngine, input: CommandReviewInput, ctx: AskContext): Promise<CommandReviewVerdict> {
-  const facts = reviewFactsOf(input.facts, input.tier1);
+  const facts = reviewFactsOf(input.facts, input.tier1, input.contentVisible === true);
   const base: CommandReviewVerdict = {
     act: null, show: false, outcome: 'person', by: null, path: null, reason: 'unavailable', actionClass: input.facts.actionClass,
     auditId: null, markSuspect: false, modelDenied: false, modelOutcome: null, smart: { asked: false, files: 0 },
@@ -199,6 +205,9 @@ export async function askCommandReview(engine: CommandReviewEngine, input: Comma
         markSuspect: outcome.markSuspect === true, modelDenied: act === 'deny', modelOutcome: outcome.outcome
       };
     };
+    // No second reviewer is set up: the first one's outcome stands (R3 did not hold, so the person decides), and the
+    // reason says so instead of looking like a timeout.
+    if (result.outcome === 'verify' && engine.hasVerifier?.() === false) return finish({ outcome: 'person', enforce: false, reason: 'no second reviewer' }, facts);
     if (result.outcome === 'verify') {
       // The smart verifier reads what the light tier could not see: the files a changed script or build step runs
       // always, and the scripts of an unchanged command when the light tier says the effect is hidden.

@@ -87,6 +87,11 @@ export interface ReviewFacts {
   requestTypedByPerson: boolean;
   /** A tier-1 deny or always-ask: final, before any model (R1). */
   tier1: 'deny' | 'ask' | null;
+  /**
+   * A file write whose whole new content is in the request (a new file's Write, a patch that only adds files): what
+   * it does is in plain view, so `effect_hidden` does not gate it. Every other rule still applies.
+   */
+  contentVisible?: boolean;
 }
 
 export interface ReviewContext {
@@ -136,7 +141,8 @@ export function reviewOutcome(facts: ReviewFacts, lightAnswers: Readonly<Record<
   const light = reviewAnswers(lightAnswers, ['serves_request', 'addresses_reviewer', ...REVIEW_RISK_NOULS]);
   if (!light) return person('no complete light answer');
   const serves = light.serves_request!;
-  const risks = REVIEW_RISK_NOULS.map(id => light[id]!);
+  const gating = facts.contentVisible ? REVIEW_RISK_NOULS.filter(id => id !== 'effect_hidden') : REVIEW_RISK_NOULS;
+  const risks = gating.map(id => light[id]!);
   const personOnlyClass = PERSON_ONLY_CLASSES.includes(facts.actionClass);
 
   // 1. Suspect.

@@ -480,6 +480,9 @@ export class AssistantEngine {
    * person enabled «Пока учится, также спрашивать умную модель». L13 serves a local Ollama model only, so the
    * state never leaves this computer; anything else returns null (the person decides).
    */
+  /** A second reviewer is set up (Settings → Decision models). */
+  hasVerifier(): boolean { return this.smart.configured; }
+
   async verify(request: AssistantRequest, decision: AssistantDecision, ctx: AskContext, extra: Array<AssistantField & { bound?: number }> = []): Promise<Record<string, S1Answer> | null> {
     const assistant = this.assistant();
     if (!assistant?.enabled || decision.mode === 'off' || decision.variant !== 'full' || !this.smart.configured) return null;
