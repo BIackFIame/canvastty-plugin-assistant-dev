@@ -12,6 +12,14 @@
     if (scale !== null && Number.isFinite(scale) && scale >= 0.5 && scale <= 3) root2.style?.setProperty("--ui-scale", String(scale));
     return locale;
   }
+  function el(tag, props = {}, ...children) {
+    const node = document.createElement(tag);
+    const { dataset, ...rest } = props;
+    Object.assign(node, rest);
+    if (dataset) Object.assign(node.dataset, dataset);
+    for (const child of children) if (child !== null && child !== false) node.append(child);
+    return node;
+  }
   var deferred = false;
   function whenIdle(refresh) {
     const active = document.activeElement;
@@ -26,6 +34,310 @@
       return;
     }
     refresh();
+  }
+
+  // src/ui/autoRouting.ts
+  var OPENROUTER = "https://openrouter.ai/api/v1";
+  var AUTO_PAGE_STRINGS = {
+    en: {
+      title: "Model: Auto (Jev)",
+      lead: "For OpenCode cards started with Model: Auto (Jev) (launcher \u2192 Advanced \u2192 Use CanvasTTY Assistant). A local router on 127.0.0.1, protected by a key per card, picks one of the models below for each new turn: Jev (task triage, when it is Suggest or Auto above) judges how hard the turn is, otherwise word rules do. Tool steps keep the turn's model; titles use the cheapest one. Prompts go only to the upstream that answers; Jev gets only the latest user text, under the data rules below. Leave the launcher's Model at Default and choose no model account.",
+      upstreams: "Upstreams",
+      none: "None yet.",
+      add: "Add",
+      remove: "Remove",
+      on: "On",
+      check: "Check",
+      checking: "Checking\u2026",
+      preset: { openrouter: "OpenRouter", "openai-compatible": "OpenAI-compatible" },
+      idLabel: "Name (a-z, 0-9, -)",
+      baseUrl: "Base URL (\u2026/v1)",
+      trust: "I trust it with",
+      trustHelp: "D3 only for a server on this computer.",
+      keyFrom: "Key",
+      keyOwn: "Its own key",
+      keyJev: "The Jev \xB7 OpenRouter key",
+      keyNone: "No key (a server on this computer)",
+      keySet: "key saved",
+      keyMissing: "no key",
+      keyPlaceholder: "Key",
+      saveKey: "Save key",
+      removeKey: "Remove key",
+      models: "Models",
+      modelId: "Model id",
+      tier: { small: "small", medium: "medium", large: "large" },
+      priceIn: "$/M in",
+      priceOut: "$/M out",
+      addModel: "Add model",
+      noModels: "No models: add at least one.",
+      checkOk: (listed, missing) => `Works${listed !== null ? ` (${listed} models listed)` : ""}.${missing.length ? ` Not listed by it: ${missing.join(", ")}.` : ""}`,
+      checkFail: (status2) => status2 === null ? "No answer, or no key saved." : `It answered ${status2}.`,
+      choices: "Choices",
+      preference: "Preference",
+      pref: { cheap: "Cheap", balanced: "Balanced", best: "Best" },
+      prefHelp: "Cheap goes one tier down and the lowest price first; Best one tier up and the highest price first.",
+      cheaper: "If a tier has no usable model, a cheaper one may answer (a stronger one is always tried first)",
+      decider: "Who judges a turn",
+      deciderJev: "Jev, word rules when it does not answer",
+      deciderRules: "Word rules only",
+      daily: "Daily cap, USD",
+      perCard: "Per card, USD",
+      capsHelp: "Counted from the cost the upstream reports, or from the prices you entered. 0 stops Auto.",
+      save: "Save",
+      recent: "Recent routing",
+      noRecent: "Nothing routed yet.",
+      stats: (s) => `${s.requests} model calls, Jev asked ${s.jevAsked} times (${s.jevAnswered} answered), ${s.leaseReuses} reused a turn's choice, ${s.failovers} failovers; today $${s.spentToday.toFixed(4)}; ${s.listening ? `listening for ${s.cards} card(s)` : "not listening"}${s.hosts.length ? `; sent to ${s.hosts.join(", ")}` : ""}.`,
+      kind: { turn: "turn", continuation: "tool step", small: "title" },
+      source: { jev: "Jev", rules: "rules", lease: "same turn", small: "small rule" },
+      unreadable: "The saved Auto (Jev) settings could not be read yet; nothing can be changed until they are."
+    },
+    ru: {
+      title: "\u041C\u043E\u0434\u0435\u043B\u044C: \u0410\u0432\u0442\u043E (Jev)",
+      lead: "\u0414\u043B\u044F \u043E\u043A\u043E\u043D OpenCode, \u0437\u0430\u043F\u0443\u0449\u0435\u043D\u043D\u044B\u0445 \u0441 \u043C\u043E\u0434\u0435\u043B\u044C\u044E \xAB\u0410\u0432\u0442\u043E (Jev)\xBB (\u0437\u0430\u043F\u0443\u0441\u043A \u2192 \u0414\u043E\u043F\u043E\u043B\u043D\u0438\u0442\u0435\u043B\u044C\u043D\u043E \u2192 \u0410\u0441\u0441\u0438\u0441\u0442\u0435\u043D\u0442 CanvasTTY). \u041B\u043E\u043A\u0430\u043B\u044C\u043D\u044B\u0439 \u043C\u0430\u0440\u0448\u0440\u0443\u0442\u0438\u0437\u0430\u0442\u043E\u0440 \u043D\u0430 127.0.0.1 \u0441 \u043A\u043B\u044E\u0447\u043E\u043C \u043D\u0430 \u043A\u0430\u0436\u0434\u043E\u0435 \u043E\u043A\u043D\u043E \u043D\u0430 \u043A\u0430\u0436\u0434\u043E\u043C \u043D\u043E\u0432\u043E\u043C \u0445\u043E\u0434\u0435 \u0432\u044B\u0431\u0438\u0440\u0430\u0435\u0442 \u043E\u0434\u043D\u0443 \u0438\u0437 \u043C\u043E\u0434\u0435\u043B\u0435\u0439 \u043D\u0438\u0436\u0435: \u043D\u0430\u0441\u043A\u043E\u043B\u044C\u043A\u043E \u0445\u043E\u0434 \u0441\u043B\u043E\u0436\u043D\u044B\u0439, \u0440\u0435\u0448\u0430\u0435\u0442 Jev (\u0440\u0430\u0437\u0431\u043E\u0440 \u0437\u0430\u0434\u0430\u0447\u0438, \u043A\u043E\u0433\u0434\u0430 \u043E\u043D \u0432 \u0440\u0435\u0436\u0438\u043C\u0435 \xAB\u041F\u043E\u0434\u0441\u043A\u0430\u0437\u043A\u0438\xBB \u0438\u043B\u0438 \xAB\u0410\u0432\u0442\u043E\xBB \u0432\u044B\u0448\u0435), \u0438\u043D\u0430\u0447\u0435 \u0441\u043B\u043E\u0432\u0435\u0441\u043D\u044B\u0435 \u043F\u0440\u0430\u0432\u0438\u043B\u0430. \u0428\u0430\u0433\u0438 \u0441 \u0438\u043D\u0441\u0442\u0440\u0443\u043C\u0435\u043D\u0442\u0430\u043C\u0438 \u043E\u0441\u0442\u0430\u044E\u0442\u0441\u044F \u043D\u0430 \u043C\u043E\u0434\u0435\u043B\u0438 \u0445\u043E\u0434\u0430, \u0437\u0430\u0433\u043E\u043B\u043E\u0432\u043A\u0438 \u2014 \u043D\u0430 \u0441\u0430\u043C\u043E\u0439 \u0434\u0435\u0448\u0451\u0432\u043E\u0439. \u0417\u0430\u043F\u0440\u043E\u0441\u044B \u0443\u0445\u043E\u0434\u044F\u0442 \u0442\u043E\u043B\u044C\u043A\u043E \u043F\u043E\u0441\u0442\u0430\u0432\u0449\u0438\u043A\u0443, \u043A\u043E\u0442\u043E\u0440\u044B\u0439 \u043E\u0442\u0432\u0435\u0447\u0430\u0435\u0442; Jev \u043F\u043E\u043B\u0443\u0447\u0430\u0435\u0442 \u0442\u043E\u043B\u044C\u043A\u043E \u043F\u043E\u0441\u043B\u0435\u0434\u043D\u0438\u0439 \u0442\u0435\u043A\u0441\u0442 \u043F\u043E\u043B\u044C\u0437\u043E\u0432\u0430\u0442\u0435\u043B\u044F \u043F\u043E \u043F\u0440\u0430\u0432\u0438\u043B\u0430\u043C \u0434\u0430\u043D\u043D\u044B\u0445 \u043D\u0438\u0436\u0435. \u0412 \u043E\u043A\u043D\u0435 \u0437\u0430\u043F\u0443\u0441\u043A\u0430 \u043E\u0441\u0442\u0430\u0432\u044C\u0442\u0435 \xAB\u041C\u043E\u0434\u0435\u043B\u044C\xBB \u043F\u043E \u0443\u043C\u043E\u043B\u0447\u0430\u043D\u0438\u044E \u0438 \u043D\u0435 \u0432\u044B\u0431\u0438\u0440\u0430\u0439\u0442\u0435 \u0430\u043A\u043A\u0430\u0443\u043D\u0442 \u043C\u043E\u0434\u0435\u043B\u0438.",
+      upstreams: "\u041F\u043E\u0441\u0442\u0430\u0432\u0449\u0438\u043A\u0438",
+      none: "\u041F\u043E\u043A\u0430 \u043D\u0435\u0442.",
+      add: "\u0414\u043E\u0431\u0430\u0432\u0438\u0442\u044C",
+      remove: "\u0423\u0434\u0430\u043B\u0438\u0442\u044C",
+      on: "\u0412\u043A\u043B",
+      check: "\u041F\u0440\u043E\u0432\u0435\u0440\u0438\u0442\u044C",
+      checking: "\u041F\u0440\u043E\u0432\u0435\u0440\u044F\u044E\u2026",
+      preset: { openrouter: "OpenRouter", "openai-compatible": "\u0421\u043E\u0432\u043C\u0435\u0441\u0442\u0438\u043C\u044B\u0439 \u0441 OpenAI" },
+      idLabel: "\u0418\u043C\u044F (a-z, 0-9, -)",
+      baseUrl: "\u0411\u0430\u0437\u043E\u0432\u044B\u0439 \u0430\u0434\u0440\u0435\u0441 (\u2026/v1)",
+      trust: "\u0414\u043E\u0432\u0435\u0440\u044F\u044E \u0434\u043E",
+      trustHelp: "D3 \u2014 \u0442\u043E\u043B\u044C\u043A\u043E \u0441\u0435\u0440\u0432\u0435\u0440\u0443 \u043D\u0430 \u044D\u0442\u043E\u043C \u043A\u043E\u043C\u043F\u044C\u044E\u0442\u0435\u0440\u0435.",
+      keyFrom: "\u041A\u043B\u044E\u0447",
+      keyOwn: "\u0421\u0432\u043E\u0439 \u043A\u043B\u044E\u0447",
+      keyJev: "\u041A\u043B\u044E\u0447 Jev \xB7 OpenRouter",
+      keyNone: "\u0411\u0435\u0437 \u043A\u043B\u044E\u0447\u0430 (\u0441\u0435\u0440\u0432\u0435\u0440 \u043D\u0430 \u044D\u0442\u043E\u043C \u043A\u043E\u043C\u043F\u044C\u044E\u0442\u0435\u0440\u0435)",
+      keySet: "\u043A\u043B\u044E\u0447 \u0441\u043E\u0445\u0440\u0430\u043D\u0451\u043D",
+      keyMissing: "\u043D\u0435\u0442 \u043A\u043B\u044E\u0447\u0430",
+      keyPlaceholder: "\u041A\u043B\u044E\u0447",
+      saveKey: "\u0421\u043E\u0445\u0440\u0430\u043D\u0438\u0442\u044C \u043A\u043B\u044E\u0447",
+      removeKey: "\u0423\u0434\u0430\u043B\u0438\u0442\u044C \u043A\u043B\u044E\u0447",
+      models: "\u041C\u043E\u0434\u0435\u043B\u0438",
+      modelId: "Id \u043C\u043E\u0434\u0435\u043B\u0438",
+      tier: { small: "\u043C\u0430\u043B\u0435\u043D\u044C\u043A\u0430\u044F", medium: "\u0441\u0440\u0435\u0434\u043D\u044F\u044F", large: "\u0431\u043E\u043B\u044C\u0448\u0430\u044F" },
+      priceIn: "$/\u041C \u0432\u0445\u043E\u0434",
+      priceOut: "$/\u041C \u0432\u044B\u0445\u043E\u0434",
+      addModel: "\u0414\u043E\u0431\u0430\u0432\u0438\u0442\u044C \u043C\u043E\u0434\u0435\u043B\u044C",
+      noModels: "\u041C\u043E\u0434\u0435\u043B\u0435\u0439 \u043D\u0435\u0442: \u0434\u043E\u0431\u0430\u0432\u044C\u0442\u0435 \u0445\u043E\u0442\u044F \u0431\u044B \u043E\u0434\u043D\u0443.",
+      checkOk: (listed, missing) => `\u0420\u0430\u0431\u043E\u0442\u0430\u0435\u0442${listed !== null ? ` (\u043C\u043E\u0434\u0435\u043B\u0435\u0439 \u0432 \u0441\u043F\u0438\u0441\u043A\u0435: ${listed})` : ""}.${missing.length ? ` \u041D\u0435\u0442 \u0432 \u0435\u0433\u043E \u0441\u043F\u0438\u0441\u043A\u0435: ${missing.join(", ")}.` : ""}`,
+      checkFail: (status2) => status2 === null ? "\u041D\u0435\u0442 \u043E\u0442\u0432\u0435\u0442\u0430 \u0438\u043B\u0438 \u043D\u0435 \u0441\u043E\u0445\u0440\u0430\u043D\u0451\u043D \u043A\u043B\u044E\u0447." : `\u041E\u0442\u0432\u0435\u0442: ${status2}.`,
+      choices: "\u0412\u044B\u0431\u043E\u0440",
+      preference: "\u041F\u0440\u0435\u0434\u043F\u043E\u0447\u0442\u0435\u043D\u0438\u0435",
+      pref: { cheap: "\u0414\u0435\u0448\u0435\u0432\u043B\u0435", balanced: "\u0421\u0431\u0430\u043B\u0430\u043D\u0441\u0438\u0440\u043E\u0432\u0430\u043D\u043D\u043E", best: "\u041B\u0443\u0447\u0448\u0435" },
+      prefHelp: "\xAB\u0414\u0435\u0448\u0435\u0432\u043B\u0435\xBB \u2014 \u043D\u0430 \u0443\u0440\u043E\u0432\u0435\u043D\u044C \u043D\u0438\u0436\u0435 \u0438 \u0441\u043D\u0430\u0447\u0430\u043B\u0430 \u0441\u0430\u043C\u0430\u044F \u043D\u0438\u0437\u043A\u0430\u044F \u0446\u0435\u043D\u0430; \xAB\u041B\u0443\u0447\u0448\u0435\xBB \u2014 \u043D\u0430 \u0443\u0440\u043E\u0432\u0435\u043D\u044C \u0432\u044B\u0448\u0435 \u0438 \u0441\u043D\u0430\u0447\u0430\u043B\u0430 \u0441\u0430\u043C\u0430\u044F \u0432\u044B\u0441\u043E\u043A\u0430\u044F.",
+      cheaper: "\u0415\u0441\u043B\u0438 \u043D\u0430 \u0443\u0440\u043E\u0432\u043D\u0435 \u043D\u0435\u0442 \u0434\u043E\u0441\u0442\u0443\u043F\u043D\u043E\u0439 \u043C\u043E\u0434\u0435\u043B\u0438, \u043C\u043E\u0436\u0435\u0442 \u043E\u0442\u0432\u0435\u0442\u0438\u0442\u044C \u0431\u043E\u043B\u0435\u0435 \u0434\u0435\u0448\u0451\u0432\u0430\u044F (\u0441\u043D\u0430\u0447\u0430\u043B\u0430 \u0432\u0441\u0435\u0433\u0434\u0430 \u043F\u0440\u043E\u0431\u0443\u0435\u0442\u0441\u044F \u0431\u043E\u043B\u0435\u0435 \u0441\u0438\u043B\u044C\u043D\u0430\u044F)",
+      decider: "\u041A\u0442\u043E \u043E\u0446\u0435\u043D\u0438\u0432\u0430\u0435\u0442 \u0445\u043E\u0434",
+      deciderJev: "Jev, \u0441\u043B\u043E\u0432\u0435\u0441\u043D\u044B\u0435 \u043F\u0440\u0430\u0432\u0438\u043B\u0430, \u0435\u0441\u043B\u0438 \u043E\u043D \u043D\u0435 \u043E\u0442\u0432\u0435\u0442\u0438\u043B",
+      deciderRules: "\u0422\u043E\u043B\u044C\u043A\u043E \u0441\u043B\u043E\u0432\u0435\u0441\u043D\u044B\u0435 \u043F\u0440\u0430\u0432\u0438\u043B\u0430",
+      daily: "\u041F\u0440\u0435\u0434\u0435\u043B \u0432 \u0434\u0435\u043D\u044C, USD",
+      perCard: "\u041D\u0430 \u043E\u043A\u043D\u043E, USD",
+      capsHelp: "\u0421\u0447\u0438\u0442\u0430\u0435\u0442\u0441\u044F \u043F\u043E \u0441\u0442\u043E\u0438\u043C\u043E\u0441\u0442\u0438, \u043A\u043E\u0442\u043E\u0440\u0443\u044E \u0441\u043E\u043E\u0431\u0449\u0430\u0435\u0442 \u043F\u043E\u0441\u0442\u0430\u0432\u0449\u0438\u043A, \u0438\u043B\u0438 \u043F\u043E \u0432\u0432\u0435\u0434\u0451\u043D\u043D\u044B\u043C \u0446\u0435\u043D\u0430\u043C. 0 \u043E\u0441\u0442\u0430\u043D\u0430\u0432\u043B\u0438\u0432\u0430\u0435\u0442 \xAB\u0410\u0432\u0442\u043E\xBB.",
+      save: "\u0421\u043E\u0445\u0440\u0430\u043D\u0438\u0442\u044C",
+      recent: "\u041F\u043E\u0441\u043B\u0435\u0434\u043D\u0438\u0435 \u0440\u0435\u0448\u0435\u043D\u0438\u044F",
+      noRecent: "\u041F\u043E\u043A\u0430 \u043D\u0438\u0447\u0435\u0433\u043E \u043D\u0435 \u043C\u0430\u0440\u0448\u0440\u0443\u0442\u0438\u0437\u0438\u0440\u043E\u0432\u0430\u043D\u043E.",
+      stats: (s) => `\u0412\u044B\u0437\u043E\u0432\u043E\u0432 \u043C\u043E\u0434\u0435\u043B\u0435\u0439: ${s.requests}, Jev \u0441\u043F\u0440\u043E\u0448\u0435\u043D ${s.jevAsked} \u0440\u0430\u0437 (\u043E\u0442\u0432\u0435\u0442\u0438\u043B ${s.jevAnswered}), \u0440\u0435\u0448\u0435\u043D\u0438\u0435 \u0445\u043E\u0434\u0430 \u043F\u043E\u0432\u0442\u043E\u0440\u043D\u043E: ${s.leaseReuses}, \u043F\u0435\u0440\u0435\u043A\u043B\u044E\u0447\u0435\u043D\u0438\u0439: ${s.failovers}; \u0441\u0435\u0433\u043E\u0434\u043D\u044F $${s.spentToday.toFixed(4)}; ${s.listening ? `\u0441\u043B\u0443\u0448\u0430\u0435\u0442, \u043E\u043A\u043E\u043D: ${s.cards}` : "\u043D\u0435 \u0441\u043B\u0443\u0448\u0430\u0435\u0442"}${s.hosts.length ? `; \u043E\u0442\u043F\u0440\u0430\u0432\u043B\u0435\u043D\u043E \u043D\u0430 ${s.hosts.join(", ")}` : ""}.`,
+      kind: { turn: "\u0445\u043E\u0434", continuation: "\u0448\u0430\u0433 \u0438\u043D\u0441\u0442\u0440\u0443\u043C\u0435\u043D\u0442\u0430", small: "\u0437\u0430\u0433\u043E\u043B\u043E\u0432\u043E\u043A" },
+      source: { jev: "Jev", rules: "\u043F\u0440\u0430\u0432\u0438\u043B\u0430", lease: "\u0442\u043E\u0442 \u0436\u0435 \u0445\u043E\u0434", small: "\u043F\u0440\u0430\u0432\u0438\u043B\u043E \u043C\u0430\u043B\u0435\u043D\u044C\u043A\u043E\u0439" },
+      unreadable: "\u0421\u043E\u0445\u0440\u0430\u043D\u0451\u043D\u043D\u044B\u0435 \u043D\u0430\u0441\u0442\u0440\u043E\u0439\u043A\u0438 \xAB\u0410\u0432\u0442\u043E (Jev)\xBB \u0435\u0449\u0451 \u043D\u0435 \u043F\u0440\u043E\u0447\u0438\u0442\u0430\u043D\u044B; \u043F\u043E\u043A\u0430 \u0438\u0445 \u043D\u0435\u043B\u044C\u0437\u044F \u043C\u0435\u043D\u044F\u0442\u044C."
+    }
+  };
+  function selectOf(name, value, options, onChange) {
+    const node = el("select", { name });
+    for (const [option, label] of options) node.append(el("option", { value: option, textContent: label, selected: option === value }));
+    node.addEventListener("change", () => onChange(node.value));
+    return node;
+  }
+  function checkOf(name, checked, label, onChange) {
+    const input = el("input", { type: "checkbox", checked, name });
+    input.addEventListener("change", () => onChange(input.checked));
+    return el("label", { className: "check" }, input, ` ${label}`);
+  }
+  var labelled = (label, control) => el("div", { className: "row" }, el("span", { className: "label", textContent: label }), control);
+  var number = (value) => value.trim() === "" ? void 0 : Number(value);
+  var isLocal = (url) => /^http:\/\/(?:127\.0\.0\.1|localhost|\[::1\])(?::\d+)?\//u.test(`${url}/`);
+  function renderAuto(state2, t2, page, checks) {
+    const settings = state2.settings;
+    const save2 = (change) => {
+      const next = structuredClone(settings);
+      change(next);
+      page.request("auto.save", { settings: next }).then(() => page.reload(), (error) => page.say(error instanceof Error ? error.message : String(error)));
+    };
+    const section = el("section", { className: "auto", dataset: { section: "auto" } });
+    section.append(el("h2", { textContent: t2.title }), el("p", { className: "muted", textContent: t2.lead }));
+    if (!state2.readable) section.append(el("p", { className: "muted", textContent: t2.unreadable }));
+    section.append(el("h2", { textContent: t2.upstreams }));
+    const list = el("ul", { className: "backends" });
+    if (!settings.upstreams.length) list.append(el("li", { className: "muted", textContent: t2.none }));
+    for (const upstream of settings.upstreams) list.append(upstreamRow(upstream, state2, t2, page, save2, checks));
+    section.append(list, addUpstream(settings, t2, save2));
+    section.append(
+      el("h2", { textContent: t2.choices }),
+      labelled(t2.preference, selectOf("auto-preference", settings.preference, ["cheap", "balanced", "best"].map((p) => [p, t2.pref[p]]), (value) => save2((next) => {
+        next.preference = value;
+      }))),
+      el("p", { className: "muted", textContent: t2.prefHelp }),
+      checkOf("auto-cheaper", settings.cheaperFallback, t2.cheaper, (value) => save2((next) => {
+        next.cheaperFallback = value;
+      })),
+      labelled(t2.decider, selectOf("auto-decider", settings.decider, [["jev", t2.deciderJev], ["rules", t2.deciderRules]], (value) => save2((next) => {
+        next.decider = value;
+      })))
+    );
+    const daily = el("input", { type: "number", name: "auto-daily", min: "0", max: "100", step: "0.01", value: String(settings.dailyUsdCap) });
+    const perCard = el("input", { type: "number", name: "auto-per-card", min: "0", max: "100", step: "0.01", value: String(settings.perCardUsdCap) });
+    const saveCaps = el("button", { type: "button", textContent: t2.save, name: "auto-caps-save" });
+    saveCaps.addEventListener("click", () => save2((next) => {
+      next.dailyUsdCap = Number(daily.value);
+      next.perCardUsdCap = Number(perCard.value);
+    }));
+    section.append(
+      el("div", { className: "row" }, el("span", { className: "label", textContent: t2.daily }), daily, el("span", { textContent: t2.perCard }), perCard, saveCaps),
+      el("p", { className: "muted", textContent: t2.capsHelp })
+    );
+    section.append(el("h2", { textContent: t2.recent }), el("p", { className: "muted", textContent: t2.stats(state2.stats), dataset: { auto: "stats" } }));
+    const recent = el("ul", { className: "recent", dataset: { auto: "recent" } });
+    if (!state2.recent.length) recent.append(el("li", { className: "muted", textContent: t2.noRecent }));
+    for (const record of state2.recent.slice(0, 20)) {
+      const time = new Date(record.at).toLocaleTimeString(document.documentElement.lang || "en", { hour: "2-digit", minute: "2-digit", second: "2-digit", hourCycle: "h23" });
+      const tier = record.tier ? t2.tier[record.tier] : "\u2014";
+      const cost = record.costUsd === null ? "" : ` \xB7 $${record.costUsd.toFixed(5)}`;
+      const failovers = record.failovers.length ? ` \xB7 \u21B7${record.failovers.length}` : "";
+      recent.append(el("li", {}, `${time} \xB7 ${record.session} \xB7 ${t2.kind[record.kind] ?? record.kind} \xB7 ${tier} \xB7 `, el("code", { textContent: record.model ?? "\u2014" }), ` \xB7 ${t2.source[record.source] ?? record.source} (${record.reason}) \xB7 ${record.status}${failovers}${cost}`));
+    }
+    section.append(recent);
+    return section;
+  }
+  function upstreamRow(upstream, state2, t2, page, save2, checks) {
+    const edit = (change) => save2((next) => {
+      change(next.upstreams.find((entry) => entry.id === upstream.id));
+    });
+    const item = el("li", { className: "backend", dataset: { upstream: upstream.id } });
+    item.append(el("div", { className: "row" }, el("strong", { textContent: `${t2.preset[upstream.preset] ?? upstream.preset} \xB7 ${upstream.id}` }), el("span", { className: "muted", textContent: upstream.baseUrl })));
+    const trustOptions = [["D0", "D0"], ["D1", "D1"], ["D2", "D2"], ...isLocal(upstream.baseUrl) ? [["D3", "D3"]] : []];
+    const check = el("button", { type: "button", textContent: t2.check, name: `auto-check-${upstream.id}` });
+    check.addEventListener("click", () => {
+      checks.set(upstream.id, t2.checking);
+      page.reload();
+      page.request("auto.test", { upstreamId: upstream.id }).then((result2) => {
+        const r = result2;
+        checks.set(upstream.id, r.ok ? t2.checkOk(r.listed, r.missing) : t2.checkFail(r.status));
+        page.reload();
+      }, (error) => {
+        checks.set(upstream.id, error instanceof Error ? error.message : String(error));
+        page.reload();
+      });
+    });
+    const remove = el("button", { type: "button", textContent: t2.remove, name: `auto-remove-${upstream.id}` });
+    remove.addEventListener("click", () => save2((next) => {
+      next.upstreams = next.upstreams.filter((entry) => entry.id !== upstream.id);
+    }));
+    item.append(el(
+      "div",
+      { className: "row" },
+      checkOf(`auto-enabled-${upstream.id}`, upstream.enabled, t2.on, (value) => edit((entry) => {
+        entry.enabled = value;
+      })),
+      el("span", { className: "label", textContent: t2.trust }),
+      selectOf(`auto-trust-${upstream.id}`, upstream.trust, trustOptions, (value) => edit((entry) => {
+        entry.trust = value;
+      })),
+      check,
+      remove
+    ));
+    item.append(el("p", { className: "muted", textContent: t2.trustHelp }));
+    const keyChoices = [["own", t2.keyOwn], ...upstream.preset === "openrouter" ? [["jev", t2.keyJev]] : [], ...isLocal(upstream.baseUrl) ? [["none", t2.keyNone]] : []];
+    const keyRow = el("div", { className: "row" }, el("span", { className: "label", textContent: t2.keyFrom }), selectOf(`auto-key-from-${upstream.id}`, upstream.key, keyChoices, (value) => edit((entry) => {
+      entry.key = value;
+    })), el("span", { className: "muted", textContent: state2.keys[upstream.id] ? t2.keySet : t2.keyMissing }));
+    if (upstream.key === "own") {
+      const input = el("input", { type: "password", placeholder: t2.keyPlaceholder, autocomplete: "off", name: `auto-key-${upstream.id}` });
+      const saveKey = el("button", { type: "button", textContent: t2.saveKey });
+      saveKey.addEventListener("click", async () => {
+        const value = input.value.trim();
+        if (!value) return;
+        try {
+          const slot = await page.request("auto.keySlot", { upstreamId: upstream.id });
+          await page.setSecret(slot.secret, JSON.stringify({ origin: slot.origin, value }));
+          input.value = "";
+          page.reload();
+        } catch (error) {
+          page.say(error instanceof Error ? error.message : String(error));
+        }
+      });
+      const removeKey = el("button", { type: "button", textContent: t2.removeKey });
+      removeKey.addEventListener("click", async () => {
+        try {
+          const slot = await page.request("auto.keySlot", { upstreamId: upstream.id });
+          await page.deleteSecret(slot.secret);
+          page.reload();
+        } catch (error) {
+          page.say(error instanceof Error ? error.message : String(error));
+        }
+      });
+      keyRow.append(input, saveKey, removeKey);
+    }
+    item.append(keyRow);
+    const models = el("ul", { className: "recent" });
+    if (!upstream.models.length) models.append(el("li", { className: "muted", textContent: t2.noModels }));
+    for (const model of upstream.models) {
+      const drop = el("button", { type: "button", textContent: t2.remove });
+      drop.addEventListener("click", () => edit((entry) => {
+        entry.models = entry.models.filter((other) => other.id !== model.id);
+      }));
+      const prices = model.priceIn !== void 0 || model.priceOut !== void 0 ? ` \xB7 $${model.priceIn ?? 0}/$${model.priceOut ?? 0}` : "";
+      models.append(el(
+        "li",
+        { className: "row", dataset: { model: model.id } },
+        el("code", { textContent: model.id }),
+        selectOf(`auto-tier-${upstream.id}-${model.id}`, model.tier, ["small", "medium", "large"].map((tier2) => [tier2, t2.tier[tier2]]), (value) => edit((entry) => {
+          entry.models.find((other) => other.id === model.id).tier = value;
+        })),
+        el("span", { className: "muted", textContent: prices }),
+        drop
+      ));
+    }
+    const id = el("input", { name: `auto-model-id-${upstream.id}`, placeholder: t2.modelId });
+    const tier = selectOf(`auto-model-tier-${upstream.id}`, "medium", ["small", "medium", "large"].map((value) => [value, t2.tier[value]]), () => void 0);
+    const priceIn = el("input", { type: "number", min: "0", step: "0.01", placeholder: t2.priceIn, name: `auto-price-in-${upstream.id}` });
+    const priceOut = el("input", { type: "number", min: "0", step: "0.01", placeholder: t2.priceOut, name: `auto-price-out-${upstream.id}` });
+    const add = el("button", { type: "button", textContent: t2.addModel, name: `auto-add-model-${upstream.id}` });
+    add.addEventListener("click", () => {
+      const modelId = id.value.trim();
+      if (!modelId) return;
+      const model = { id: modelId, tier: tier.value };
+      const pin = number(priceIn.value), pout = number(priceOut.value);
+      if (pin !== void 0) model.priceIn = pin;
+      if (pout !== void 0) model.priceOut = pout;
+      edit((entry) => {
+        entry.models.push(model);
+      });
+    });
+    item.append(el("div", {}, el("span", { className: "label", textContent: t2.models }), models), el("div", { className: "add" }, id, tier, priceIn, priceOut, add));
+    const result = checks.get(upstream.id);
+    if (result) item.append(el("div", { className: "check-result", textContent: result, dataset: { result: upstream.id } }));
+    return item;
+  }
+  function addUpstream(settings, t2, save2) {
+    const form = el("div", { className: "add" });
+    const preset = selectOf("auto-new-preset", "openrouter", [["openrouter", t2.preset.openrouter], ["openai-compatible", t2.preset["openai-compatible"]]], (value) => {
+      url.disabled = value === "openrouter";
+      url.value = value === "openrouter" ? OPENROUTER : "https://";
+    });
+    const id = el("input", { name: "auto-new-id", placeholder: t2.idLabel, value: settings.upstreams.some((entry) => entry.id === "openrouter") ? "" : "openrouter" });
+    const url = el("input", { name: "auto-new-url", placeholder: t2.baseUrl, value: OPENROUTER, disabled: true });
+    const add = el("button", { type: "button", textContent: t2.add, name: "auto-add-upstream" });
+    add.addEventListener("click", () => {
+      const kind = preset.value;
+      const entry = { id: id.value.trim(), preset: kind, baseUrl: kind === "openrouter" ? OPENROUTER : url.value.trim(), trust: "D1", key: "own", models: [], enabled: true };
+      save2((next) => {
+        next.upstreams.push(entry);
+      });
+    });
+    form.append(preset, id, url, add);
+    return form;
   }
 
   // src/ui/settings.ts
@@ -142,7 +454,10 @@
     }
   };
   var t = STRINGS.en;
+  var autoStrings = AUTO_PAGE_STRINGS.en;
   var state = null;
+  var autoState = null;
+  var autoChecks = /* @__PURE__ */ new Map();
   var root = document.querySelector("#app");
   var status = document.querySelector("#status");
   var PRESETS = [
@@ -158,7 +473,7 @@
     status.textContent = message;
   }
   var errorText = (error) => error instanceof Error ? error.message : String(error);
-  function el(tag, props = {}, ...children) {
+  function el2(tag, props = {}, ...children) {
     const node = document.createElement(tag);
     const { dataset, ...rest } = props;
     Object.assign(node, rest);
@@ -167,18 +482,24 @@
     return node;
   }
   function select(value, options, onChange, name) {
-    const node = el("select", { name });
-    for (const [option, label] of options) node.append(el("option", { value: option, textContent: label, selected: option === value }));
+    const node = el2("select", { name });
+    for (const [option, label] of options) node.append(el2("option", { value: option, textContent: label, selected: option === value }));
     node.addEventListener("change", () => onChange(node.value));
     return node;
   }
   function checkbox(checked, label, onChange, name) {
-    const input = el("input", { type: "checkbox", checked, name });
+    const input = el2("input", { type: "checkbox", checked, name });
     input.addEventListener("change", () => onChange(input.checked));
-    return el("label", { className: "check" }, input, ` ${label}`);
+    return el2("label", { className: "check" }, input, ` ${label}`);
   }
   async function load() {
-    state = await host2.service.request(SERVICE, "state");
+    const [main, auto] = await Promise.all([
+      host2.service.request(SERVICE, "state"),
+      // A service from before Auto (Jev) has no such method: the page simply shows no Auto rows.
+      host2.service.request(SERVICE, "auto.state").catch(() => null)
+    ]);
+    state = main;
+    autoState = auto;
     render();
   }
   var saving = Promise.resolve();
@@ -198,43 +519,43 @@
     return saving;
   }
   function row(label, control) {
-    return el("div", { className: "row" }, el("span", { className: "label", textContent: label }), control);
+    return el2("div", { className: "row" }, el2("span", { className: "label", textContent: label }), control);
   }
   function backendRow(entry) {
     const preset = PRESETS.find((item2) => item2.id === entry.preset);
     const info = state.status.backends.find((item2) => item2.id === entry.id);
     const slot = state.slots[entry.id] ?? null;
     const check = state.checks[entry.id];
-    const item = el("li", { className: "backend", dataset: { backend: entry.id } });
-    const head = el(
+    const item = el2("li", { className: "backend", dataset: { backend: entry.id } });
+    const head = el2(
       "div",
       { className: "row" },
-      el("strong", { textContent: `${preset?.label ?? entry.preset} \xB7 ${entry.model ?? ""}` }),
-      el("span", { className: "muted", textContent: `${entry.url ?? ""} \u2014 ${info ? t.where[info.target] : ""}` })
+      el2("strong", { textContent: `${preset?.label ?? entry.preset} \xB7 ${entry.model ?? ""}` }),
+      el2("span", { className: "muted", textContent: `${entry.url ?? ""} \u2014 ${info ? t.where[info.target] : ""}` })
     );
-    const controls = el("div", { className: "row" });
+    const controls = el2("div", { className: "row" });
     controls.append(checkbox(entry.enabled, t.enabledBackend, (value) => void save((s) => {
       s.backends.find((b) => b.id === entry.id).enabled = value;
     }), `enabled-${entry.id}`));
     if (info?.target === "remote") {
-      controls.append(el("span", { className: "label", textContent: t.trust }), select(entry.trust ?? "D0", [["D0", "D0"], ["D1", "D1"], ["D2", "D2"]], (value) => void save((s) => {
+      controls.append(el2("span", { className: "label", textContent: t.trust }), select(entry.trust ?? "D0", [["D0", "D0"], ["D1", "D1"], ["D2", "D2"]], (value) => void save((s) => {
         s.backends.find((b) => b.id === entry.id).trust = value;
       }), `trust-${entry.id}`));
     }
-    const checkButton = el("button", { type: "button", textContent: t.check, name: `check-${entry.id}` });
+    const checkButton = el2("button", { type: "button", textContent: t.check, name: `check-${entry.id}` });
     checkButton.addEventListener("click", () => {
       say(t.checking);
       host2.service.request(SERVICE, "check", { backendId: entry.id }).then(() => load(), (error) => say(errorText(error)));
     });
-    const removeButton = el("button", { type: "button", textContent: t.remove });
+    const removeButton = el2("button", { type: "button", textContent: t.remove });
     removeButton.addEventListener("click", () => void save((s) => {
       s.backends = s.backends.filter((b) => b.id !== entry.id);
     }));
     controls.append(checkButton, removeButton);
     item.append(head, controls);
     if (slot) {
-      const input = el("input", { type: "password", placeholder: t.key, autocomplete: "off", name: `key-${entry.id}` });
-      const saveKey = el("button", { type: "button", textContent: t.saveKey });
+      const input = el2("input", { type: "password", placeholder: t.key, autocomplete: "off", name: `key-${entry.id}` });
+      const saveKey = el2("button", { type: "button", textContent: t.saveKey });
       saveKey.addEventListener("click", async () => {
         const value = input.value.trim();
         if (!value) return;
@@ -250,7 +571,7 @@
         }
         if (stored) await load();
       });
-      const removeKey = el("button", { type: "button", textContent: t.removeKey });
+      const removeKey = el2("button", { type: "button", textContent: t.removeKey });
       removeKey.addEventListener("click", async () => {
         try {
           await host2.secrets.delete(slot.secret);
@@ -260,22 +581,22 @@
         }
         await load();
       });
-      item.append(el("div", { className: "row" }, el("span", { className: "muted", textContent: info?.keyConfigured ? t.keySet : t.keyNone }), input, saveKey, removeKey));
+      item.append(el2("div", { className: "row" }, el2("span", { className: "muted", textContent: info?.keyConfigured ? t.keySet : t.keyNone }), input, saveKey, removeKey));
     }
     if (check) {
       const line = "running" in check ? t.checking : "error" in check ? check.error : check.added ? t.checkOk(check) : t.checkFail(check);
-      item.append(el("div", { className: "check-result", textContent: line, dataset: { result: entry.id } }));
+      item.append(el2("div", { className: "check-result", textContent: line, dataset: { result: entry.id } }));
     }
     return item;
   }
   function addForm() {
-    const form = el("div", { className: "add" });
-    const presetSelect = el("select", { name: "preset" });
-    for (const preset of PRESETS) presetSelect.append(el("option", { value: preset.id, textContent: preset.label }));
-    const model = el("input", { name: "model", placeholder: t.model, value: PRESETS[0].model });
-    const url = el("input", { name: "url", placeholder: t.url, value: PRESETS[0].url ?? "" });
-    const localInput = el("input", { type: "checkbox", name: "local", checked: true });
-    const local = el("label", { className: "check" }, localInput, ` ${t.local}`);
+    const form = el2("div", { className: "add" });
+    const presetSelect = el2("select", { name: "preset" });
+    for (const preset of PRESETS) presetSelect.append(el2("option", { value: preset.id, textContent: preset.label }));
+    const model = el2("input", { name: "model", placeholder: t.model, value: PRESETS[0].model });
+    const url = el2("input", { name: "url", placeholder: t.url, value: PRESETS[0].url ?? "" });
+    const localInput = el2("input", { type: "checkbox", name: "local", checked: true });
+    const local = el2("label", { className: "check" }, localInput, ` ${t.local}`);
     const sync = () => {
       const preset = PRESETS.find((item) => item.id === presetSelect.value);
       model.value = preset.model;
@@ -285,7 +606,7 @@
       localInput.checked = !!preset.url && /^http:\/\/(127\.0\.0\.1|\[::1\]|localhost)/u.test(preset.url);
     };
     presetSelect.addEventListener("change", sync);
-    const add = el("button", { type: "button", textContent: t.add, name: "add" });
+    const add = el2("button", { type: "button", textContent: t.add, name: "add" });
     add.addEventListener("click", () => {
       const preset = PRESETS.find((item) => item.id === presetSelect.value);
       const taken = new Set(state.settings.backends.map((b) => b.id));
@@ -310,35 +631,35 @@
   }
   function smartSection() {
     const smart = state.settings.smart;
-    const model = el("input", { name: "smart-model", placeholder: t.smartModel, value: smart.kind === "ollama-chat" ? smart.model : "" });
-    const saveSmart = el("button", { type: "button", textContent: t.add, name: "smart-save" });
+    const model = el2("input", { name: "smart-model", placeholder: t.smartModel, value: smart.kind === "ollama-chat" ? smart.model : "" });
+    const saveSmart = el2("button", { type: "button", textContent: t.add, name: "smart-save" });
     saveSmart.addEventListener("click", () => void save((s) => {
       s.smart = model.value.trim() ? { kind: "ollama-chat", url: "http://127.0.0.1:11434", model: model.value.trim() } : { kind: "none" };
     }));
-    return el(
+    return el2(
       "div",
       {},
-      row(t.smart, el("span", {}, model, saveSmart)),
+      row(t.smart, el2("span", {}, model, saveSmart)),
       checkbox(state.settings.shadowAsksSmart, t.smartAsk, (value) => void save((s) => {
         s.shadowAsksSmart = value;
       }), "shadow-asks-smart")
     );
   }
   function recentSection() {
-    const list = el("ul", { className: "recent" });
-    if (!state.recent.length) list.append(el("li", { className: "muted", textContent: t.noRecent }));
+    const list = el2("ul", { className: "recent" });
+    if (!state.recent.length) list.append(el2("li", { className: "muted", textContent: t.noRecent }));
     for (const entry of state.recent.slice(0, 20)) {
-      const item = el("li", {}, el("code", { textContent: entry.summary }), ` \u2192 ${entry.act ?? "\u2014"} (${entry.outcome}, ${entry.tier ?? "\u2014"}, ${entry.reason}) `);
+      const item = el2("li", {}, el2("code", { textContent: entry.summary }), ` \u2192 ${entry.act ?? "\u2014"} (${entry.outcome}, ${entry.tier ?? "\u2014"}, ${entry.reason}) `);
       if (entry.auditId && entry.tier !== "rule" && !entry.label) {
         for (const verdict of ["right", "wrong"]) {
-          const button = el("button", { type: "button", textContent: t[verdict] });
+          const button = el2("button", { type: "button", textContent: t[verdict] });
           button.addEventListener("click", async () => {
             await host2.service.request(SERVICE, "feedback", { auditId: entry.auditId, verdict });
             await load();
           });
           item.append(button);
         }
-      } else if (entry.label) item.append(el("span", { className: "muted", textContent: t[entry.label] }));
+      } else if (entry.label) item.append(el2("span", { className: "muted", textContent: t[entry.label] }));
       list.append(item);
     }
     return list;
@@ -346,24 +667,24 @@
   function render() {
     if (!state) return;
     const s = state.settings;
-    const backends = el("ul", { className: "backends" });
-    if (!s.backends.length) backends.append(el("li", { className: "muted", textContent: t.none }));
+    const backends = el2("ul", { className: "backends" });
+    if (!s.backends.length) backends.append(el2("li", { className: "muted", textContent: t.none }));
     for (const entry of s.backends) backends.append(backendRow(entry));
     root.replaceChildren(
-      el("h1", { textContent: t.title }),
-      el("p", { className: "muted", textContent: t.lead }),
-      el("h2", { textContent: t.modes }),
+      el2("h1", { textContent: t.title }),
+      el2("p", { className: "muted", textContent: t.lead }),
+      el2("h2", { textContent: t.modes }),
       // Task triage needs the Assistant on; command review's own control keeps it on while review runs.
       row(t.triage, select(s.modes["task.route"], [["off", t.off], ["shadow", t.shadow], ["suggest", t.suggest], ["auto", t.auto]], (value) => void save((next) => {
         next.modes["task.route"] = value;
         next.enabled = value !== "off" || next.modes["command.review"] !== "off";
       }), "task.route")),
-      el("p", { className: "muted", textContent: t.modeHelp }),
-      el("h2", { textContent: t.backends }),
+      el2("p", { className: "muted", textContent: t.modeHelp }),
+      el2("h2", { textContent: t.backends }),
       backends,
       addForm(),
       smartSection(),
-      el("h2", { textContent: t.data }),
+      el2("h2", { textContent: t.data }),
       row(t.engine, select(s.engine, [["auto", t.engineAuto], ["jev", t.engineJev], ["local", t.engineLocal]], (value) => void save((next) => {
         next.engine = value;
       }), "engine")),
@@ -376,12 +697,23 @@
       row(t.defaultClass, select(s.defaultDataClass, [["D0", "D0"], ["D1", "D1"], ["D2", "D2"], ["D3", "D3"]], (value) => void save((next) => {
         next.defaultDataClass = value;
       }), "default-class")),
-      el("h2", { textContent: t.recent }),
-      recentSection()
+      el2("h2", { textContent: t.recent }),
+      recentSection(),
+      ...autoState ? [renderAuto(autoState, autoStrings, {
+        request: (method, params) => host2.service.request(SERVICE, method, params),
+        setSecret: (key, value) => host2.secrets.set(key, value),
+        deleteSecret: (key) => host2.secrets.delete(key),
+        say,
+        reload: () => {
+          void load().catch((error) => say(errorText(error)));
+        }
+      }, autoChecks)] : []
     );
   }
   host2.onContext(({ appearance }) => {
-    t = applyAppearance(appearance) === "ru" ? STRINGS.ru : STRINGS.en;
+    const locale = applyAppearance(appearance);
+    t = locale === "ru" ? STRINGS.ru : STRINGS.en;
+    autoStrings = locale === "ru" ? AUTO_PAGE_STRINGS.ru : AUTO_PAGE_STRINGS.en;
     render();
   });
   host2.service.onEvent(({ serviceId, event, data }) => {

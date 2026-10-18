@@ -6,8 +6,10 @@ h2 { font-size: 1rem; margin: 1.23rem 0 0.46rem; }
 .label { min-width: 14.62rem; }
 .check { display: block; margin: 0.31rem 0; }
 select, input, button { font: inherit; color: inherit; }
-select, input:not([type]), input[type="password"] { min-height: 2.31rem; padding: 0.23rem 0.62rem; border: 1px solid var(--line); border-radius: var(--radius-sm); background: var(--surface-soft); }
+select, input:not([type]), input[type="password"], input[type="number"] { min-height: 2.31rem; padding: 0.23rem 0.62rem; border: 1px solid var(--line); border-radius: var(--radius-sm); background: var(--surface-soft); }
 input:not([type]), input[type="password"] { min-width: 12.31rem; }
+input[type="number"] { width: 7.69rem; }
+.auto .recent .row { margin: 0; }
 button { min-height: 2.31rem; padding: 0.31rem 0.92rem; border: 0; border-radius: var(--radius-sm); background: var(--surface-soft); cursor: pointer; }
 .backends, .recent { list-style: none; margin: 0 0 0.62rem; padding: 0; display: grid; gap: 0.46rem; }
 .backend { padding: 0.62rem 0.77rem; border-radius: var(--radius-md); background: var(--surface-soft); }

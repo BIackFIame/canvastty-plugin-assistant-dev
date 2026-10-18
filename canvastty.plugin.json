@@ -39,13 +39,13 @@
     },
     {
       "path": "settings/assistant.js",
-      "bytes": 23671,
-      "sha256": "752c3df729a239f548737e454415cb6a514f4b4cb2418d4c5b49c9ab378a98d6"
+      "bytes": 51251,
+      "sha256": "9988e533015f209c7f286d2aff5dd8d771fa9da7ab76fa50479c27f14181e6fa"
     },
     {
       "path": "settings/assistant.css",
-      "bytes": 1545,
-      "sha256": "8d83fc34e2d50a46994fe65e048160bbdb77f7db87d83a042ff25a57225ca1e8"
+      "bytes": 1642,
+      "sha256": "b90cd6c7c66222aca94f3c8daee04848144afe5ff2b699556befeffd81a39e36"
     },
     {
       "path": "settings/harness.html",

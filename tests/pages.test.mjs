@@ -22,7 +22,7 @@ class Node {
   text() { return [this.textContent, ...this.children.map(child => child.text())].filter(Boolean).join(' ').replace(/\s+/gu, ' '); }
 }
 
-function page(file, replies) {
+function page(file, replies, extraSdk = {}) {
   const app = Object.assign(new Node('main'), { id: 'app' });
   const status = Object.assign(new Node('output'), { id: 'status' });
   const html = new Node('html');
@@ -35,10 +35,11 @@ function page(file, replies) {
       async request(serviceId, method, params) { params = params === undefined ? undefined : JSON.parse(JSON.stringify(params)); requests.push({ serviceId, method, params }); const reply = replies[method]; return typeof reply === 'function' ? reply(params) : reply; },
       onEvent(listener) { events.push(listener); }
     },
-    canvas: { open: async id => { requests.push({ method: 'canvas.open', params: id }); } }
+    canvas: { open: async id => { requests.push({ method: 'canvas.open', params: id }); } },
+    ...extraSdk
   };
   const document = { documentElement: html, activeElement: null, createElement: tag => new Node(tag), querySelector: selector => selector === '#app' ? app : status };
-  vm.runInNewContext(readFileSync(join(root, file), 'utf8'), { window: { CanvasTTYPlugin: sdk }, document, console, setTimeout, clearTimeout });
+  vm.runInNewContext(readFileSync(join(root, file), 'utf8'), { window: { CanvasTTYPlugin: sdk }, document, console, setTimeout, clearTimeout, structuredClone });
   return { app, html, requests, context: (locale, palette, extra = {}) => context({ appearance: { locale, palette, ...extra } }), event: (event, data) => events.forEach(listener => listener({ serviceId: 'assistant', event, data })) };
 }
 
@@ -204,4 +205,62 @@ test('Task board: columns by status, assignee by card title, empty state', async
   await settle();
   empty.context('ru', 'sage');
   assert.match(empty.app.text(), /Досок задач пока нет/u);
+});
+
+test('decision models page: Auto (Jev) rows in Russian and English — upstreams, models, preference, caps, recent routing without text; keys write-only', async () => {
+  const { DEFAULT_ASSISTANT_SETTINGS } = await import('../src/shared/settings.ts');
+  const auto = {
+    settings: {
+      upstreams: [{ id: 'openrouter', preset: 'openrouter', baseUrl: 'https://openrouter.ai/api/v1', trust: 'D1', key: 'jev', enabled: true, models: [{ id: 'qwen/qwen3-coder', tier: 'medium', priceIn: 0.2, priceOut: 0.8 }] }],
+      preference: 'balanced', cheaperFallback: false, decider: 'jev', dailyUsdCap: 1, perCardUsdCap: 0.4
+    },
+    readable: true, keys: { openrouter: true },
+    recent: [{ at: Date.UTC(2026, 9, 18, 10, 0, 0), session: 'abcd1234', conversation: 'c', turn: 't', kind: 'turn', source: 'jev', tier: 'medium', upstream: 'openrouter', model: 'qwen/qwen3-coder', attempts: 2, failovers: [{ upstream: 'openrouter', model: 'x', status: 429 }], status: 200, reason: 'jev', ttfbMs: 300, totalMs: 900, tokensIn: 10, tokensOut: 2, costUsd: 0.00012 }],
+    stats: { requests: 12, turns: 2, continuations: 9, small: 1, jevAsked: 2, jevAnswered: 2, rules: 0, leaseReuses: 9, failovers: 1, hosts: ['openrouter.ai'], spentToday: 0.0123, listening: true, cards: 1 }
+  };
+  const secrets = [];
+  const ui = page('settings/assistant.js', {
+    state: { settings: DEFAULT_ASSISTANT_SETTINGS, status: { enabled: false, backends: [] }, slots: {}, checks: {}, recent: [] },
+    'auto.state': auto, 'auto.save': ({ settings }) => settings, 'auto.keySlot': () => ({ secret: 'auto-upstream-local', origin: 'http://127.0.0.1:8080' })
+  }, { secrets: { set: async (key, value) => { secrets.push({ key, value }); }, delete: async () => undefined } });
+  await settle();
+  ui.context('en', 'sage');
+  const text = ui.app.text();
+  assert.match(text, /Model: Auto \(Jev\)/u);
+  assert.match(text, /OpenRouter · openrouter/u);
+  assert.match(text, /The Jev · OpenRouter key/u);
+  assert.match(text, /key saved/u);
+  assert.match(text, /qwen\/qwen3-coder/u);
+  assert.match(text, /12 model calls, Jev asked 2 times \(2 answered\), 9 reused a turn's choice, 1 failovers/u);
+  assert.match(text, /abcd1234 · turn · medium · qwen\/qwen3-coder · Jev \(jev\) · 200 · ↷1 · \$0\.00012/u);
+  ui.context('ru', 'night');
+  const ru = ui.app.text();
+  assert.match(ru, /Модель: Авто \(Jev\)/u);
+  assert.match(ru, /Поставщики/u);
+  assert.match(ru, /Ключ Jev · OpenRouter/u);
+  assert.match(ru, /Предпочтение .*Сбалансированно/u);
+  assert.match(ru, /Предел в день, USD/u);
+  assert.match(ru, /ход · средняя · qwen\/qwen3-coder/u);
+  assert.doesNotMatch(ru, /Model calls|Upstreams/u, 'no English left in the Auto rows');
+  // Add an OpenAI-compatible upstream on this computer: the service gets the whole Auto settings to validate.
+  const all = ui.app.all();
+  const byName = name => all.find(node => node.name === name);
+  byName('auto-new-preset').value = 'openai-compatible';
+  for (const listener of byName('auto-new-preset').listeners.change) listener();
+  byName('auto-new-id').value = 'local';
+  byName('auto-new-url').value = 'http://127.0.0.1:8080/v1';
+  byName('auto-add-upstream').click();
+  await settle();
+  const saved = ui.requests.filter(r => r.method === 'auto.save').at(-1).params.settings;
+  assert.deepEqual(saved.upstreams.map(u => [u.id, u.preset, u.baseUrl, u.trust]), [['openrouter', 'openrouter', 'https://openrouter.ai/api/v1', 'D1'], ['local', 'openai-compatible', 'http://127.0.0.1:8080/v1', 'D1']]);
+  // A key typed for an upstream goes to the plugin's secrets, bound to its origin, and is never sent to the service.
+  auto.settings.upstreams.push({ id: 'local', preset: 'openai-compatible', baseUrl: 'http://127.0.0.1:8080/v1', trust: 'D3', key: 'own', enabled: true, models: [] });
+  ui.event('settings', null);
+  await settle();
+  const keyInput = ui.app.all().find(node => node.name === 'auto-key-local');
+  keyInput.value = 'sk-local-123456';
+  ui.app.all().find(node => node.textContent === 'Сохранить ключ' && node.parent?.dataset?.upstream === undefined && node.parent.children.includes(keyInput)).click();
+  await settle();
+  assert.deepEqual(secrets, [{ key: 'auto-upstream-local', value: JSON.stringify({ origin: 'http://127.0.0.1:8080', value: 'sk-local-123456' }) }]);
+  assert.ok(!JSON.stringify(ui.requests).includes('sk-local-123456'), 'the key never goes to the service');
 });

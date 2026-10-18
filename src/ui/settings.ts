@@ -5,6 +5,7 @@
 import type { AssistantBackendPreset, AssistantBackendSettings, AssistantBackendStatus, AssistantCheckResult, AssistantSettings } from '../shared/settings.ts';
 import type { RecentReview } from '../review/reviewService.ts';
 import { applyAppearance, whenIdle, type Appearance } from './common.ts';
+import { AUTO_PAGE_STRINGS, renderAuto, type AutoState } from './autoRouting.ts';
 
 interface PluginHost {
   onContext(listener: (context: { appearance: Appearance }) => void): void;
@@ -63,7 +64,11 @@ const STRINGS = {
 };
 type Strings = typeof STRINGS.en;
 let t: Strings = STRINGS.en;
+let autoStrings = AUTO_PAGE_STRINGS.en;
 let state: State | null = null;
+let autoState: AutoState | null = null;
+/** The last «Проверить» result per Auto upstream, until the page reloads. */
+const autoChecks = new Map<string, string>();
 const root = document.querySelector('#app')!;
 const status = document.querySelector('#status')!;
 
@@ -103,7 +108,13 @@ function checkbox(checked: boolean, label: string, onChange: (checked: boolean) 
 }
 
 async function load(): Promise<void> {
-  state = await host.service.request(SERVICE, 'state') as State;
+  const [main, auto] = await Promise.all([
+    host.service.request(SERVICE, 'state') as Promise<State>,
+    // A service from before Auto (Jev) has no such method: the page simply shows no Auto rows.
+    (host.service.request(SERVICE, 'auto.state') as Promise<AutoState>).catch(() => null)
+  ]);
+  state = main;
+  autoState = auto;
   render();
 }
 
@@ -278,12 +289,21 @@ function render(): void {
     row(t.grant, select(s.grant, [['off', t.grantOff], ['D1', t.grantD1], ['D2', t.grantD2]], value => void save(next => { next.grant = value; }), 'grant')),
     row(t.defaultClass, select(s.defaultDataClass, [['D0', 'D0'], ['D1', 'D1'], ['D2', 'D2'], ['D3', 'D3']], value => void save(next => { next.defaultDataClass = value; }), 'default-class')),
     el('h2', { textContent: t.recent }),
-    recentSection()
+    recentSection(),
+    ...(autoState ? [renderAuto(autoState, autoStrings, {
+      request: (method, params) => host.service.request(SERVICE, method, params),
+      setSecret: (key, value) => host.secrets.set(key, value),
+      deleteSecret: key => host.secrets.delete(key),
+      say,
+      reload: () => { void load().catch(error => say(errorText(error))); }
+    }, autoChecks)] : [])
   );
 }
 
 host.onContext(({ appearance }) => {
-  t = applyAppearance(appearance) === 'ru' ? STRINGS.ru : STRINGS.en;
+  const locale = applyAppearance(appearance);
+  t = locale === 'ru' ? STRINGS.ru : STRINGS.en;
+  autoStrings = locale === 'ru' ? AUTO_PAGE_STRINGS.ru : AUTO_PAGE_STRINGS.en;
   render();
 });
 host.service.onEvent(({ serviceId, event, data }) => {
