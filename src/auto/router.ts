@@ -104,6 +104,8 @@ class HttpError extends Error {
 }
 
 const RETRYABLE = new Set([404, 408, 409, 425, 429, 500, 502, 503, 504]);
+/** A 400 whose message says the model id itself is unknown (OpenRouter: "… is not a valid model ID"). */
+const UNKNOWN_MODEL = /\bis not a valid model id\b|\bmodel\b.{0,80}\b(?:does not exist|not found)\b|\bno endpoints found\b/iu;
 const clean = (value: string, max: number): string => value.replace(/[\u0000-\u001f\u007f]+/gu, ' ').replace(/\s+/gu, ' ').trim().slice(0, max);
 
 /** Seconds or an HTTP date, bounded to 24 h; null when absent or not understood. */
@@ -558,6 +560,9 @@ export class AutoRouter {
           const detail = await upstream.text().then(text => upstreamMessage(text), () => '');
           reservation.release();
           if (status === 401 || status === 403) { failover(status, candidate.upstream.id, COOLDOWN_MS.auth, 'auth'); continue; }
+          // OpenRouter answers an unknown model id with 400 ("<id> is not a valid model ID"), not 404: that is this
+          // model missing, not a bad payload, so the next candidate is tried and this one cools down like a 404.
+          if (status === 400 && UNKNOWN_MODEL.test(detail)) { failover(status, `${candidate.upstream.id}|${candidate.model.id}`, COOLDOWN_MS.missing, 'model_not_found'); continue; }
           if (RETRYABLE.has(status)) {
             const ms = status === 429 ? retryAfterMs(upstream.headers.get('retry-after'), this.now()) ?? COOLDOWN_MS.quota : status === 404 ? COOLDOWN_MS.missing : COOLDOWN_MS.transient;
             failover(status, `${candidate.upstream.id}|${candidate.model.id}`, ms, status === 429 ? 'rate_limited' : status === 404 ? 'model_not_found' : 'upstream_error');

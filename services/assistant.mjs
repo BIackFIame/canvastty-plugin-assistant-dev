@@ -11334,6 +11334,7 @@ var HttpError = class extends Error {
   }
 };
 var RETRYABLE = /* @__PURE__ */ new Set([404, 408, 409, 425, 429, 500, 502, 503, 504]);
+var UNKNOWN_MODEL = /\bis not a valid model id\b|\bmodel\b.{0,80}\b(?:does not exist|not found)\b|\bno endpoints found\b/iu;
 var clean2 = (value, max) => value.replace(/[\u0000-\u001f\u007f]+/gu, " ").replace(/\s+/gu, " ").trim().slice(0, max);
 function retryAfterMs2(header, now) {
   if (!header) return null;
@@ -11919,6 +11920,10 @@ var AutoRouter = class {
           reservation.release();
           if (status === 401 || status === 403) {
             failover(status, candidate.upstream.id, COOLDOWN_MS.auth, "auth");
+            continue;
+          }
+          if (status === 400 && UNKNOWN_MODEL.test(detail)) {
+            failover(status, `${candidate.upstream.id}|${candidate.model.id}`, COOLDOWN_MS.missing, "model_not_found");
             continue;
           }
           if (RETRYABLE.has(status)) {

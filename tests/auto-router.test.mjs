@@ -229,6 +229,20 @@ test('failover before the first byte: 429 (Retry-After), 500, 404, a dead upstre
   assert.ok(router['cooldowns'].get('fake|m/rate') - Date.now() > 100_000, 'Retry-After 120 s honoured');
 });
 
+test('a 400 that names an unknown model id (OpenRouter: "is not a valid model ID") moves on and cools that model down like a 404', async t => {
+  const models = [{ id: 'm/typo', tier: 'medium' }, { id: 'm/good', tier: 'medium' }];
+  const { upstream, router, token, port } = await setup(t, { models, behaviours: { 'm/typo': { status: 400, body: { error: { message: 'm/typo is not a valid model ID', code: 400 } } } } });
+  assert.equal((await call(port, { token, body: userTurn('Write a function') })).status, 200);
+  assert.deepEqual(upstream.posts().map(entry => entry.model), ['m/typo', 'm/good']);
+  const record = router.recent()[0];
+  assert.deepEqual(record.failovers.map(f => [f.model, f.status]), [['m/typo', 400]]);
+  assert.equal(record.model, 'm/good');
+  const before = upstream.posts().length;
+  assert.equal((await call(port, { token, body: userTurn('Write another function') })).status, 200);
+  assert.deepEqual(upstream.posts().slice(before).map(entry => entry.model), ['m/good'], 'the unknown id cools down');
+  assert.ok(router['cooldowns'].get('fake|m/typo') - Date.now() > 10 * 60_000, 'cooldown as long as a 404');
+});
+
 test('no failover on a bad payload (400) or after the first byte (no replay); 401 cools the upstream and tries the next', async t => {
   const bad = await setup(t, { models: [{ id: 'm/strict', tier: 'medium' }, { id: 'm/good', tier: 'medium' }], behaviours: { 'm/strict': 400 } });
   const refused = await call(bad.port, { token: bad.token, body: userTurn('Write a function') });
