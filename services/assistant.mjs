@@ -525,7 +525,8 @@ var SMART_DEADLINE_MS = 6e4;
 var CACHE_TTL_MS = { "task.route": 6e5, "command.review": 3e5 };
 var CACHE_MAX_ENTRIES = 2e3;
 var DEFAULT_ASSISTANT_BUDGETS = Object.freeze({ perMinute: 300, perDay: 1e4, cloudUsdPerDay: 0.5 });
-var USE_CASE_PER_MINUTE = { "task.route": 10, "command.review": 120 };
+var USE_CASE_PER_MINUTE = { "task.route": 60, "command.review": 120 };
+var USE_CASE_PER_CARD_PER_MINUTE = { "task.route": 10 };
 var LOCAL_CONCURRENCY = Object.freeze({ inFlight: 1, queue: 4 });
 var SHADOW_RECORDER = Object.freeze({ maxEntries: 2e3, ttlMs: 24 * 36e5 });
 var LOG_POLICY = Object.freeze({ retentionDays: 90, maxTotalBytes: 50 * 1024 * 1024, summaryMaxChars: 80, decimals: 3 });
@@ -3034,6 +3035,7 @@ function jsonPromptTokens(state, questions) {
 }
 
 // src/engine/AssistantBudget.ts
+var MAX_CARDS = 2048;
 var MINUTE = 6e4;
 function dayKey(at) {
   const date2 = new Date(at);
@@ -3044,6 +3046,8 @@ var AssistantBudget = class {
   now;
   minute = [];
   useCaseMinute = /* @__PURE__ */ new Map();
+  /** `<use case>|<session>` → call times in the last minute, for the use cases with a per-card limit. */
+  cardMinute = /* @__PURE__ */ new Map();
   day = "";
   dayCalls = 0;
   daySpend = 0;
@@ -3066,6 +3070,11 @@ var AssistantBudget = class {
     const cutoff = at - MINUTE;
     this.minute = this.minute.filter((t) => t > cutoff);
     for (const [key2, list] of this.useCaseMinute) this.useCaseMinute.set(key2, list.filter((t) => t > cutoff));
+    for (const [key2, list] of this.cardMinute) {
+      const kept = list.filter((t) => t > cutoff);
+      if (kept.length) this.cardMinute.set(key2, kept);
+      else this.cardMinute.delete(key2);
+    }
   }
   /** What would refuse this request now, or null. */
   refusal(request) {
@@ -3079,6 +3088,9 @@ var AssistantBudget = class {
       if (committed >= limits.cloudUsdPerDay || committed + estimate(request) > limits.cloudUsdPerDay) return "cloud-spend";
     }
     if ((this.useCaseMinute.get(request.useCase)?.length ?? 0) >= USE_CASE_PER_MINUTE[request.useCase]) return "use-case-minute";
+    const perCard = USE_CASE_PER_CARD_PER_MINUTE[request.useCase];
+    const card = cardKey(request);
+    if (perCard !== void 0 && card && (this.cardMinute.get(card)?.length ?? 0) >= perCard) return "card-minute";
     return null;
   }
   /** Synchronous: a slot, or null when any cap is reached. */
@@ -3090,6 +3102,14 @@ var AssistantBudget = class {
     const perUseCase = this.useCaseMinute.get(request.useCase) ?? [];
     perUseCase.push(at);
     this.useCaseMinute.set(request.useCase, perUseCase);
+    const card = USE_CASE_PER_CARD_PER_MINUTE[request.useCase] !== void 0 ? cardKey(request) : null;
+    if (card) {
+      const list = this.cardMinute.get(card) ?? [];
+      list.push(at);
+      this.cardMinute.delete(card);
+      this.cardMinute.set(card, list);
+      while (this.cardMinute.size > MAX_CARDS) this.cardMinute.delete(this.cardMinute.keys().next().value);
+    }
     const held = request.cloud ? estimate(request) : 0;
     this.dayHeld += held;
     const day = this.day;
@@ -3116,6 +3136,7 @@ var AssistantBudget = class {
         };
         drop(this.minute);
         drop(this.useCaseMinute.get(request.useCase));
+        if (card) drop(this.cardMinute.get(card));
         if (day !== this.day) return;
         this.dayCalls = Math.max(0, this.dayCalls - 1);
       }
@@ -3181,6 +3202,7 @@ var AssistantBudget = class {
     return { calls: this.dayCalls, usd: this.daySpend };
   }
 };
+var cardKey = (request) => request.sessionId ? `${request.useCase}|${request.sessionId}` : null;
 function estimate(request) {
   const value = request.estimateUsd;
   return typeof value === "number" && Number.isFinite(value) && value > 0 ? value : 0;
@@ -8068,7 +8090,7 @@ import { join as join7 } from "node:path";
 
 // src/harness/badges.ts
 var PRIORITY = { loop: 0, flow: 1, review: 2, tasks: 3, triage: 4, model: 5 };
-var MAX_CARDS = 1024;
+var MAX_CARDS2 = 1024;
 var BadgeBoard = class {
   cards = /* @__PURE__ */ new Map();
   shown = /* @__PURE__ */ new Map();
@@ -8084,7 +8106,7 @@ var BadgeBoard = class {
       if (!entries) {
         entries = /* @__PURE__ */ new Map();
         this.cards.set(sessionId, entries);
-        while (this.cards.size > MAX_CARDS) {
+        while (this.cards.size > MAX_CARDS2) {
           const oldest = this.cards.keys().next().value;
           this.cards.delete(oldest);
           this.shown.delete(oldest);

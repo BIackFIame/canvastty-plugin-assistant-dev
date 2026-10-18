@@ -289,7 +289,13 @@ export const CACHE_MAX_ENTRIES = 2_000;
 
 /** Budgets (§5.5). */
 export const DEFAULT_ASSISTANT_BUDGETS = Object.freeze({ perMinute: 300, perDay: 10_000, cloudUsdPerDay: 0.5 });
-export const USE_CASE_PER_MINUTE: Readonly<Record<AssistantUseCase, number>> = { 'task.route': 10, 'command.review': 120 };
+/** Calls per minute per use case, for all cards together (the ceiling). */
+export const USE_CASE_PER_MINUTE: Readonly<Record<AssistantUseCase, number>> = { 'task.route': 60, 'command.review': 120 };
+/**
+ * Calls per minute per use case and card: task triage runs on every new user turn of each Auto (Jev) card, so one
+ * busy card must not use up the others' share. A call with no card counts only against the ceiling.
+ */
+export const USE_CASE_PER_CARD_PER_MINUTE: Readonly<Partial<Record<AssistantUseCase, number>>> = { 'task.route': 10 };
 export const LOCAL_CONCURRENCY = Object.freeze({ inFlight: 1, queue: 4 });
 
 export const SHADOW_RECORDER = Object.freeze({ maxEntries: 2_000, ttlMs: 24 * 3_600_000 });

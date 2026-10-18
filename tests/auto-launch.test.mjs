@@ -183,6 +183,34 @@ test('the decision model is asked once per user turn; continuations and small ca
   assert.equal(host.badges('card-aaaa1111').at(-1).text, 'loop?');
 });
 
+test('several Auto cards: Jev answers up to 10 turns a minute per card, then that card falls back to word rules while the others keep Jev; each turn is the card\'s task for command review', async t => {
+  const ollama = await startFakeOllama({ prefer: ['true', 'debug', '3'] });
+  t.after(() => ollama.close());
+  const port = Number(new URL(ollama.url).port);
+  const { assistant } = await assistantWith(t, { settings: {
+    enabled: true, modes: { 'task.route': 'suggest', 'command.review': 'off' },
+    backends: [{ id: 'ollama-1', preset: 'emulated', runtime: 'ollama', model: 'qwen3.5:9b', url: ollama.url, enabled: true, localConfirmed: { port, at: 1 } }]
+  } });
+  const busy = await assistant.launch(launch({ sessionId: 'card-busy0001' }));
+  const quiet = await assistant.launch(launch({ sessionId: 'card-quiet001' }));
+  const history = [];
+  for (let i = 0; i < 11; i++) {
+    history.push({ role: 'user', content: `Investigate failure number ${i} in the scheduler` });
+    assert.equal((await chat(portOf(busy), busy.env.CTTY_JEV_ROUTER_KEY, { model: 'auto', stream: true, messages: [{ role: 'system', content: 'sys' }, ...history] })).status, 200);
+    history.push({ role: 'assistant', content: 'Done.' });
+  }
+  const turns = assistant.auto.router.recent().filter(record => record.session === 'card-bus' && record.kind === 'turn').reverse();
+  assert.deepEqual(turns.map(record => record.source), [...Array(10).fill('jev'), 'rules']);
+  assert.equal(turns.at(-1).reason, 'jev_unavailable');
+  assert.equal(turns.at(-1).status, 200, 'the call itself still succeeds');
+  assert.equal((await chat(portOf(quiet), quiet.env.CTTY_JEV_ROUTER_KEY, turn('Investigate the flaky login test'))).status, 200);
+  assert.equal(assistant.auto.router.recent()[0].source, 'jev', 'another card still gets Jev');
+  // The router's turns reach command review (the card's task, latest first).
+  assert.match(assistant.review.requestFor('card-busy0001').text, /^Investigate failure number 10 in the scheduler\n\nInvestigate failure number 9/u);
+  assert.equal(assistant.review.requestFor('card-busy0001').byPerson, true);
+  assert.equal(assistant.review.requestFor('card-quiet001').text, 'Investigate the flaky login test');
+});
+
 test('route: a caller on Auto (Jev) gets Auto launch options for an OpenCode subagent, and no fixed model', async t => {
   const { assistant } = await assistantWith(t);
   const caller = { id: 'orch-on-auto', provider: 'opencode', role: 'orchestrator', title: 'o', status: 'idle', cwd: base, workingDirectory: base };

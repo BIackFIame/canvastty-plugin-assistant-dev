@@ -1,4 +1,4 @@
-import { LOCAL_CONCURRENCY, USE_CASE_PER_MINUTE, type AssistantUseCase } from '../shared/catalog.ts';
+import { LOCAL_CONCURRENCY, USE_CASE_PER_CARD_PER_MINUTE, USE_CASE_PER_MINUTE, type AssistantUseCase } from '../shared/catalog.ts';
 
 /**
  * Budgets (assistant spec §5.5). Every slot is reserved synchronously, before any `await`, so concurrent calls
@@ -17,7 +17,10 @@ export interface Reservation {
   /** Nothing was sent: give the slot back. */
   release(): void;
 }
-export type BudgetRefusal = 'assistant-minute' | 'assistant-day' | 'cloud-spend' | 'use-case-minute';
+export type BudgetRefusal = 'assistant-minute' | 'assistant-day' | 'cloud-spend' | 'use-case-minute' | 'card-minute';
+
+/** Cards whose per-minute calls are kept (the oldest goes first; an emptied list goes at once). */
+const MAX_CARDS = 2_048;
 
 const MINUTE = 60_000;
 
@@ -31,6 +34,8 @@ export class AssistantBudget {
   private readonly now: () => number;
   private minute: number[] = [];
   private readonly useCaseMinute = new Map<AssistantUseCase, number[]>();
+  /** `<use case>|<session>` → call times in the last minute, for the use cases with a per-card limit. */
+  private readonly cardMinute = new Map<string, number[]>();
   private day = '';
   private dayCalls = 0;
   private daySpend = 0;
@@ -50,6 +55,7 @@ export class AssistantBudget {
     const cutoff = at - MINUTE;
     this.minute = this.minute.filter(t => t > cutoff);
     for (const [key2, list] of this.useCaseMinute) this.useCaseMinute.set(key2, list.filter(t => t > cutoff));
+    for (const [key2, list] of this.cardMinute) { const kept = list.filter(t => t > cutoff); if (kept.length) this.cardMinute.set(key2, kept); else this.cardMinute.delete(key2); }
   }
 
   /** What would refuse this request now, or null. */
@@ -64,6 +70,9 @@ export class AssistantBudget {
       if (committed >= limits.cloudUsdPerDay || committed + estimate(request) > limits.cloudUsdPerDay) return 'cloud-spend';
     }
     if ((this.useCaseMinute.get(request.useCase)?.length ?? 0) >= USE_CASE_PER_MINUTE[request.useCase]) return 'use-case-minute';
+    const perCard = USE_CASE_PER_CARD_PER_MINUTE[request.useCase];
+    const card = cardKey(request);
+    if (perCard !== undefined && card && (this.cardMinute.get(card)?.length ?? 0) >= perCard) return 'card-minute';
     return null;
   }
 
@@ -75,6 +84,13 @@ export class AssistantBudget {
     this.dayCalls++;
     const perUseCase = this.useCaseMinute.get(request.useCase) ?? [];
     perUseCase.push(at); this.useCaseMinute.set(request.useCase, perUseCase);
+    const card = USE_CASE_PER_CARD_PER_MINUTE[request.useCase] !== undefined ? cardKey(request) : null;
+    if (card) {
+      const list = this.cardMinute.get(card) ?? [];
+      list.push(at);
+      this.cardMinute.delete(card); this.cardMinute.set(card, list);
+      while (this.cardMinute.size > MAX_CARDS) this.cardMinute.delete(this.cardMinute.keys().next().value!);
+    }
     const held = request.cloud ? estimate(request) : 0;
     this.dayHeld += held;
     const day = this.day;
@@ -94,7 +110,7 @@ export class AssistantBudget {
         settled = true;
         unhold();
         const drop = (list: number[] | undefined): void => { const i = list?.lastIndexOf(at) ?? -1; if (list && i >= 0) list.splice(i, 1); };
-        drop(this.minute); drop(this.useCaseMinute.get(request.useCase));
+        drop(this.minute); drop(this.useCaseMinute.get(request.useCase)); if (card) drop(this.cardMinute.get(card));
         if (day !== this.day) return;
         this.dayCalls = Math.max(0, this.dayCalls - 1);
       }
@@ -143,6 +159,8 @@ export class AssistantBudget {
   /** For the checklist: whether the day's cloud spend or calls ran out. */
   spent(): { calls: number; usd: number } { this.roll(this.now()); return { calls: this.dayCalls, usd: this.daySpend }; }
 }
+
+const cardKey = (request: BudgetRequest): string | null => request.sessionId ? `${request.useCase}|${request.sessionId}` : null;
 
 function estimate(request: BudgetRequest): number {
   const value = request.estimateUsd;

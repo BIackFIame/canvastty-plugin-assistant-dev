@@ -81,8 +81,8 @@ test('cache: answers only; a hit reruns the mapping, and mode, trust or key chan
 test('budget: slots are reserved before any await, so concurrent calls never overshoot a cap', async () => {
   const f = await engineWith({ fake: { delayMs: 30 } });
   try {
-    // task.route allows 10 requests per minute.
-    const decisions = await Promise.all(Array.from({ length: 15 }, (_, i) => f.engine.ask(routeRequest(`Task number ${i}`), ctx())));
+    // task.route allows 10 requests per minute per card.
+    const decisions = await Promise.all(Array.from({ length: 15 }, (_, i) => f.engine.ask(routeRequest(`Task number ${i}`), ctx({ sessionId: 'card-1' }))));
     assert.equal(f.posts().length, 10);
     assert.equal(decisions.filter(d => d.fallbackReason === 'budget').length, 5);
     assert.ok(decisions.every(d => !d.enforce));
@@ -99,6 +99,32 @@ test('budget: slots are reserved before any await, so concurrent calls never ove
   const local = new AssistantBudget({ limits: () => ({ perMinute: 1000, perDay: 1000, cloudUsdPerDay: 1 }) });
   const slots = Array.from({ length: 6 }, () => local.local());
   assert.equal(slots.filter(Boolean).length, 5, 'one in flight and a queue of four');
+});
+
+test('budget: task triage is limited per card (10 a minute) under a ceiling for all cards (60); command review keeps its own; a minute later it is back', () => {
+  let now = Date.UTC(2026, 9, 18, 12);
+  const budget = new AssistantBudget({ limits: () => ({ perMinute: 1000, perDay: 100_000, cloudUsdPerDay: 100 }), now: () => now });
+  const route = sessionId => budget.reserve({ useCase: 'task.route', cloud: true, ...(sessionId ? { sessionId } : {}) });
+  // One busy card: its eleventh turn this minute falls back; another card is not starved by it.
+  for (let i = 0; i < 10; i++) assert.notEqual(route('busy'), null, `busy #${i + 1}`);
+  assert.equal(route('busy'), null);
+  assert.equal(budget.refusal({ useCase: 'task.route', cloud: true, sessionId: 'busy' }), 'card-minute');
+  assert.notEqual(route('quiet'), null);
+  // Several Auto cards together reach the ceiling: 60 calls in the minute, whichever cards made them.
+  let granted = 11;
+  for (let card = 0; card < 8; card++) for (let i = 0; i < 10; i++) if (route(`card-${card}`)) granted++;
+  assert.equal(granted, 60);
+  assert.equal(budget.refusal({ useCase: 'task.route', cloud: true, sessionId: 'fresh' }), 'use-case-minute');
+  assert.equal(route(), null, 'a call with no card counts against the ceiling only');
+  assert.notEqual(budget.reserve({ useCase: 'command.review', cloud: true, sessionId: 'busy' }), null, 'command review has its own limit');
+  // A call that sent nothing gives its slot back to its card.
+  now += 61_000;
+  const slots = Array.from({ length: 10 }, () => route('busy'));
+  assert.equal(route('busy'), null);
+  slots[0].release();
+  assert.notEqual(route('busy'), null);
+  now += 61_000;
+  assert.notEqual(route('busy'), null, 'a minute later');
 });
 
 test('budget: a cloud call holds its cost estimate against the day cap while it runs; an unknown cost counts as the estimate', () => {
