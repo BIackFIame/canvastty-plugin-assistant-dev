@@ -1,12 +1,14 @@
 /**
  * CanvasTTY gives a plugin one badge per card (`cards.setBadge` replaces the plugin's badge). Several signals can
- * want it (a suspected loop, a flow waiting for the person, a review suggestion, task progress, launch triage), so the
+ * want it (a suspected loop, a flow waiting for the person, a review suggestion, task progress, launch triage, the
+ * model Auto (Jev) chose), so the
  * card shows the most important one; when it goes, the next one comes back. Nothing is shown without a signal.
  */
-export type BadgeKind = 'loop' | 'flow' | 'review' | 'tasks' | 'triage';
+export type BadgeKind = 'loop' | 'flow' | 'review' | 'tasks' | 'triage' | 'model';
 export interface Badge { text: string; tone: 'neutral' | 'info' | 'warn' | 'error'; tooltip?: string }
 
-const PRIORITY: Readonly<Record<BadgeKind, number>> = { loop: 0, flow: 1, review: 2, tasks: 3, triage: 4 };
+/** `model` (Auto (Jev)'s current model) is the least important: any other signal wins the card's one badge. */
+const PRIORITY: Readonly<Record<BadgeKind, number>> = { loop: 0, flow: 1, review: 2, tasks: 3, triage: 4, model: 5 };
 const MAX_CARDS = 1_024;
 
 export class BadgeBoard {

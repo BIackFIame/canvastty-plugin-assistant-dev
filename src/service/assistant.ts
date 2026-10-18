@@ -13,6 +13,11 @@ import {
 import { Harness, type CardSummary } from '../harness/harness.ts';
 import { HarnessError, localeOf, type Locale, type ServiceStrings } from '../harness/i18n.ts';
 import { commandReviewLevel, withCommandReview, COMMAND_REVIEW_LEVELS, type CommandReviewLevel, type CommandReviewState } from '../harness/settings.ts';
+import { ROUTE_TAUS } from '../shared/catalog.ts';
+import { AutoService, type AutoPrepareAnswer } from '../auto/service.ts';
+import { AUTO_STRINGS } from '../auto/i18n.ts';
+import { clampClass } from '../auto/launch.ts';
+import type { RouterDeps } from '../auto/router.ts';
 
 /**
  * The Assistant service: one process that answers CanvasTTY's decision hook (command review), its launch pipeline
@@ -39,6 +44,7 @@ export interface LaunchContext {
   chosen?: boolean;
   /** Where the card runs: the chosen or saved environment; null on this computer. */
   environment?: { pluginId: string; kind: string } | null;
+  parentSessionId?: string;
 }
 
 const text = (value: unknown, max: number): string => typeof value === 'string' ? value.replace(/[\u0000-\u001f\u007f]+/gu, ' ').trim().slice(0, max) : '';
@@ -61,8 +67,12 @@ export class Assistant {
   /** The same for the harness switches (routing, loop alerts, flows): their defaults apply, nothing is saved over. */
   private harnessReadable: boolean;
   readonly harness: Harness;
+  /** Model: Auto (Jev): the router, its settings and the launch contribution. */
+  readonly auto: AutoService;
+  /** Each card's effective data class, so a subagent's can be clamped to its parent's. */
+  private readonly classes = new Map<string, DataClass>();
 
-  constructor(options: { host: Host; dataDir: string; settings?: unknown; settingsUnavailable?: boolean; harness?: unknown; harnessUnavailable?: boolean; locale?: unknown; transport?: typeof fetch; git?: null; now?: () => number }) {
+  constructor(options: { host: Host; dataDir: string; settings?: unknown; settingsUnavailable?: boolean; harness?: unknown; harnessUnavailable?: boolean; autoRouting?: unknown; autoRoutingUnavailable?: boolean; locale?: unknown; transport?: typeof fetch; git?: null; now?: () => number; autoTimeouts?: RouterDeps['timeouts'] }) {
     this.host = options.host;
     // Nothing saved (a fresh install, or an update from a version that saved nothing) or nothing readable: the
     // defaults, with command review Off. The person turns it on; the plugin never decides trust for them.
@@ -78,7 +88,8 @@ export class Assistant {
       modelDifficulty: async (task, caller, deadlineMs) => {
         const answer = await this.advice(task, null, caller.workingDirectory || caller.cwd || process.cwd(), caller.id, deadlineMs, requesterOf(caller.role));
         return answer.kind === 'advice' ? answer.advice.difficulty : null;
-      }
+      },
+      autoLaunchOptions: caller => this.auto.launchOptionsFor(caller.id)
     });
     this.harness.loadSettings(options.harness);
     const secrets: DecisionSecretsLike = {
@@ -99,6 +110,16 @@ export class Assistant {
       settings: () => this.settings, directory: join(options.dataDir, 'assistant'), secrets,
       ...(options.transport ? { transport: options.transport } : {})
     });
+    this.auto = new AutoService({
+      host: options.host, dataDir: options.dataDir, locale, saved: options.autoRouting, savedUnavailable: options.autoRoutingUnavailable === true,
+      readKey: owner => this.readKey(owner),
+      dataClassMode: () => this.settings.dataClassMode,
+      decide: (text, grant, signal) => this.turnDifficulty(text, grant.dataClass, grant.sessionId, grant.role, signal),
+      publishBadge: (sessionId, badge) => { void this.harness.setBadge(sessionId, 'model', badge); },
+      ...(options.transport ? { transport: options.transport } : {}),
+      ...(options.now ? { now: options.now } : {}),
+      ...(options.autoTimeouts ? { timeouts: options.autoTimeouts } : {})
+    });
     this.review = new ReviewService({
       engine: this.engine, settings: () => this.settings,
       ...(options.git === null ? { git: null } : {}),
@@ -107,7 +128,7 @@ export class Assistant {
   }
 
   /** A key the settings page wrote: `{ origin, value }` as JSON under the backend's secret name. */
-  private async readKey(owner: string): Promise<{ origin: string; value: string } | null> {
+  async readKey(owner: string): Promise<{ origin: string; value: string } | null> {
     let raw: unknown;
     try { raw = await this.host.callHost('secrets.get', { key: owner }); } catch { throw new Error('The plugin secrets are unavailable.'); }
     if (typeof raw !== 'string' || !raw) return null;
@@ -134,13 +155,15 @@ export class Assistant {
     if (!Array.isArray(list)) return;
     this.harness.sessionsKnown(list);
     for (const session of list) if (session && typeof session === 'object' && typeof (session as SessionSummary).id === 'string') this.sessions.set((session as SessionSummary).id, session as SessionSummary);
+    // Keys of cards CanvasTTY no longer has (they closed while the service was down) stop working now.
+    this.auto.sessionsKnown(new Set(this.sessions.keys()));
   }
 
   sessionEvent(event: { type?: unknown; session?: unknown }): void {
     const session = event.session as SessionSummary | undefined;
     if (!session || typeof session.id !== 'string') return;
     this.harness.sessionEvent(event);
-    if (event.type === 'closed') { this.sessions.delete(session.id); this.review.forget(session.id); return; }
+    if (event.type === 'closed') { this.sessions.delete(session.id); this.review.forget(session.id); this.classes.delete(session.id); this.auto.sessionClosed(session.id); return; }
     this.sessions.set(session.id, session);
   }
 
@@ -166,16 +189,41 @@ export class Assistant {
    * `isolation.state` says which. A worktree is not an isolated environment, so the old "YOLO only isolated" option
    * (which counted it as one) is gone and a saved value of it is ignored.
    */
-  launch(context: LaunchContext): null {
+  async launch(context: LaunchContext): Promise<AutoPrepareAnswer | null> {
     if (context.chosen === false) return null;
     const options = context.options ?? {};
     const task = text(options.task, 2_000) || null;
-    const dataClass = DATA_CLASSES.includes(options.dataClass as DataClass) ? options.dataClass as DataClass : null;
+    const requested = DATA_CLASSES.includes(options.dataClass as DataClass) ? options.dataClass as DataClass : null;
+    // An orchestrator may choose these options for its subagents (delegable), but never a lower class than its own.
+    const parentClass = context.role === 'subagent' && context.parentSessionId ? this.classes.get(context.parentSessionId) ?? null : null;
+    const dataClass = requested ? clampClass(requested, parentClass) : parentClass;
+    this.classes.set(context.sessionId, dataClass ?? this.settings.defaultDataClass);
+    while (this.classes.size > 4_096) this.classes.delete(this.classes.keys().next().value!);
+    const model = options.model ?? 'off';
+    if (model !== 'off' && model !== 'auto') { const refusal = AUTO_STRINGS[this.locale].unknownValue; return { refuse: { reason: refusal } }; }
     const mode = this.engine.mode('task.route');
     const triage = !!task && (mode === 'suggest' || mode === 'auto' || mode === 'shadow');
     this.review.noteLaunch(context.sessionId, { task, dataClass, triage: triage && mode !== 'shadow' });
     if (triage) void this.triage(context.sessionId, task!, dataClass, context.cwd);
-    return null;
+    if (model !== 'auto') return null;
+    return this.auto.prepare({
+      sessionId: context.sessionId, provider: context.provider, role: context.role, cwd: context.cwd, parentSessionId: context.parentSessionId ?? null,
+      environment: context.environment, dataClass: dataClass ?? this.settings.defaultDataClass
+    });
+  }
+
+  /**
+   * Jev's view of one Auto turn: the existing task triage (task.route) on the latest user text only, through the
+   * engine (data-class gate, budget, cache, breaker, log). Only while task triage is Suggest or Auto; otherwise, or
+   * without an answer, null and the router uses word rules.
+   */
+  private async turnDifficulty(task: string, dataClass: DataClass, sessionId: string, role: string, signal: AbortSignal): Promise<{ difficulty: 'simple' | 'normal' | 'hard'; strong: boolean } | null> {
+    const mode = this.engine.mode('task.route');
+    if (mode !== 'suggest' && mode !== 'auto') return null;
+    const { triage } = await askTaskRoute(this.engine, { task, dataClass }, {
+      signal, assertCurrent: () => { if (signal.aborted) throw new Error('aborted'); }, requester: role === 'subagent' ? 'orchestrator' : 'person', sessionId
+    });
+    return triage ? { difficulty: triage.difficulty, strong: triage.p3 >= ROUTE_TAUS.strong } : null;
   }
 
   private async triage(sessionId: string, task: string, dataClass: DataClass | null, cwd: string): Promise<void> {
@@ -295,13 +343,14 @@ export class Assistant {
   }
 
   /** A later read of the stored settings succeeded (after a storage error at start): they apply now. */
-  storageRecovered(stored: { settings?: unknown; harness?: unknown }): void {
+  storageRecovered(stored: { settings?: unknown; harness?: unknown; autoRouting?: unknown }): void {
     if ('settings' in stored) {
       this.settings = normalizeAssistantSettings(stored.settings);
       this.settingsReadable = true;
       this.engine.settingsChanged();
     }
     if ('harness' in stored) { this.harness.loadSettings(stored.harness); this.harnessReadable = true; }
+    if ('autoRouting' in stored) this.auto.loaded(stored.autoRouting);
     this.host.emit('settings', null);
   }
 

@@ -76,7 +76,7 @@ function serve({ methods, notifications = {}, onInitialize, input = process.stdi
     return true;
   };
   const host = {
-    callHost: (method, params) => new Promise((resolve4, reject) => {
+    callHost: (method, params) => new Promise((resolve5, reject) => {
       if (hostGone) {
         reject(new Error("The host connection is closed."));
         return;
@@ -90,7 +90,7 @@ function serve({ methods, notifications = {}, onInitialize, input = process.stdi
         pending.delete(id);
         reject(new Error(`The host did not answer ${method} in time.`));
       }, limit.hostCallMs);
-      pending.set(id, { resolve: resolve4, reject, timer });
+      pending.set(id, { resolve: resolve5, reject, timer });
       if (!send({ id, method, params })) {
         clearTimeout(timer);
         pending.delete(id);
@@ -228,7 +228,7 @@ function serve({ methods, notifications = {}, onInitialize, input = process.stdi
 }
 
 // src/service/assistant.ts
-import { join as join8 } from "node:path";
+import { join as join12 } from "node:path";
 
 // src/engine/AssistantEngine.ts
 import { randomUUID } from "node:crypto";
@@ -714,10 +714,10 @@ function utf8Length(text5) {
   return bytes;
 }
 function parseBoundedJson(text5, caps, errorClass = "invalid-response") {
-  const fail3 = (message) => {
+  const fail4 = (message) => {
     throw new SystemOneError(errorClass, message);
   };
-  if (utf8Length(text5) > caps.maxBytes) fail3("System One JSON exceeds its byte limit.");
+  if (utf8Length(text5) > caps.maxBytes) fail4("System One JSON exceeds its byte limit.");
   let i = 0, nodes = 0;
   const ws = () => {
     for (; ; ) {
@@ -735,14 +735,14 @@ function parseBoundedJson(text5, caps, errorClass = "invalid-response") {
         try {
           return JSON.parse(text5.slice(start, i));
         } catch {
-          return fail3("Invalid JSON string.");
+          return fail4("Invalid JSON string.");
         }
       }
     }
-    return fail3("Invalid JSON string.");
+    return fail4("Invalid JSON string.");
   };
   const value = (depth) => {
-    if (depth > caps.maxDepth || ++nodes > caps.maxNodes) fail3("System One JSON structure limit exceeded.");
+    if (depth > caps.maxDepth || ++nodes > caps.maxNodes) fail4("System One JSON structure limit exceeded.");
     ws();
     const c = text5[i];
     if (c === "{") {
@@ -755,19 +755,19 @@ function parseBoundedJson(text5, caps, errorClass = "invalid-response") {
       const keys = /* @__PURE__ */ new Set();
       for (; ; ) {
         ws();
-        if (text5[i] !== '"') fail3("Invalid JSON key.");
+        if (text5[i] !== '"') fail4("Invalid JSON key.");
         const key = string();
-        if (keys.has(key) || FORBIDDEN_KEYS.has(key)) fail3("Duplicate or forbidden JSON key.");
+        if (keys.has(key) || FORBIDDEN_KEYS.has(key)) fail4("Duplicate or forbidden JSON key.");
         keys.add(key);
         ws();
-        if (text5[i++] !== ":") fail3("Invalid JSON object.");
+        if (text5[i++] !== ":") fail4("Invalid JSON object.");
         value(depth + 1);
         ws();
         if (text5[i] === "}") {
           i++;
           return;
         }
-        if (text5[i++] !== ",") fail3("Invalid JSON object.");
+        if (text5[i++] !== ",") fail4("Invalid JSON object.");
       }
     }
     if (c === "[") {
@@ -784,7 +784,7 @@ function parseBoundedJson(text5, caps, errorClass = "invalid-response") {
           i++;
           return;
         }
-        if (text5[i++] !== ",") fail3("Invalid JSON array.");
+        if (text5[i++] !== ",") fail4("Invalid JSON array.");
       }
     }
     if (c === '"') {
@@ -793,13 +793,13 @@ function parseBoundedJson(text5, caps, errorClass = "invalid-response") {
     }
     LITERAL.lastIndex = i;
     const match = LITERAL.exec(text5);
-    if (!match) return fail3("Invalid JSON value.");
+    if (!match) return fail4("Invalid JSON value.");
     i += match[0].length;
-    if (match[0] !== "true" && match[0] !== "false" && match[0] !== "null" && !Number.isFinite(Number(match[0]))) fail3("Nonfinite JSON number.");
+    if (match[0] !== "true" && match[0] !== "false" && match[0] !== "null" && !Number.isFinite(Number(match[0]))) fail4("Nonfinite JSON number.");
   };
   value(0);
   ws();
-  if (i !== text5.length) fail3("Trailing JSON.");
+  if (i !== text5.length) fail4("Trailing JSON.");
   return JSON.parse(text5);
 }
 var S1_LIMITS = Object.freeze({
@@ -933,18 +933,18 @@ function planS1Batches(request, limits) {
       skipped[id] = "context";
       continue;
     }
-    const tokens = questionTokens(question);
-    if (state + tokens > limits.maxStateTokensPerQuestion || limits.contextTokens !== null && state + tokens > limits.contextTokens) {
+    const tokens2 = questionTokens(question);
+    if (state + tokens2 > limits.maxStateTokensPerQuestion || limits.contextTokens !== null && state + tokens2 > limits.contextTokens) {
       skipped[id] = "context";
       continue;
     }
-    if (current.length >= limits.maxQuestions || limits.contextTokens !== null && used + tokens > limits.contextTokens) {
+    if (current.length >= limits.maxQuestions || limits.contextTokens !== null && used + tokens2 > limits.contextTokens) {
       batches.push(current);
       current = [];
       used = state;
     }
     current.push(id);
-    used += tokens;
+    used += tokens2;
   }
   if (current.length) batches.push(current);
   return { batches, skipped };
@@ -1345,14 +1345,14 @@ function retryDelayMs(attempt, headers, timing) {
   return timing.now + delay + timing.expectedLatencyMs < timing.deadlineAt ? delay : null;
 }
 function sleep(ms, signal) {
-  return new Promise((resolve4, reject) => {
+  return new Promise((resolve5, reject) => {
     if (signal.aborted) {
       reject(signal.reason);
       return;
     }
     const timer = setTimeout(() => {
       signal.removeEventListener("abort", abort);
-      resolve4();
+      resolve5();
     }, ms);
     const abort = () => {
       clearTimeout(timer);
@@ -1749,10 +1749,10 @@ var SystemOneHttpBackend = class {
    * try may be billed, a token is at least one byte, plus room for the request's own framing. 0 without a price.
    */
   costCeilingUsd(request) {
-    const price = this.presetInfo.priceUsdPerMillionInput;
-    if (price === null) return 0;
+    const price2 = this.presetInfo.priceUsdPerMillionInput;
+    if (price2 === null) return 0;
     const batches = Math.max(1, Object.keys(request.questions).length);
-    return (Buffer.byteLength(JSON.stringify(request)) + FRAMING_TOKENS) * batches * (1 + RETRY_POLICY.maxRetries) * price / 1e6;
+    return (Buffer.byteLength(JSON.stringify(request)) + FRAMING_TOKENS) * batches * (1 + RETRY_POLICY.maxRetries) * price2 / 1e6;
   }
   setCaps(caps) {
     this.record = structuredClone(caps);
@@ -3143,11 +3143,11 @@ var AssistantBudget = class {
       if (onAbort) signal?.removeEventListener("abort", onAbort);
       onAbort = null;
     };
-    const ready2 = new Promise((resolve4, reject) => {
+    const ready2 = new Promise((resolve5, reject) => {
       wake = () => {
         admitted = true;
         unlisten();
-        resolve4();
+        resolve5();
       };
       if (!signal) return;
       onAbort = () => {
@@ -3770,10 +3770,10 @@ function lowerLimits(caps, reported) {
   };
   lower("maxQuestions", positiveInt(limits.max_questions));
   lower("maxOptions", positiveInt(limits.max_answers_per_question));
-  const tokens = positiveInt(limits.max_input_tokens);
-  lower("maxStateTokensPerQuestion", tokens);
-  if (tokens !== null && next.contextTokens > 0 && tokens < next.contextTokens) {
-    next.contextTokens = tokens;
+  const tokens2 = positiveInt(limits.max_input_tokens);
+  lower("maxStateTokensPerQuestion", tokens2);
+  if (tokens2 !== null && next.contextTokens > 0 && tokens2 < next.contextTokens) {
+    next.contextTokens = tokens2;
     next.limitsSource = "server";
   }
   return next;
@@ -3846,7 +3846,7 @@ async function runConformance(backend, options) {
     if (!answered) check("probe", "skip", "No read-only route answered; the battery decides.");
     if (preset.id === "custom" && healthDialect) dialect = healthDialect;
   }
-  const fail3 = (id, failure2, detail) => {
+  const fail4 = (id, failure2, detail) => {
     check(id, "fail", detail);
     return { added: false, caps, checks, dialect, gateway, modelLabel: null, drift: "first", requests, failure: failure2 };
   };
@@ -3860,13 +3860,13 @@ async function runConformance(backend, options) {
     a1 = await send(batteryRequest(backend.model));
   } catch (error) {
     const failure2 = s1ErrorClass(error);
-    if (failure2 !== "bad-request") return fail3("route", failure2, ROUTE_DETAIL[failure2 ?? "transport"] ?? `The server refused the request (${failure2}).`);
+    if (failure2 !== "bad-request") return fail4("route", failure2, ROUTE_DETAIL[failure2 ?? "transport"] ?? `The server refused the request (${failure2}).`);
     scoreSupported = false;
     try {
       a1 = await send(batteryRequest(backend.model));
     } catch (retry) {
       const again = s1ErrorClass(retry);
-      return fail3("route", again, ROUTE_DETAIL[again ?? "transport"] ?? `The server refused the request (${again}).`);
+      return fail4("route", again, ROUTE_DETAIL[again ?? "transport"] ?? `The server refused the request (${again}).`);
     }
   }
   if (preset.id === "custom") ({ dialect, gateway } = detectDialect(a1.json));
@@ -3883,7 +3883,7 @@ async function runConformance(backend, options) {
   try {
     run = decode(a1, false);
   } catch (error) {
-    const shapeFailure = (cause) => fail3("shape", s1ErrorClass(cause), "The answers do not have the System One shape.");
+    const shapeFailure = (cause) => fail4("shape", s1ErrorClass(cause), "The answers do not have the System One shape.");
     if (!scoreSupported) return shapeFailure(error);
     const full = batteryRequest(backend.model);
     try {
@@ -3910,7 +3910,7 @@ async function runConformance(backend, options) {
   try {
     preset.acceptModel(backend.model, reported, { modelHash: null, fingerprint: null, routingModel: first.routingModel, unstable: false });
   } catch (error) {
-    return fail3("model-identity", s1ErrorClass(error), "The server answered with another model.");
+    return fail4("model-identity", s1ErrorClass(error), "The server answered with another model.");
   }
   const noul = answersA1.q_noul, choice = answersA1.q_choice, score = answersA1.q_score;
   const wrong = [];
@@ -3918,7 +3918,7 @@ async function runConformance(backend, options) {
   if (choice.type === "choice" && (choice.choice !== "none_of_these" || (choice.probabilities.none_of_these ?? 0) < 0.5)) wrong.push({ id: "q_choice", top: choice.top });
   if (score.type === "score" && score.level !== 0) wrong.push({ id: "q_score", top: Math.max(...score.probabilities) });
   const confidentlyWrong = wrong.some((item) => item.top >= 0.8);
-  if (confidentlyWrong) return fail3("known-answers", null, "Confidently wrong on a simple question: not suitable for decisions.");
+  if (confidentlyWrong) return fail4("known-answers", null, "Confidently wrong on a simple question: not suitable for decisions.");
   check("known-answers", wrong.length ? "warn" : "pass", wrong.length ? `Unsure on ${wrong.map((item) => item.id).join(", ")}: no automatic decisions until a calibration fit passes.` : "All three simple questions answered right.");
   const latencies = [];
   let answersA2 = null, answersB = null;
@@ -4117,7 +4117,7 @@ async function runEmulatedBattery(backend, options) {
   };
   let caps = backend.caps();
   const call = () => ({ signal: options.signal, deadlineAt: now() + 6e4, credential: options.credential });
-  const fail3 = (id, failure2, detail, requests2) => {
+  const fail4 = (id, failure2, detail, requests2) => {
     check(id, "fail", detail);
     return { added: false, caps, checks, dialect: "semif-letter", modelLabel: null, drift: "first", requests: requests2, failure: failure2 };
   };
@@ -4125,13 +4125,13 @@ async function runEmulatedBattery(backend, options) {
   try {
     a1 = await backend.evaluate(batteryRequest(backend.model), call());
   } catch (error) {
-    return fail3("route", s1ErrorClass(error), "The model did not answer the synthetic questions.", 1);
+    return fail4("route", s1ErrorClass(error), "The model did not answer the synthetic questions.", 1);
   }
   check("route", "pass", "Answered the synthetic questions.");
   const mass = Math.min(...Object.values(a1.emulated?.letterMass ?? { any: 1 }));
-  if (mass < 0.5) return fail3("shape", "invalid-output", "The model did not understand the format (letter mass below 0.5).", 1);
+  if (mass < 0.5) return fail4("shape", "invalid-output", "The model did not understand the format (letter mass below 0.5).", 1);
   const known = knownAnswers(a1.answers);
-  if (known.confidentlyWrong) return fail3("known-answers", null, "Confidently wrong on a simple question: not suitable for decisions.", 1);
+  if (known.confidentlyWrong) return fail4("known-answers", null, "Confidently wrong on a simple question: not suitable for decisions.", 1);
   check("known-answers", known.wrong.length ? "warn" : "pass", known.wrong.length ? `Unsure on ${known.wrong.join(", ")}.` : "All three simple questions answered right.");
   const vector = batteryVector(a1.answers);
   let deterministic = false, orderSensitivity = "strong", requests = 1;
@@ -5808,12 +5808,12 @@ var defaultGit = (cwd, args, signal) => new Promise((resolvePromise, reject) => 
     env: { ...process.env, GIT_OPTIONAL_LOCKS: "0", GIT_TERMINAL_PROMPT: "0", GIT_PAGER: "cat", LC_ALL: "C", GIT_NO_REPLACE_OBJECTS: "1" }
   }, (error, stdout) => error ? reject(error) : resolvePromise(String(stdout)));
 });
-async function gitState(root, candidates, git, signal) {
+async function gitState(root, candidates2, git, signal) {
   try {
     const top = (await git(root, ["rev-parse", "--show-toplevel"], signal)).trim();
     if (!top) return { repo: false, changed: /* @__PURE__ */ new Set(), tracked: /* @__PURE__ */ new Set() };
     const topReal = realish(top);
-    const files = [...new Set(candidates.map(realish))].filter((abs) => {
+    const files = [...new Set(candidates2.map(realish))].filter((abs) => {
       const rel = relative2(topReal, abs);
       return !!rel && !rel.startsWith("..") && !isAbsolute2(rel) && isFileQuiet(abs);
     }).slice(0, 32);
@@ -7986,7 +7986,7 @@ import { mkdir as mkdir3, rename as rename2, writeFile as writeFile3 } from "nod
 import { join as join7 } from "node:path";
 
 // src/harness/badges.ts
-var PRIORITY = { loop: 0, flow: 1, review: 2, tasks: 3, triage: 4 };
+var PRIORITY = { loop: 0, flow: 1, review: 2, tasks: 3, triage: 4, model: 5 };
 var MAX_CARDS = 1024;
 var BadgeBoard = class {
   cards = /* @__PURE__ */ new Map();
@@ -8490,15 +8490,16 @@ function pickEffort(entry, difficulty) {
 }
 function suggestRoute(input) {
   const listed = (Array.isArray(input.providers) ? input.providers : []).filter((entry2) => entry2 && typeof entry2 === "object" && typeof entry2.id === "string");
-  const candidates = listed.filter(usable);
-  const byId = (id) => id ? candidates.find((entry2) => entry2.id === id) : void 0;
+  const candidates2 = listed.filter(usable);
+  const byId = (id) => id ? candidates2.find((entry2) => entry2.id === id) : void 0;
   let entry = byId(input.prefer) ?? byId(input.callerProvider);
-  if (!entry) entry = [...candidates].sort((a, b) => rank(a.id) - rank(b.id))[0];
+  if (!entry) entry = [...candidates2].sort((a, b) => rank(a.id) - rank(b.id))[0];
   let provider = entry?.id ?? null;
   if (!provider && !listed.length) provider = input.prefer || input.callerProvider;
   if (!provider) return null;
-  const model = pickModel(entry, input.difficulty);
-  const effort = pickEffort(entry, input.difficulty);
+  const auto = provider === "opencode" && input.autoLaunchOptions ? input.autoLaunchOptions : null;
+  const model = auto ? void 0 : pickModel(entry, input.difficulty);
+  const effort = auto ? void 0 : pickEffort(entry, input.difficulty);
   const accountTool = (Array.isArray(input.launchOptionTools) ? input.launchOptionTools : []).find((name) => typeof name === "string" && /__(?:pick_account|pick_route)$/u.test(name));
   const why = input.difficulty === "simple" ? "a routine task: a small, quick model is enough" : input.difficulty === "hard" ? "a difficult task: use the strongest model offered" : "a task of ordinary difficulty: the provider default fits";
   const from = input.source === "model" ? "the decision model" : "word rules (no decision model answered)";
@@ -8509,8 +8510,9 @@ function suggestRoute(input) {
     ...effort ? { effort } : {},
     difficulty: input.difficulty,
     source: input.source,
-    reason: `${why} (difficulty from ${from}; ${keep}).`,
-    ...accountTool ? { accountTool } : {}
+    reason: auto ? `you run on Model: Auto (Jev), so the subagent does too: its model is chosen per turn (difficulty from ${from}; ${keep}).` : `${why} (difficulty from ${from}; ${keep}).`,
+    ...accountTool && !auto ? { accountTool } : {},
+    ...auto ? { launchOptions: auto } : {}
   };
 }
 var rank = (id) => {
@@ -8518,9 +8520,9 @@ var rank = (id) => {
   return index < 0 ? PREFERENCE.length : index;
 };
 function routeAnswer(suggestion) {
-  const spawn = { provider: suggestion.provider, ...suggestion.model ? { model: suggestion.model } : {}, ...suggestion.effort ? { effort: suggestion.effort } : {} };
+  const spawn = { provider: suggestion.provider, ...suggestion.model ? { model: suggestion.model } : {}, ...suggestion.effort ? { effort: suggestion.effort } : {}, ...suggestion.launchOptions ? { launchOptions: suggestion.launchOptions } : {} };
   const lines = [
-    `Suggested: ${suggestion.provider}${suggestion.model ? ` / ${suggestion.model}` : " (its default model)"}${suggestion.effort ? `, effort ${suggestion.effort}` : ""}. Why: ${suggestion.reason}`,
+    `Suggested: ${suggestion.provider}${suggestion.launchOptions ? " on Model: Auto (Jev) (do not pass a model)" : suggestion.model ? ` / ${suggestion.model}` : " (its default model)"}${suggestion.effort ? `, effort ${suggestion.effort}` : ""}. Why: ${suggestion.reason}`,
     `Pass these to spawn_agent: ${JSON.stringify(spawn)}.`,
     suggestion.accountTool ? `To choose an account, call ${suggestion.accountTool} and pass what it returns as spawn_agent.launchOptions.` : ""
   ].filter(Boolean);
@@ -8844,11 +8846,11 @@ var PlanStore = class {
   }
   /** Resolves on the next change or after `ms`. */
   waitForChange(ms) {
-    return new Promise((resolve4) => {
+    return new Promise((resolve5) => {
       const done = () => {
         clearTimeout(timer);
         this.waiters.delete(done);
-        resolve4();
+        resolve5();
       };
       const timer = setTimeout(done, ms);
       this.waiters.add(done);
@@ -9266,6 +9268,7 @@ var Harness = class {
   now;
   modelDifficulty;
   reviewOn;
+  autoLaunchOptions;
   sessions = /* @__PURE__ */ new Map();
   /** When a card last stopped working (turn boundaries; a short flicker is not a new turn). */
   stoppedAt = /* @__PURE__ */ new Map();
@@ -9283,6 +9286,7 @@ var Harness = class {
     this.now = options.now ?? Date.now;
     this.modelDifficulty = options.modelDifficulty;
     this.reviewOn = options.reviewOn ?? (() => false);
+    this.autoLaunchOptions = options.autoLaunchOptions;
     this.dir = join7(options.dataDir, "harness");
     this.badges = new BadgeBoard(options.publishBadge);
     this.journals = new Journals(this.now);
@@ -9505,7 +9509,8 @@ var Harness = class {
       callerProvider: caller.provider ?? null,
       providers: this.providersOf(input),
       prefer: text3(input.prefer, 40) || null,
-      launchOptionTools: strings(input.launchOptionTools, 8)
+      launchOptionTools: strings(input.launchOptionTools, 8),
+      autoLaunchOptions: this.autoLaunchOptions?.(caller) ?? null
     });
     if (!suggestion) return { content: "No listed provider is available for a subagent. Call list_providers and pick one yourself." };
     return { content: routeAnswer(suggestion) };
@@ -9754,6 +9759,1257 @@ ${JSON.stringify(task)}` };
   }
 };
 
+// src/auto/service.ts
+import { join as join11 } from "node:path";
+
+// src/auto/i18n.ts
+var EN2 = {
+  provider: "Model: Auto (Jev) works with OpenCode for now. Choose Off for this agent.",
+  environment: "Auto (Jev) runs on this computer; it cannot reach a container or a remote host yet. Choose Off, or run the card on this computer.",
+  project: "This project's OpenCode config chooses its own model or providers, so Auto (Jev) cannot guarantee where prompts go. Remove model/provider settings from it, or choose Off.",
+  projectUnreadable: "This project's OpenCode config could not be read, so Auto (Jev) cannot check where prompts go. Choose Off, or fix the file.",
+  noUpstream: "Auto (Jev) has no model to use yet: add an upstream and its models on the Decision models page (Settings \u2192 Plugins \u2192 CanvasTTY Assistant).",
+  dataClass: "No Auto (Jev) upstream is trusted with this card's data class. Raise an upstream's trust on the Decision models page, or lower the card's class.",
+  router: "Auto (Jev) could not open its local port on 127.0.0.1. Try again; the plugin log has the details.",
+  unknownValue: "This Model value is not known to the Assistant. Choose Off or Auto (Jev).",
+  badgeTip: (tier, source) => `Auto (Jev): ${EN2.tiers[tier]} model, chosen by ${EN2.sources[source] ?? source}. It can change at the next turn.`,
+  tiers: { small: "small", medium: "medium", large: "large" },
+  sources: { jev: "Jev", rules: "word rules (Jev did not answer)", lease: "the turn's earlier decision", small: "the small-model rule" }
+};
+var RU2 = {
+  provider: "\u041C\u043E\u0434\u0435\u043B\u044C \xAB\u0410\u0432\u0442\u043E (Jev)\xBB \u043F\u043E\u043A\u0430 \u0440\u0430\u0431\u043E\u0442\u0430\u0435\u0442 \u0442\u043E\u043B\u044C\u043A\u043E \u0441 OpenCode. \u0412\u044B\u0431\u0435\u0440\u0438\u0442\u0435 \xAB\u0412\u044B\u043A\u043B\xBB \u0434\u043B\u044F \u044D\u0442\u043E\u0433\u043E \u0430\u0433\u0435\u043D\u0442\u0430.",
+  environment: "\xAB\u0410\u0432\u0442\u043E (Jev)\xBB \u0440\u0430\u0431\u043E\u0442\u0430\u0435\u0442 \u043D\u0430 \u044D\u0442\u043E\u043C \u043A\u043E\u043C\u043F\u044C\u044E\u0442\u0435\u0440\u0435 \u0438 \u043F\u043E\u043A\u0430 \u043D\u0435 \u0434\u043E\u0441\u0442\u0430\u0451\u0442 \u0434\u043E \u043A\u043E\u043D\u0442\u0435\u0439\u043D\u0435\u0440\u0430 \u0438\u043B\u0438 \u0443\u0434\u0430\u043B\u0451\u043D\u043D\u043E\u0433\u043E \u0445\u043E\u0441\u0442\u0430. \u0412\u044B\u0431\u0435\u0440\u0438\u0442\u0435 \xAB\u0412\u044B\u043A\u043B\xBB \u0438\u043B\u0438 \u0437\u0430\u043F\u0443\u0441\u0442\u0438\u0442\u0435 \u043E\u043A\u043D\u043E \u043D\u0430 \u044D\u0442\u043E\u043C \u043A\u043E\u043C\u043F\u044C\u044E\u0442\u0435\u0440\u0435.",
+  project: "\u041A\u043E\u043D\u0444\u0438\u0433 OpenCode \u044D\u0442\u043E\u0433\u043E \u043F\u0440\u043E\u0435\u043A\u0442\u0430 \u0441\u0430\u043C \u0432\u044B\u0431\u0438\u0440\u0430\u0435\u0442 \u043C\u043E\u0434\u0435\u043B\u044C \u0438\u043B\u0438 \u043F\u0440\u043E\u0432\u0430\u0439\u0434\u0435\u0440\u043E\u0432, \u043F\u043E\u044D\u0442\u043E\u043C\u0443 \xAB\u0410\u0432\u0442\u043E (Jev)\xBB \u043D\u0435 \u043C\u043E\u0436\u0435\u0442 \u043E\u0431\u0435\u0449\u0430\u0442\u044C, \u043A\u0443\u0434\u0430 \u0443\u0439\u0434\u0443\u0442 \u0437\u0430\u043F\u0440\u043E\u0441\u044B. \u0423\u0431\u0435\u0440\u0438\u0442\u0435 \u0438\u0437 \u043D\u0435\u0433\u043E model/provider \u0438\u043B\u0438 \u0432\u044B\u0431\u0435\u0440\u0438\u0442\u0435 \xAB\u0412\u044B\u043A\u043B\xBB.",
+  projectUnreadable: "\u041A\u043E\u043D\u0444\u0438\u0433 OpenCode \u044D\u0442\u043E\u0433\u043E \u043F\u0440\u043E\u0435\u043A\u0442\u0430 \u043D\u0435 \u0447\u0438\u0442\u0430\u0435\u0442\u0441\u044F, \u043F\u043E\u044D\u0442\u043E\u043C\u0443 \xAB\u0410\u0432\u0442\u043E (Jev)\xBB \u043D\u0435 \u043C\u043E\u0436\u0435\u0442 \u043F\u0440\u043E\u0432\u0435\u0440\u0438\u0442\u044C, \u043A\u0443\u0434\u0430 \u0443\u0439\u0434\u0443\u0442 \u0437\u0430\u043F\u0440\u043E\u0441\u044B. \u0412\u044B\u0431\u0435\u0440\u0438\u0442\u0435 \xAB\u0412\u044B\u043A\u043B\xBB \u0438\u043B\u0438 \u0438\u0441\u043F\u0440\u0430\u0432\u044C\u0442\u0435 \u0444\u0430\u0439\u043B.",
+  noUpstream: "\u0423 \xAB\u0410\u0432\u0442\u043E (Jev)\xBB \u043F\u043E\u043A\u0430 \u043D\u0435\u0442 \u043C\u043E\u0434\u0435\u043B\u0435\u0439: \u0434\u043E\u0431\u0430\u0432\u044C\u0442\u0435 \u043F\u043E\u0441\u0442\u0430\u0432\u0449\u0438\u043A\u0430 \u0438 \u0435\u0433\u043E \u043C\u043E\u0434\u0435\u043B\u0438 \u043D\u0430 \u0441\u0442\u0440\u0430\u043D\u0438\u0446\u0435 \xAB\u041C\u043E\u0434\u0435\u043B\u0438 \u0440\u0435\u0448\u0435\u043D\u0438\u0439\xBB (\u041D\u0430\u0441\u0442\u0440\u043E\u0439\u043A\u0438 \u2192 \u041F\u043B\u0430\u0433\u0438\u043D\u044B \u2192 \u0410\u0441\u0441\u0438\u0441\u0442\u0435\u043D\u0442 CanvasTTY).",
+  dataClass: "\u041D\u0438 \u043E\u0434\u043D\u043E\u043C\u0443 \u043F\u043E\u0441\u0442\u0430\u0432\u0449\u0438\u043A\u0443 \xAB\u0410\u0432\u0442\u043E (Jev)\xBB \u043D\u0435 \u0434\u043E\u0432\u0435\u0440\u0435\u043D \u043A\u043B\u0430\u0441\u0441 \u0434\u0430\u043D\u043D\u044B\u0445 \u044D\u0442\u043E\u0433\u043E \u043E\u043A\u043D\u0430. \u041F\u043E\u0432\u044B\u0441\u044C\u0442\u0435 \u0434\u043E\u0432\u0435\u0440\u0438\u0435 \u043F\u043E\u0441\u0442\u0430\u0432\u0449\u0438\u043A\u0443 \u043D\u0430 \u0441\u0442\u0440\u0430\u043D\u0438\u0446\u0435 \xAB\u041C\u043E\u0434\u0435\u043B\u0438 \u0440\u0435\u0448\u0435\u043D\u0438\u0439\xBB \u0438\u043B\u0438 \u043F\u043E\u043D\u0438\u0437\u044C\u0442\u0435 \u043A\u043B\u0430\u0441\u0441 \u043E\u043A\u043D\u0430.",
+  router: "\xAB\u0410\u0432\u0442\u043E (Jev)\xBB \u043D\u0435 \u0441\u043C\u043E\u0433 \u043E\u0442\u043A\u0440\u044B\u0442\u044C \u043B\u043E\u043A\u0430\u043B\u044C\u043D\u044B\u0439 \u043F\u043E\u0440\u0442 \u043D\u0430 127.0.0.1. \u041F\u043E\u043F\u0440\u043E\u0431\u0443\u0439\u0442\u0435 \u0435\u0449\u0451 \u0440\u0430\u0437; \u043F\u043E\u0434\u0440\u043E\u0431\u043D\u043E\u0441\u0442\u0438 \u2014 \u0432 \u0436\u0443\u0440\u043D\u0430\u043B\u0435 \u043F\u043B\u0430\u0433\u0438\u043D\u0430.",
+  unknownValue: "\u0422\u0430\u043A\u043E\u0435 \u0437\u043D\u0430\u0447\u0435\u043D\u0438\u0435 \xAB\u041C\u043E\u0434\u0435\u043B\u0438\xBB \u0410\u0441\u0441\u0438\u0441\u0442\u0435\u043D\u0442\u0443 \u043D\u0435\u0438\u0437\u0432\u0435\u0441\u0442\u043D\u043E. \u0412\u044B\u0431\u0435\u0440\u0438\u0442\u0435 \xAB\u0412\u044B\u043A\u043B\xBB \u0438\u043B\u0438 \xAB\u0410\u0432\u0442\u043E (Jev)\xBB.",
+  badgeTip: (tier, source) => `\u0410\u0432\u0442\u043E (Jev): ${RU2.tiers[tier]} \u043C\u043E\u0434\u0435\u043B\u044C, \u0432\u044B\u0431\u0440\u0430\u043B ${RU2.sources[source] ?? source}. \u041D\u0430 \u0441\u043B\u0435\u0434\u0443\u044E\u0449\u0435\u043C \u0445\u043E\u0434\u0435 \u043C\u043E\u0436\u0435\u0442 \u0441\u043C\u0435\u043D\u0438\u0442\u044C\u0441\u044F.`,
+  tiers: { small: "\u043C\u0430\u043B\u0435\u043D\u044C\u043A\u0430\u044F", medium: "\u0441\u0440\u0435\u0434\u043D\u044F\u044F", large: "\u0431\u043E\u043B\u044C\u0448\u0430\u044F" },
+  sources: { jev: "Jev", rules: "\u0441\u043B\u043E\u0432\u0435\u0441\u043D\u044B\u0435 \u043F\u0440\u0430\u0432\u0438\u043B\u0430 (Jev \u043D\u0435 \u043E\u0442\u0432\u0435\u0442\u0438\u043B)", lease: "\u043F\u0440\u0435\u0436\u043D\u0435\u0435 \u0440\u0435\u0448\u0435\u043D\u0438\u0435 \u044D\u0442\u043E\u0433\u043E \u0445\u043E\u0434\u0430", small: "\u043F\u0440\u0430\u0432\u0438\u043B\u043E \u043C\u0430\u043B\u0435\u043D\u044C\u043A\u043E\u0439 \u043C\u043E\u0434\u0435\u043B\u0438" }
+};
+var AUTO_STRINGS = { en: EN2, ru: RU2 };
+function badgeText(model) {
+  const name = model.split("/").at(-1) ?? model;
+  return name.length <= 24 ? name : `${name.slice(0, 23)}\u2026`;
+}
+
+// src/auto/launch.ts
+import { randomBytes as randomBytes4 } from "node:crypto";
+import { existsSync as existsSync2, readFileSync as readFileSync2, statSync as statSync3 } from "node:fs";
+import { dirname as dirname3, join as join8, resolve as resolve4 } from "node:path";
+
+// src/auto/classify.ts
+import { createHmac as createHmac3 } from "node:crypto";
+
+// src/auto/settings.ts
+var AUTO_TIERS = ["small", "medium", "large"];
+var AUTO_PREFERENCES = ["cheap", "balanced", "best"];
+var OPENROUTER_BASE_URL = "https://openrouter.ai/api/v1";
+var MAX_AUTO_UPSTREAMS = 8;
+var MAX_AUTO_MODELS = 16;
+var DEFAULT_CONTEXT = 128e3;
+var DEFAULT_OUTPUT = 8192;
+var DEFAULT_AUTO_SETTINGS = {
+  upstreams: [],
+  preference: "balanced",
+  cheaperFallback: false,
+  decider: "jev",
+  dailyUsdCap: 1,
+  perCardUsdCap: 0.4
+};
+var ID3 = /^[a-z0-9][a-z0-9-]{0,23}$/u;
+var MODEL_ID = /^[A-Za-z0-9][A-Za-z0-9._:/@+-]{0,159}$/u;
+var CLASSES = ["D0", "D1", "D2", "D3"];
+function isRecord7(value) {
+  return !!value && typeof value === "object" && !Array.isArray(value);
+}
+function fail3(message) {
+  throw new Error(message);
+}
+function only(value, keys, what) {
+  const extra = Object.keys(value).find((key) => !keys.includes(key));
+  if (extra) fail3(`${what}: unknown field ${extra.slice(0, 40)}.`);
+}
+var price = (value) => value === void 0 || typeof value === "number" && Number.isFinite(value) && value >= 0 && value <= 1e3;
+var tokens = (value) => value === void 0 || Number.isInteger(value) && value >= 1024 && value <= 1e7;
+var usd = (value) => typeof value === "number" && Number.isFinite(value) && value >= 0 && value <= 100;
+function isLoopbackUrl2(value) {
+  try {
+    const host = new URL(value).hostname;
+    return host === "127.0.0.1" || host === "[::1]" || host === "localhost";
+  } catch {
+    return false;
+  }
+}
+function originOf(baseUrl) {
+  return new URL(baseUrl).origin;
+}
+function validateAutoUpstream(value) {
+  if (!isRecord7(value)) fail3("Invalid upstream.");
+  only(value, ["id", "preset", "baseUrl", "trust", "key", "models", "enabled"], "Upstream");
+  if (typeof value.id !== "string" || !ID3.test(value.id)) fail3("Upstream id: lowercase letters, digits and dashes, at most 24.");
+  if (value.preset !== "openrouter" && value.preset !== "openai-compatible") fail3("Unknown upstream kind.");
+  if (typeof value.enabled !== "boolean") fail3("Invalid upstream.");
+  const baseUrl = value.preset === "openrouter" ? OPENROUTER_BASE_URL : value.baseUrl;
+  if (value.preset === "openrouter" && value.baseUrl !== void 0 && value.baseUrl !== OPENROUTER_BASE_URL) fail3("OpenRouter has a fixed address.");
+  if (typeof baseUrl !== "string" || !validUrl(baseUrl.replace(/\/+$/u, "")) || !/^https?:\/\/[^/]+(?:\/[A-Za-z0-9._~-]+)*\/?$/u.test(baseUrl)) fail3("Invalid upstream address (https, or http on this computer only).");
+  if (!CLASSES.includes(value.trust)) fail3("Invalid upstream trust.");
+  if (value.trust === "D3" && !isLoopbackUrl2(baseUrl)) fail3("D3 stays on this computer: only a server on 127.0.0.1 can take it.");
+  const key = value.key ?? "own";
+  if (key !== "own" && key !== "jev" && key !== "none") fail3("Invalid upstream key choice.");
+  if (key === "jev" && value.preset !== "openrouter") fail3("Only an OpenRouter upstream can use the Jev \xB7 OpenRouter key.");
+  if (key === "none" && !isLoopbackUrl2(baseUrl)) fail3("Only a server on this computer can work without a key.");
+  if (!Array.isArray(value.models) || value.models.length > MAX_AUTO_MODELS) fail3(`At most ${MAX_AUTO_MODELS} models per upstream.`);
+  const models = [];
+  const seen = /* @__PURE__ */ new Set();
+  for (const raw of value.models) {
+    if (!isRecord7(raw)) fail3("Invalid model.");
+    only(raw, ["id", "tier", "priceIn", "priceOut", "context", "output"], "Model");
+    if (typeof raw.id !== "string" || !MODEL_ID.test(raw.id)) fail3("Invalid model id.");
+    if (seen.has(raw.id)) fail3(`Model ${raw.id} is listed twice.`);
+    seen.add(raw.id);
+    if (!AUTO_TIERS.includes(raw.tier)) fail3("Invalid model tier.");
+    if (!price(raw.priceIn) || !price(raw.priceOut)) fail3("Invalid model price.");
+    if (!tokens(raw.context) || !tokens(raw.output)) fail3("Invalid model limits.");
+    models.push(structuredClone(raw));
+  }
+  return { id: value.id, preset: value.preset, baseUrl: baseUrl.replace(/\/+$/u, ""), trust: value.trust, key, models, enabled: value.enabled };
+}
+function validateAutoSettings(value) {
+  if (!isRecord7(value)) fail3("Invalid Auto (Jev) settings.");
+  only(value, Object.keys(DEFAULT_AUTO_SETTINGS), "Auto (Jev) settings");
+  if (!Array.isArray(value.upstreams) || value.upstreams.length > MAX_AUTO_UPSTREAMS) fail3(`At most ${MAX_AUTO_UPSTREAMS} upstreams.`);
+  const upstreams = value.upstreams.map(validateAutoUpstream);
+  if (new Set(upstreams.map((entry) => entry.id)).size !== upstreams.length) fail3("Two upstreams have the same id.");
+  if (!AUTO_PREFERENCES.includes(value.preference)) fail3("Invalid preference.");
+  if (typeof value.cheaperFallback !== "boolean") fail3("Invalid fallback choice.");
+  if (value.decider !== "jev" && value.decider !== "rules") fail3("Invalid decider.");
+  if (!usd(value.dailyUsdCap) || !usd(value.perCardUsdCap)) fail3("Caps are USD from 0 to 100.");
+  return { upstreams, preference: value.preference, cheaperFallback: value.cheaperFallback, decider: value.decider, dailyUsdCap: value.dailyUsdCap, perCardUsdCap: value.perCardUsdCap };
+}
+function normalizeAutoSettings(value) {
+  const source = isRecord7(value) ? value : {};
+  const upstreams = [];
+  for (const raw of Array.isArray(source.upstreams) ? source.upstreams.slice(0, MAX_AUTO_UPSTREAMS) : []) {
+    try {
+      const entry = validateAutoUpstream(raw);
+      if (!upstreams.some((other) => other.id === entry.id)) upstreams.push(entry);
+    } catch {
+    }
+  }
+  const candidate = { ...structuredClone(DEFAULT_AUTO_SETTINGS), upstreams };
+  for (const key of Object.keys(DEFAULT_AUTO_SETTINGS)) {
+    if (key === "upstreams" || !Object.hasOwn(source, key)) continue;
+    try {
+      validateAutoSettings({ ...candidate, [key]: source[key] });
+      candidate[key] = source[key];
+    } catch {
+    }
+  }
+  return validateAutoSettings(candidate);
+}
+var upstreamSecret = (id) => `auto-upstream-${id}`;
+var JEV_OPENROUTER_SECRET = "assistant-openrouter";
+
+// src/auto/classify.ts
+function contentText(content) {
+  if (typeof content === "string") return content;
+  if (!Array.isArray(content)) return "";
+  return content.map((part) => part && typeof part === "object" && part.type === "text" && typeof part.text === "string" ? part.text : "").filter(Boolean).join("\n");
+}
+var messagesOf = (body) => Array.isArray(body.messages) ? body.messages.filter((m) => !!m && typeof m === "object") : [];
+function requestKind(body, smallModel) {
+  if (smallModel) return "small";
+  const last = messagesOf(body).at(-1);
+  return last?.role === "user" ? "turn" : "continuation";
+}
+function latestUserText(body) {
+  const user = [...messagesOf(body)].reverse().find((message) => message.role === "user");
+  return contentText(user?.content).replace(/<(system-reminder|environment_details|env|context)\b[^>]*>[\s\S]*?<\/\1>/giu, " ").replace(/[\u0000-\u0008\u000b-\u001f\u007f]+/gu, " ").trim();
+}
+function keyed(salt, ...parts) {
+  const mac = createHmac3("sha256", salt);
+  for (const part of parts) mac.update(part, "utf8").update("\0");
+  return mac.digest("hex").slice(0, 24);
+}
+function requestKeys(salt, tokenHash, body) {
+  const messages = messagesOf(body);
+  const system = messages.filter((message) => message.role === "system" || message.role === "developer").map((message) => contentText(message.content)).join("\n");
+  const users = messages.filter((message) => message.role === "user");
+  return {
+    conversation: keyed(salt, tokenHash, system, contentText(users[0]?.content)),
+    turn: keyed(salt, String(users.length), contentText(users.at(-1)?.content)),
+    contract: keyed(salt, JSON.stringify(body.tools ?? null), JSON.stringify(body.tool_choice ?? null), system)
+  };
+}
+var TIER_OF = { simple: "small", normal: "medium", hard: "large" };
+function tierFor(difficulty, strong, preference) {
+  let index = AUTO_TIERS.indexOf(strong ? "large" : TIER_OF[difficulty]);
+  if (preference === "cheap") index -= 1;
+  if (preference === "best") index += 1;
+  return AUTO_TIERS[Math.max(0, Math.min(AUTO_TIERS.length - 1, index))];
+}
+function rulesDifficulty(text5, toolCount) {
+  const words = ruleDifficulty(text5);
+  if (words === "simple" && (text5.length > 1500 || toolCount > 24)) return "normal";
+  return words;
+}
+function upstreamAllowed(upstream, cardClass, mode) {
+  if (mode === "off") return true;
+  if (cardClass === "D3") return upstream.trust === "D3";
+  return mode === "warn" || classRank(upstream.trust) >= classRank(cardClass);
+}
+var priceOf = (model) => model.priceIn === void 0 && model.priceOut === void 0 ? null : (model.priceIn ?? 0) + (model.priceOut ?? 0) * 3;
+function candidates(settings, tier, options) {
+  const usable2 = settings.upstreams.filter((upstream) => upstream.enabled && upstreamAllowed(upstream, options.cardClass, options.mode));
+  const ofTier = (wanted) => {
+    const list = [];
+    for (const upstream of usable2) for (const model of upstream.models) if (model.tier === wanted && !options.coolingDown(upstream.id, model.id)) list.push({ upstream, model, tier: wanted });
+    const order2 = options.cheapest ? "cheap" : settings.preference;
+    if (order2 === "balanced") return list;
+    return list.map((candidate, index) => ({ candidate, index, price: priceOf(candidate.model) })).sort((a, b) => (a.price === null ? 1 : 0) - (b.price === null ? 1 : 0) || (a.price === null || b.price === null ? 0 : order2 === "cheap" ? a.price - b.price : b.price - a.price) || a.index - b.index).map((entry) => entry.candidate);
+  };
+  const at = AUTO_TIERS.indexOf(tier);
+  const order = [tier, ...AUTO_TIERS.slice(at + 1), ...settings.cheaperFallback || options.cheapest ? AUTO_TIERS.slice(0, at).reverse() : []];
+  return order.flatMap(ofTier);
+}
+function limitsOf(settings, fallback) {
+  const models = settings.upstreams.filter((upstream) => upstream.enabled).flatMap((upstream) => upstream.models);
+  const contexts = models.map((model) => model.context).filter((value) => typeof value === "number");
+  const outputs = models.map((model) => model.output).filter((value) => typeof value === "number");
+  return { context: contexts.length ? Math.min(...contexts) : fallback.context, output: outputs.length ? Math.min(...outputs) : fallback.output };
+}
+
+// src/auto/launch.ts
+var LOCAL_ENVIRONMENT_KINDS = ["worktree"];
+var MODEL_KEYS = ["model", "small_model", "enabled_providers", "disabled_providers"];
+var CONFIG_NAMES = ["opencode.json", "opencode.jsonc", join8(".opencode", "opencode.json"), join8(".opencode", "opencode.jsonc")];
+var MAX_CONFIG_BYTES = 1048576;
+function parseJsonc(text5) {
+  let out = "";
+  for (let i = 0; i < text5.length; i++) {
+    const c = text5[i];
+    if (c === '"') {
+      let j = i + 1;
+      while (j < text5.length && text5[j] !== '"') j += text5[j] === "\\" ? 2 : 1;
+      out += text5.slice(i, j + 1);
+      i = j;
+      continue;
+    }
+    if (c === "/" && text5[i + 1] === "/") {
+      while (i < text5.length && text5[i] !== "\n") i++;
+      out += "\n";
+      continue;
+    }
+    if (c === "/" && text5[i + 1] === "*") {
+      const end = text5.indexOf("*/", i + 2);
+      i = end < 0 ? text5.length : end + 1;
+      out += " ";
+      continue;
+    }
+    out += c;
+  }
+  try {
+    return JSON.parse(out.replace(/,(\s*[}\]])/gu, "$1"));
+  } catch {
+    return void 0;
+  }
+}
+function modelChoiceIn(config) {
+  if (!config || typeof config !== "object" || Array.isArray(config)) return null;
+  const record2 = config;
+  for (const key of MODEL_KEYS) if (record2[key] !== void 0) return key;
+  const provider = record2.provider;
+  if (provider && typeof provider === "object" && Object.keys(provider).some((id) => /^ctty-jev/iu.test(id))) return "provider";
+  for (const group of ["agent", "mode"]) {
+    const agents = record2[group];
+    if (!agents || typeof agents !== "object") continue;
+    for (const [name, agent] of Object.entries(agents)) {
+      if (agent && typeof agent === "object" && agent.model !== void 0) return `${group}.${name}.model`;
+    }
+  }
+  return null;
+}
+function projectModelConfig(cwd) {
+  let current = resolve4(cwd);
+  for (let depth = 0; depth < 64; depth++) {
+    for (const name of CONFIG_NAMES) {
+      const path = join8(current, name);
+      let size;
+      try {
+        size = statSync3(path).size;
+      } catch {
+        continue;
+      }
+      if (size > MAX_CONFIG_BYTES) return { found: null, unreadable: path };
+      let parsed;
+      try {
+        parsed = parseJsonc(readFileSync2(path, "utf8"));
+      } catch {
+        return { found: null, unreadable: path };
+      }
+      if (parsed === void 0) return { found: null, unreadable: path };
+      const key = modelChoiceIn(parsed);
+      if (key) return { found: `${path} (${key})`, unreadable: null };
+    }
+    if (existsSync2(join8(current, ".git"))) break;
+    const parent = dirname3(current);
+    if (parent === current) break;
+    current = parent;
+  }
+  return { found: null, unreadable: null };
+}
+function autoRefusal(input) {
+  if (input.provider !== "opencode") return "provider";
+  if (input.environment && !LOCAL_ENVIRONMENT_KINDS.includes(input.environment.kind)) return "environment";
+  const usable2 = input.settings.upstreams.filter((upstream) => upstream.enabled && upstream.models.length > 0);
+  if (!usable2.length || input.settings.dailyUsdCap <= 0 || input.settings.perCardUsdCap <= 0) return "noUpstream";
+  if (!usable2.some((upstream) => upstreamAllowed(upstream, input.dataClass, input.mode))) return "dataClass";
+  const project = projectModelConfig(input.cwd);
+  if (project.unreadable) return "projectUnreadable";
+  if (project.found) return "project";
+  return null;
+}
+function clampClass(requested, parent) {
+  return parent && classRank(parent) > classRank(requested) ? parent : requested;
+}
+var ROUTER_KEY_ENV = "CTTY_JEV_ROUTER_KEY";
+function openCodeContribution(input) {
+  const id = input.providerId ?? `ctty-jev-${randomBytes4(3).toString("hex")}`;
+  const limit = limitsOf(input.settings, { context: DEFAULT_CONTEXT, output: DEFAULT_OUTPUT });
+  const config = {
+    $schema: "https://opencode.ai/config.json",
+    provider: {
+      [id]: {
+        npm: "@ai-sdk/openai-compatible",
+        name: "Auto (Jev)",
+        options: { baseURL: `http://127.0.0.1:${input.port}/v1`, apiKey: `{env:${ROUTER_KEY_ENV}}` },
+        models: {
+          auto: { name: "Auto (Jev)", tool_call: true, limit },
+          "auto-small": { name: "Auto (Jev) small", tool_call: true, limit }
+        }
+      }
+    },
+    model: `${id}/auto`,
+    small_model: `${id}/auto-small`,
+    enabled_providers: [id]
+  };
+  return {
+    env: { OPENCODE_CONFIG: "{launchFiles}/opencode.json", [ROUTER_KEY_ENV]: input.token },
+    args: ["--model", `${id}/auto`],
+    files: [{ relPath: "opencode.json", content: `${JSON.stringify(config, null, 2)}
+` }],
+    thirdPartyModel: true
+  };
+}
+
+// src/auto/router.ts
+import { randomBytes as randomBytes6 } from "node:crypto";
+import { appendFileSync, mkdirSync as mkdirSync2, readFileSync as readFileSync4, renameSync as renameSync2, statSync as statSync4, writeFileSync as writeFileSync2 } from "node:fs";
+import { createServer } from "node:http";
+import { join as join10 } from "node:path";
+
+// src/auto/tokens.ts
+import { createHash as createHash5, randomBytes as randomBytes5 } from "node:crypto";
+import { mkdirSync, readFileSync as readFileSync3, renameSync, writeFileSync } from "node:fs";
+import { join as join9 } from "node:path";
+var PREFIX = "sk-ctty-";
+var SHAPE = /^sk-ctty-[A-Za-z0-9_-]{43}$/u;
+var MAX_GRANTS = 1024;
+var hashToken = (token) => createHash5("sha256").update(token, "utf8").digest("hex");
+var TokenStore = class {
+  file;
+  grants = /* @__PURE__ */ new Map();
+  now;
+  constructor(directory, now = Date.now) {
+    this.now = now;
+    this.file = directory ? join9(directory, "tokens.json") : null;
+    if (!this.file) return;
+    try {
+      const saved = JSON.parse(readFileSync3(this.file, "utf8"));
+      if (Array.isArray(saved)) {
+        for (const entry of saved.slice(0, MAX_GRANTS)) {
+          if (!Array.isArray(entry) || typeof entry[0] !== "string" || !/^[0-9a-f]{64}$/u.test(entry[0])) continue;
+          const grant = entry[1];
+          if (grant && typeof grant.sessionId === "string" && typeof grant.dataClass === "string") this.grants.set(entry[0], grant);
+        }
+      }
+    } catch {
+    }
+  }
+  get size() {
+    return this.grants.size;
+  }
+  /** A new key for this launch; any earlier key of the same card stops working. */
+  mint(grant) {
+    this.revoke(grant.sessionId, false);
+    const token = `${PREFIX}${randomBytes5(32).toString("base64url")}`;
+    this.grants.set(hashToken(token), { ...grant, createdAt: this.now() });
+    while (this.grants.size > MAX_GRANTS) this.grants.delete(this.grants.keys().next().value);
+    this.save();
+    return token;
+  }
+  /** What a key was minted for, or null. A map lookup by hash: no comparison of secrets. */
+  lookup(token) {
+    if (!token || !SHAPE.test(token)) return null;
+    return this.grants.get(hashToken(token)) ?? null;
+  }
+  /** The newest grant of a card (for subagent clamps and the route tool). */
+  forSession(sessionId) {
+    let found = null;
+    for (const grant of this.grants.values()) if (grant.sessionId === sessionId) found = grant;
+    return found;
+  }
+  revoke(sessionId, persist = true) {
+    let removed = false;
+    for (const [hash, grant] of this.grants) if (grant.sessionId === sessionId) {
+      this.grants.delete(hash);
+      removed = true;
+    }
+    if (removed && persist) this.save();
+    return removed;
+  }
+  /** Keeps only the cards CanvasTTY still knows (after sessions.subscribe). */
+  retain(known) {
+    let removed = false;
+    for (const [hash, grant] of this.grants) if (!known.has(grant.sessionId)) {
+      this.grants.delete(hash);
+      removed = true;
+    }
+    if (removed) this.save();
+  }
+  save() {
+    if (!this.file) return;
+    try {
+      mkdirSync(join9(this.file, ".."), { recursive: true, mode: 448 });
+      writeFileSync(`${this.file}.tmp`, JSON.stringify([...this.grants]), { mode: 384 });
+      renameSync(`${this.file}.tmp`, this.file);
+    } catch {
+    }
+  }
+};
+
+// src/auto/router.ts
+var ROUTER_TIMEOUTS = { jevMs: 2500, headersMs: 6e4, firstChunkMs: 6e4, idleMs: 9e4, totalMs: 15 * 6e4 };
+var ROUTER_LIMITS = Object.freeze({ bodyBytes: 32 * 1048576, perCard: 16, total: 64, attempts: 6, conversations: 1024, leaseMs: 30 * 6e4, recent: 50, logBytes: 512 * 1024 });
+var COOLDOWN_MS = Object.freeze({ transient: 3e4, quota: 3e5, missing: 9e5, auth: 9e5, maxRetryAfter: 24 * 36e5 });
+var HttpError = class extends Error {
+  status;
+  code;
+  constructor(status, code, message) {
+    super(message);
+    this.status = status;
+    this.code = code;
+  }
+};
+var RETRYABLE = /* @__PURE__ */ new Set([404, 408, 409, 425, 429, 500, 502, 503, 504]);
+var clean2 = (value, max) => value.replace(/[\u0000-\u001f\u007f]+/gu, " ").replace(/\s+/gu, " ").trim().slice(0, max);
+function retryAfterMs2(header, now) {
+  if (!header) return null;
+  const seconds = Number(header);
+  const ms = Number.isFinite(seconds) ? seconds * 1e3 : Date.parse(header) - now;
+  return Number.isFinite(ms) && ms > 0 ? Math.min(ms, COOLDOWN_MS.maxRetryAfter) : null;
+}
+var Spend = class {
+  day = "";
+  total = 0;
+  held = 0;
+  cards = /* @__PURE__ */ new Map();
+  file;
+  now;
+  constructor(directory, now) {
+    this.now = now;
+    this.file = directory ? join10(directory, "spend.json") : null;
+    try {
+      const saved = JSON.parse(readFileSync4(this.file, "utf8"));
+      if (saved.day === this.dayKey() && typeof saved.total === "number" && saved.total >= 0) {
+        this.day = saved.day;
+        this.total = saved.total;
+        if (saved.cards && typeof saved.cards === "object") {
+          for (const [id, usd2] of Object.entries(saved.cards)) if (typeof usd2 === "number" && usd2 >= 0) this.cards.set(id, { spent: usd2, held: 0 });
+        }
+      }
+    } catch {
+    }
+  }
+  dayKey() {
+    const d = new Date(this.now());
+    return `${d.getFullYear()}-${d.getMonth() + 1}-${d.getDate()}`;
+  }
+  roll() {
+    const key = this.dayKey();
+    if (key !== this.day) {
+      this.day = key;
+      this.total = 0;
+      this.held = 0;
+      for (const card of this.cards.values()) {
+        card.spent = 0;
+      }
+    }
+  }
+  card(id) {
+    let card = this.cards.get(id);
+    if (!card) {
+      card = { spent: 0, held: 0 };
+      this.cards.set(id, card);
+    }
+    return card;
+  }
+  today() {
+    this.roll();
+    return this.total;
+  }
+  ofCard(id) {
+    this.roll();
+    return this.cards.get(id)?.spent ?? 0;
+  }
+  /** Holds `estimate` against both caps; throws 402 when either is spent. */
+  reserve(sessionId, estimate2, caps) {
+    this.roll();
+    const card = this.card(sessionId);
+    if (this.total + this.held >= caps.daily || this.total + this.held + estimate2 > caps.daily) throw new HttpError(402, "daily_cap", "Auto (Jev): the daily cap is reached; change it on the Decision models page.");
+    if (card.spent + card.held >= caps.perCard || card.spent + card.held + estimate2 > caps.perCard) throw new HttpError(402, "card_cap", "Auto (Jev): this card's cap is reached; change it on the Decision models page.");
+    this.held += estimate2;
+    card.held += estimate2;
+    let done = false;
+    const free = () => {
+      if (done) return;
+      done = true;
+      this.held = Math.max(0, this.held - estimate2);
+      card.held = Math.max(0, card.held - estimate2);
+    };
+    return {
+      commit: (cost) => {
+        free();
+        const usd2 = cost ?? estimate2;
+        this.total += usd2;
+        card.spent += usd2;
+        this.save();
+      },
+      release: free
+    };
+  }
+  forget(sessionId) {
+    const card = this.cards.get(sessionId);
+    if (card && card.held === 0) this.cards.delete(sessionId);
+  }
+  save() {
+    if (!this.file) return;
+    try {
+      writeFileSync2(`${this.file}.tmp`, JSON.stringify({ day: this.day, total: this.total, cards: Object.fromEntries([...this.cards].map(([id, card]) => [id, card.spent])) }), { mode: 384 });
+      renameSync2(`${this.file}.tmp`, this.file);
+    } catch {
+    }
+  }
+};
+var UsageReader = class {
+  rest = "";
+  usage = { in: null, out: null, cost: null };
+  push(text5) {
+    const lines = (this.rest + text5).split("\n");
+    this.rest = lines.pop() ?? "";
+    if (this.rest.length > 1048576) this.rest = "";
+    for (const line of lines) this.line(line);
+  }
+  end() {
+    if (this.rest) this.line(this.rest);
+    this.rest = "";
+  }
+  json(value) {
+    const usage = value && typeof value === "object" ? value.usage : null;
+    if (!usage || typeof usage !== "object") return;
+    const u = usage;
+    if (typeof u.prompt_tokens === "number") this.usage.in = u.prompt_tokens;
+    if (typeof u.completion_tokens === "number") this.usage.out = u.completion_tokens;
+    if (typeof u.cost === "number" && Number.isFinite(u.cost) && u.cost >= 0) this.usage.cost = u.cost;
+  }
+  line(line) {
+    if (!line.startsWith("data:") || !line.includes('"usage"')) return;
+    try {
+      this.json(JSON.parse(line.slice(5).trim()));
+    } catch {
+    }
+  }
+};
+var AutoRouter = class {
+  tokens;
+  deps;
+  now;
+  timeouts;
+  transport;
+  salt;
+  spend;
+  server = null;
+  starting = null;
+  port = null;
+  leases = /* @__PURE__ */ new Map();
+  cooldowns = /* @__PURE__ */ new Map();
+  active = /* @__PURE__ */ new Map();
+  activeTotal = 0;
+  shownModel = /* @__PURE__ */ new Map();
+  recentRecords = [];
+  hosts = /* @__PURE__ */ new Set();
+  stats = { requests: 0, turns: 0, continuations: 0, small: 0, jevAsked: 0, jevAnswered: 0, rules: 0, leaseReuses: 0, failovers: 0 };
+  constructor(deps) {
+    this.deps = deps;
+    this.now = deps.now ?? Date.now;
+    this.timeouts = { ...ROUTER_TIMEOUTS, ...deps.timeouts };
+    this.transport = deps.transport ?? fetch;
+    if (deps.directory) {
+      try {
+        mkdirSync2(deps.directory, { recursive: true, mode: 448 });
+      } catch {
+      }
+    }
+    this.tokens = new TokenStore(deps.directory, this.now);
+    this.salt = this.loadSalt();
+    this.spend = new Spend(deps.directory, this.now);
+  }
+  loadSalt() {
+    const file = this.deps.directory ? join10(this.deps.directory, "salt") : null;
+    if (file) {
+      try {
+        const saved = readFileSync4(file);
+        if (saved.length === 32) return saved;
+      } catch {
+      }
+    }
+    const salt = randomBytes6(32);
+    if (file) {
+      try {
+        writeFileSync2(file, salt, { mode: 384 });
+      } catch {
+      }
+    }
+    return salt;
+  }
+  // ---------------------------------------------------------------------------------------------------------------
+  // Listener
+  // ---------------------------------------------------------------------------------------------------------------
+  get listening() {
+    return this.server ? this.port : null;
+  }
+  portFile() {
+    return this.deps.directory ? join10(this.deps.directory, "port") : null;
+  }
+  /** Starts the listener (once), on the port used before when it is free. Resolves to the port. */
+  start() {
+    if (this.server && this.port) return Promise.resolve(this.port);
+    if (this.starting) return this.starting;
+    let stored = 0;
+    try {
+      const value = Number(readFileSync4(this.portFile(), "utf8"));
+      if (Number.isInteger(value) && value > 1023 && value < 65536) stored = value;
+    } catch {
+    }
+    const listen = (port) => new Promise((resolve5, reject) => {
+      const server = createServer((request, response) => {
+        void this.handle(request, response);
+      });
+      server.headersTimeout = 3e4;
+      server.requestTimeout = 0;
+      server.keepAliveTimeout = 5e3;
+      server.once("error", reject);
+      server.listen({ port, host: "127.0.0.1", exclusive: true }, () => {
+        server.off("error", reject);
+        resolve5(server);
+      });
+    });
+    this.starting = (async () => {
+      let server;
+      try {
+        server = await listen(stored);
+      } catch {
+        server = await listen(0);
+      }
+      this.server = server;
+      this.port = server.address().port;
+      server.unref();
+      if (this.port !== stored) {
+        try {
+          writeFileSync2(this.portFile(), String(this.port), { mode: 384 });
+        } catch {
+        }
+      }
+      return this.port;
+    })().finally(() => {
+      this.starting = null;
+    });
+    return this.starting;
+  }
+  /** Stops listening and aborts every call in flight (service shutdown). */
+  async stop() {
+    for (const set of this.active.values()) for (const controller of set) controller.abort();
+    const server = this.server;
+    this.server = null;
+    if (!server) return;
+    server.closeAllConnections?.();
+    await new Promise((resolve5) => server.close(() => resolve5()));
+  }
+  /** Nothing uses the router any more: the port closes (it is reused next time). */
+  idle() {
+    if (this.tokens.size === 0 && this.activeTotal === 0 && this.server) void this.stop();
+  }
+  // ---------------------------------------------------------------------------------------------------------------
+  // Cards
+  // ---------------------------------------------------------------------------------------------------------------
+  /** A key for one launch (the listener is running before the CLI starts). */
+  async grant(grant) {
+    const port = await this.start();
+    this.dropSession(grant.sessionId, false);
+    return { token: this.tokens.mint(grant), port };
+  }
+  /** The card closed: its key stops working, its calls are aborted, its decisions are forgotten. */
+  closeSession(sessionId) {
+    this.dropSession(sessionId, true);
+    this.idle();
+  }
+  dropSession(sessionId, revoke) {
+    if (revoke) this.tokens.revoke(sessionId);
+    for (const controller of this.active.get(sessionId) ?? []) controller.abort();
+    for (const [key, lease] of this.leases) if (lease.sessionId === sessionId) this.leases.delete(key);
+    if (this.shownModel.delete(sessionId)) this.deps.badge?.(sessionId, null);
+    this.spend.forget(sessionId);
+  }
+  /** Cards CanvasTTY no longer lists lose their keys (after a restart of the service). */
+  retainSessions(known) {
+    this.tokens.retain(known);
+    this.idle();
+  }
+  /** Starts the listener again at service start when running cards still hold keys. */
+  async resume() {
+    if (this.tokens.size > 0) await this.start().catch((error) => this.deps.log?.("warn", `Auto (Jev): the router could not listen: ${String(error).slice(0, 120)}`));
+  }
+  recent() {
+    return [...this.recentRecords];
+  }
+  statsView() {
+    return { ...this.stats, hosts: [...this.hosts], spentToday: Math.round(this.spend.today() * 1e6) / 1e6, listening: !!this.server, cards: this.tokens.size };
+  }
+  // ---------------------------------------------------------------------------------------------------------------
+  // Requests
+  // ---------------------------------------------------------------------------------------------------------------
+  refuse(response, status, code, message, headers = {}) {
+    if (response.headersSent) {
+      response.end();
+      return;
+    }
+    response.writeHead(status, { "content-type": "application/json", "cache-control": "no-store", ...headers });
+    response.end(JSON.stringify({ error: { message, type: "canvastty_auto", code } }));
+  }
+  async handle(request, response) {
+    try {
+      if (request.headers.origin !== void 0) return this.refuse(response, 403, "origin", "Requests from web pages are not accepted.");
+      const host = String(request.headers.host ?? "").toLowerCase();
+      if (host !== `127.0.0.1:${this.port}` && host !== `localhost:${this.port}`) return this.refuse(response, 403, "host", "Wrong host.");
+      const auth = String(request.headers.authorization ?? "");
+      const token = /^Bearer (\S+)$/u.exec(auth)?.[1] ?? null;
+      const grant = this.tokens.lookup(token);
+      if (!grant) {
+        request.resume();
+        return this.refuse(response, 401, "invalid_api_key", "This key is not valid (the card closed or restarted).");
+      }
+      const path = (request.url ?? "").split("?")[0];
+      if (request.method === "GET" && path === "/v1/models") {
+        response.writeHead(200, { "content-type": "application/json", "cache-control": "no-store" });
+        response.end(JSON.stringify({ object: "list", data: [{ id: "auto", object: "model", owned_by: "canvastty" }, { id: "auto-small", object: "model", owned_by: "canvastty" }] }));
+        return;
+      }
+      if (request.method !== "POST" || path !== "/v1/chat/completions") {
+        request.resume();
+        return this.refuse(response, 404, "not_found", "Not found.");
+      }
+      await this.complete(request, response, grant, hashToken(token));
+    } catch (error) {
+      if (error instanceof HttpError) return this.refuse(response, error.status, error.code, error.message);
+      this.deps.log?.("warn", `Auto (Jev): request failed (${error instanceof Error ? error.name : "error"})`);
+      this.refuse(response, 500, "internal", "Auto (Jev): the router failed.");
+    }
+  }
+  readBody(request) {
+    return new Promise((resolve5, reject) => {
+      const chunks = [];
+      let size = 0;
+      request.on("data", (chunk) => {
+        size += chunk.length;
+        if (size > ROUTER_LIMITS.bodyBytes) {
+          reject(new HttpError(413, "too_large", "The request is larger than 32 MB."));
+          request.destroy();
+          return;
+        }
+        chunks.push(chunk);
+      });
+      request.on("end", () => resolve5(Buffer.concat(chunks)));
+      request.on("error", reject);
+    });
+  }
+  coolingDown = (upstreamId, modelId) => {
+    const now = this.now();
+    for (const key of [upstreamId, `${upstreamId}|${modelId}`]) {
+      const until = this.cooldowns.get(key);
+      if (until !== void 0) {
+        if (until > now) return true;
+        this.cooldowns.delete(key);
+      }
+    }
+    return false;
+  };
+  cool(key, ms) {
+    this.cooldowns.set(key, this.now() + ms);
+  }
+  /** Jev within its budget, else rules; never fails the request. */
+  async decideTurn(text5, grant, toolCount) {
+    const settings = this.deps.settings();
+    if (settings.decider === "jev" && this.deps.decide && text5) {
+      this.stats.jevAsked++;
+      const controller = new AbortController();
+      let timer;
+      try {
+        const answer = await Promise.race([
+          this.deps.decide(text5, grant, controller.signal),
+          new Promise((resolve5) => {
+            timer = setTimeout(() => {
+              controller.abort();
+              resolve5(null);
+            }, this.timeouts.jevMs);
+          })
+        ]);
+        if (answer) {
+          this.stats.jevAnswered++;
+          return { decision: answer, source: "jev", reason: "jev" };
+        }
+        return { decision: { difficulty: rulesDifficulty(text5, toolCount), strong: false }, source: "rules", reason: controller.signal.aborted ? "jev_slow" : "jev_unavailable" };
+      } catch {
+        return { decision: { difficulty: rulesDifficulty(text5, toolCount), strong: false }, source: "rules", reason: "jev_error" };
+      } finally {
+        if (timer) clearTimeout(timer);
+      }
+    }
+    return { decision: { difficulty: rulesDifficulty(text5, toolCount), strong: false }, source: "rules", reason: settings.decider === "rules" ? "rules_only" : "no_text" };
+  }
+  async complete(request, response, grant, tokenHash) {
+    const started = this.now();
+    const raw = await this.readBody(request);
+    let body;
+    try {
+      body = JSON.parse(raw.toString("utf8"));
+    } catch {
+      throw new HttpError(400, "invalid_json", "The request body is not JSON.");
+    }
+    if (!body || typeof body !== "object" || Array.isArray(body)) throw new HttpError(400, "invalid_json", "The request body is not a JSON object.");
+    if (body.model !== "auto" && body.model !== "auto-small") throw new HttpError(400, "model_not_found", 'Auto (Jev) answers the models "auto" and "auto-small" only.');
+    const sessionSet = this.active.get(grant.sessionId) ?? /* @__PURE__ */ new Set();
+    if (sessionSet.size >= ROUTER_LIMITS.perCard || this.activeTotal >= ROUTER_LIMITS.total) throw new HttpError(429, "busy", "Auto (Jev): too many calls at once; try again.");
+    const controller = new AbortController();
+    sessionSet.add(controller);
+    this.active.set(grant.sessionId, sessionSet);
+    this.activeTotal++;
+    const total = setTimeout(() => controller.abort(), this.timeouts.totalMs);
+    response.on("close", () => {
+      if (!response.writableFinished) controller.abort();
+    });
+    this.stats.requests++;
+    const settings = this.deps.settings();
+    const kind = requestKind(body, body.model === "auto-small");
+    this.stats[kind === "small" ? "small" : kind === "turn" ? "turns" : "continuations"]++;
+    const keys = requestKeys(this.salt, tokenHash, body);
+    const record2 = {
+      at: started,
+      session: grant.sessionId.slice(0, 8),
+      conversation: keys.conversation,
+      turn: keys.turn,
+      kind,
+      source: "small",
+      tier: null,
+      upstream: null,
+      model: null,
+      attempts: 0,
+      failovers: [],
+      status: 0,
+      reason: "",
+      ttfbMs: null,
+      totalMs: 0,
+      tokensIn: null,
+      tokensOut: null,
+      costUsd: null
+    };
+    try {
+      let tier;
+      let preferred = null;
+      if (kind === "small") {
+        tier = "small";
+        record2.reason = "small_model";
+      } else {
+        const lease = this.leases.get(keys.conversation);
+        const fresh = lease && lease.contract === keys.contract && this.now() - lease.decidedAt < ROUTER_LIMITS.leaseMs;
+        if (lease && fresh && (kind === "continuation" || lease.turn === keys.turn)) {
+          tier = lease.tier;
+          preferred = lease.model;
+          record2.source = "lease";
+          record2.reason = "same_turn";
+          this.stats.leaseReuses++;
+        } else {
+          const decided = await this.decideTurn(latestUserText(body), grant, Array.isArray(body.tools) ? body.tools.length : 0);
+          if (controller.signal.aborted) throw new HttpError(499, "aborted", "The call was cancelled.");
+          if (decided.source === "rules") this.stats.rules++;
+          tier = tierFor(decided.decision.difficulty, decided.decision.strong, settings.preference);
+          preferred = lease && lease.tier === tier ? lease.model : null;
+          record2.source = decided.source;
+          record2.reason = decided.reason;
+        }
+        this.leases.delete(keys.conversation);
+        this.leases.set(keys.conversation, { sessionId: grant.sessionId, turn: keys.turn, contract: keys.contract, tier, model: preferred, upstream: null, source: record2.source, decidedAt: record2.source === "lease" && lease ? lease.decidedAt : this.now() });
+        while (this.leases.size > ROUTER_LIMITS.conversations) this.leases.delete(this.leases.keys().next().value);
+      }
+      record2.tier = tier;
+      let list = candidates(settings, tier, { cardClass: grant.dataClass, mode: this.deps.dataClassMode(), coolingDown: this.coolingDown, cheapest: kind === "small" });
+      if (preferred) list = [...list.filter((c) => c.model.id === preferred), ...list.filter((c) => c.model.id !== preferred)];
+      if (!list.length) throw new HttpError(503, "no_model", "Auto (Jev): no allowed model is available now (all are off, cooling down or not allowed for this card's data class).");
+      await this.forward(list.slice(0, ROUTER_LIMITS.attempts), body, grant, response, controller, record2, kind, keys.conversation);
+    } catch (error) {
+      if (error instanceof HttpError) {
+        record2.status = error.status;
+        record2.reason ||= error.code;
+        if (error.status !== 499) this.refuse(response, error.status, error.code, error.message);
+        else response.destroy();
+      } else {
+        record2.status = 500;
+        record2.reason = "internal";
+        this.refuse(response, 500, "internal", "Auto (Jev): the router failed.");
+      }
+    } finally {
+      clearTimeout(total);
+      sessionSet.delete(controller);
+      this.activeTotal--;
+      if (!sessionSet.size) this.active.delete(grant.sessionId);
+      record2.totalMs = this.now() - started;
+      this.remember(record2);
+      this.idle();
+    }
+  }
+  estimate(candidate, bodyBytes, maxTokens) {
+    const output = typeof maxTokens === "number" && maxTokens > 0 ? Math.min(maxTokens, 32768) : candidate.model.output ?? DEFAULT_OUTPUT;
+    return (bodyBytes / 4 * (candidate.model.priceIn ?? 0) + output * (candidate.model.priceOut ?? 0)) / 1e6;
+  }
+  costOf(candidate, usage) {
+    if (usage.cost !== null) return usage.cost;
+    if (usage.in === null && usage.out === null) return null;
+    if (candidate.model.priceIn === void 0 && candidate.model.priceOut === void 0) return null;
+    return ((usage.in ?? 0) * (candidate.model.priceIn ?? 0) + (usage.out ?? 0) * (candidate.model.priceOut ?? 0)) / 1e6;
+  }
+  async forward(list, body, grant, response, controller, record2, kind, conversation) {
+    const settings = this.deps.settings();
+    const stream = body.stream === true;
+    let lastStatus = 503;
+    let lastCode = "no_upstream";
+    for (const candidate of list) {
+      if (controller.signal.aborted) throw new HttpError(499, "aborted", "The call was cancelled.");
+      if (this.coolingDown(candidate.upstream.id, candidate.model.id)) continue;
+      record2.attempts++;
+      const failover = (status, cooldownKey, ms, code) => {
+        this.cool(cooldownKey, ms);
+        record2.failovers.push({ upstream: candidate.upstream.id, model: candidate.model.id, status });
+        this.stats.failovers++;
+        lastStatus = typeof status === "number" ? status : 504;
+        lastCode = code;
+      };
+      const key = candidate.upstream.key === "none" ? null : await this.deps.key(candidate.upstream).catch(() => null);
+      if (candidate.upstream.key !== "none" && !key) {
+        failover("error", candidate.upstream.id, COOLDOWN_MS.auth, "no_key");
+        continue;
+      }
+      const payload = Buffer.from(JSON.stringify({ ...body, model: candidate.model.id }), "utf8");
+      const reservation = this.spend.reserve(grant.sessionId, this.estimate(candidate, payload.length, body.max_tokens), { daily: settings.dailyUsdCap, perCard: settings.perCardUsdCap });
+      const attempt = new AbortController();
+      const relay = () => attempt.abort();
+      controller.signal.addEventListener("abort", relay, { once: true });
+      let timer = setTimeout(() => attempt.abort(), stream ? this.timeouts.headersMs : this.timeouts.totalMs);
+      let sent = false;
+      const usage = new UsageReader();
+      try {
+        const url = `${candidate.upstream.baseUrl}/chat/completions`;
+        this.hosts.add(new URL(url).host);
+        let upstream;
+        try {
+          upstream = await this.transport(url, {
+            method: "POST",
+            body: payload,
+            signal: attempt.signal,
+            redirect: "error",
+            headers: { "content-type": "application/json", accept: stream ? "text/event-stream" : "application/json", ...key ? { authorization: `Bearer ${key}` } : {} }
+          });
+        } catch {
+          reservation.release();
+          if (controller.signal.aborted) throw new HttpError(499, "aborted", "The call was cancelled.");
+          const timedOut = attempt.signal.aborted;
+          failover(timedOut ? "timeout" : "error", timedOut ? `${candidate.upstream.id}|${candidate.model.id}` : candidate.upstream.id, COOLDOWN_MS.transient, timedOut ? "timeout" : "connect");
+          continue;
+        }
+        if (!upstream.ok) {
+          const status = upstream.status;
+          const detail = await upstream.text().then((text5) => upstreamMessage(text5), () => "");
+          reservation.release();
+          if (status === 401 || status === 403) {
+            failover(status, candidate.upstream.id, COOLDOWN_MS.auth, "auth");
+            continue;
+          }
+          if (RETRYABLE.has(status)) {
+            const ms = status === 429 ? retryAfterMs2(upstream.headers.get("retry-after"), this.now()) ?? COOLDOWN_MS.quota : status === 404 ? COOLDOWN_MS.missing : COOLDOWN_MS.transient;
+            failover(status, `${candidate.upstream.id}|${candidate.model.id}`, ms, status === 429 ? "rate_limited" : status === 404 ? "model_not_found" : "upstream_error");
+            continue;
+          }
+          record2.upstream = candidate.upstream.id;
+          record2.model = candidate.model.id;
+          throw new HttpError(status, "upstream_rejected", `Auto (Jev): ${candidate.model.id} refused the request (${status})${detail ? `: ${detail}` : ""}.`);
+        }
+        const reader = upstream.body?.getReader();
+        if (!reader) {
+          reservation.release();
+          failover("error", `${candidate.upstream.id}|${candidate.model.id}`, COOLDOWN_MS.transient, "empty");
+          continue;
+        }
+        clearTimeout(timer);
+        timer = setTimeout(() => attempt.abort(), stream ? this.timeouts.firstChunkMs : this.timeouts.totalMs);
+        let first;
+        try {
+          first = await reader.read();
+        } catch {
+          reservation.release();
+          if (controller.signal.aborted) throw new HttpError(499, "aborted", "The call was cancelled.");
+          failover(attempt.signal.aborted ? "timeout" : "error", `${candidate.upstream.id}|${candidate.model.id}`, COOLDOWN_MS.transient, attempt.signal.aborted ? "timeout" : "stream_error");
+          continue;
+        }
+        if (first.done || !first.value?.length) {
+          reservation.release();
+          failover("error", `${candidate.upstream.id}|${candidate.model.id}`, COOLDOWN_MS.transient, "empty");
+          continue;
+        }
+        record2.upstream = candidate.upstream.id;
+        record2.model = candidate.model.id;
+        record2.tier = candidate.tier;
+        record2.ttfbMs = this.now() - record2.at;
+        if (kind !== "small") {
+          const lease = this.leases.get(conversation);
+          if (lease) {
+            lease.model = candidate.model.id;
+            lease.upstream = candidate.upstream.id;
+          }
+          this.showModel(grant.sessionId, candidate, record2.source);
+        }
+        sent = true;
+        response.writeHead(200, { "content-type": upstream.headers.get("content-type") ?? (stream ? "text/event-stream" : "application/json"), "cache-control": "no-cache" });
+        const decoder = new TextDecoder();
+        const chunks = [];
+        const take = (bytes) => {
+          if (stream) usage.push(decoder.decode(bytes, { stream: true }));
+          else chunks.push(decoder.decode(bytes, { stream: true }));
+        };
+        take(first.value);
+        response.write(first.value);
+        let failed = false;
+        for (; ; ) {
+          clearTimeout(timer);
+          timer = setTimeout(() => attempt.abort(), stream ? this.timeouts.idleMs : this.timeouts.totalMs);
+          let next;
+          try {
+            next = await reader.read();
+          } catch {
+            failed = true;
+            break;
+          }
+          if (next.done) break;
+          take(next.value);
+          if (!response.write(next.value)) await new Promise((resolve5) => {
+            response.once("drain", resolve5);
+            response.once("close", resolve5);
+          });
+          if (response.destroyed) {
+            failed = true;
+            break;
+          }
+        }
+        if (stream) usage.end();
+        else {
+          try {
+            usage.json(JSON.parse(chunks.join("")));
+          } catch {
+          }
+        }
+        record2.tokensIn = usage.usage.in;
+        record2.tokensOut = usage.usage.out;
+        const cost = this.costOf(candidate, usage.usage);
+        record2.costUsd = cost;
+        reservation.commit(cost);
+        if (failed && !controller.signal.aborted && !response.destroyed) {
+          response.write(stream ? `data: ${JSON.stringify({ error: { message: "Auto (Jev): the upstream stopped in the middle of the answer.", type: "canvastty_auto", code: "upstream_interrupted" } })}
+
+` : "");
+          record2.status = 502;
+          record2.reason ||= "interrupted";
+        } else record2.status = controller.signal.aborted ? 499 : 200;
+        response.end();
+        return;
+      } finally {
+        clearTimeout(timer);
+        controller.signal.removeEventListener("abort", relay);
+        if (!sent) attempt.abort();
+      }
+    }
+    throw new HttpError(lastStatus === 429 ? 429 : 503, lastCode, `Auto (Jev): no allowed model answered (last: ${lastCode}). It tries again on the next call.`);
+  }
+  showModel(sessionId, candidate, source) {
+    if (this.shownModel.get(sessionId) === candidate.model.id) return;
+    this.shownModel.set(sessionId, candidate.model.id);
+    this.deps.badge?.(sessionId, { model: candidate.model.id, tier: candidate.tier, source });
+  }
+  remember(record2) {
+    this.recentRecords.unshift(record2);
+    if (this.recentRecords.length > ROUTER_LIMITS.recent) this.recentRecords.length = ROUTER_LIMITS.recent;
+    const file = this.deps.directory ? join10(this.deps.directory, "decisions.jsonl") : null;
+    if (!file) return;
+    try {
+      try {
+        if (statSync4(file).size > ROUTER_LIMITS.logBytes) renameSync2(file, `${file}.1`);
+      } catch {
+      }
+      appendFileSync(file, `${JSON.stringify(record2)}
+`, { mode: 384 });
+    } catch {
+    }
+  }
+};
+function upstreamMessage(text5) {
+  try {
+    const parsed = JSON.parse(text5);
+    const message = typeof parsed.error === "string" ? parsed.error : typeof parsed.error?.message === "string" ? parsed.error.message : typeof parsed.message === "string" ? parsed.message : "";
+    return clean2(message, 240);
+  } catch {
+    return "";
+  }
+}
+
+// src/auto/service.ts
+var AUTO_STORAGE_KEY = "autoRouting";
+var PLUGIN_ID = "canvastty-assistant";
+var TEST_TIMEOUT_MS = 1e4;
+var AutoService = class {
+  settings;
+  readable;
+  router;
+  options;
+  constructor(options) {
+    this.options = options;
+    this.readable = options.savedUnavailable !== true;
+    this.settings = normalizeAutoSettings(this.readable ? options.saved : null);
+    const strings2 = AUTO_STRINGS[options.locale];
+    this.router = new AutoRouter({
+      directory: join11(options.dataDir, "auto"),
+      settings: () => this.settings,
+      dataClassMode: options.dataClassMode,
+      key: (upstream) => this.keyFor(upstream),
+      ...options.decide ? { decide: options.decide } : {},
+      badge: (sessionId, model) => options.publishBadge(sessionId, model ? { text: badgeText(model.model), tone: "neutral", tooltip: strings2.badgeTip(model.tier, model.source) } : null),
+      log: (level, message) => options.host.log(level, message),
+      ...options.transport ? { transport: options.transport } : {},
+      ...options.now ? { now: options.now } : {},
+      ...options.timeouts ? { timeouts: options.timeouts } : {}
+    });
+  }
+  /** The key for an upstream, only when it was saved for this upstream's own address. */
+  async keyFor(upstream) {
+    if (upstream.key === "none") return null;
+    const stored = await this.options.readKey(upstream.key === "jev" ? JEV_OPENROUTER_SECRET : upstreamSecret(upstream.id));
+    if (!stored) return null;
+    return stored.origin === originOf(upstream.baseUrl) ? stored.value : null;
+  }
+  loaded(saved) {
+    this.settings = normalizeAutoSettings(saved);
+    this.readable = true;
+  }
+  /** `model: "auto"` for this launch: refuse with a reason, or the contribution with a fresh key. Never waits on a model. */
+  async prepare(input) {
+    const strings2 = AUTO_STRINGS[this.options.locale];
+    const refusal = autoRefusal({ provider: input.provider, role: input.role, cwd: input.cwd, environment: input.environment, dataClass: input.dataClass, settings: this.settings, mode: this.options.dataClassMode() });
+    if (refusal) return { refuse: { reason: strings2[refusal] } };
+    let granted;
+    try {
+      granted = await this.router.grant({ sessionId: input.sessionId, provider: input.provider, role: input.role, parentSessionId: input.parentSessionId, dataClass: input.dataClass });
+    } catch (error) {
+      this.options.host.log("warn", `Auto (Jev): no local port (${error instanceof Error ? error.message.slice(0, 120) : "error"})`);
+      return { refuse: { reason: strings2.router } };
+    }
+    return openCodeContribution({ port: granted.port, token: granted.token, settings: this.settings });
+  }
+  /** For `route`: the launch options that give a subagent Auto too, when the caller itself runs on it. */
+  launchOptionsFor(sessionId) {
+    return this.router.tokens.forSession(sessionId) ? { [PLUGIN_ID]: { model: "auto" } } : null;
+  }
+  sessionClosed(sessionId) {
+    this.router.closeSession(sessionId);
+  }
+  sessionsKnown(ids) {
+    this.router.retainSessions(ids);
+  }
+  resume() {
+    return this.router.resume();
+  }
+  stop() {
+    return this.router.stop();
+  }
+  // ---------------------------------------------------------------------------------------------------------------
+  // The decision models page
+  // ---------------------------------------------------------------------------------------------------------------
+  async state() {
+    const keys = {};
+    for (const upstream of this.settings.upstreams) keys[upstream.id] = upstream.key === "none" ? true : !!await this.keyFor(upstream).catch(() => null);
+    return { settings: this.settings, readable: this.readable, keys, recent: this.router.recent(), stats: this.router.statsView() };
+  }
+  async save(value) {
+    if (!this.readable) throw new Error(this.options.locale === "ru" ? "\u0421\u043E\u0445\u0440\u0430\u043D\u0451\u043D\u043D\u044B\u0435 \u043D\u0430\u0441\u0442\u0440\u043E\u0439\u043A\u0438 \u0435\u0449\u0451 \u043D\u0435 \u043F\u0440\u043E\u0447\u0438\u0442\u0430\u043D\u044B, \u043F\u043E\u044D\u0442\u043E\u043C\u0443 \u043D\u0438\u0447\u0435\u0433\u043E \u043D\u0435 \u0438\u0437\u043C\u0435\u043D\u0435\u043D\u043E." : "The saved settings could not be read yet, so nothing is changed.");
+    const next = validateAutoSettings(value);
+    await this.options.host.callHost("storage.set", { key: AUTO_STORAGE_KEY, value: next });
+    this.settings = next;
+    this.options.host.emit("settings", null);
+    return next;
+  }
+  /** The secret name and origin the page writes an upstream's own key under (never the key itself). */
+  keySlot(upstreamId) {
+    const upstream = this.settings.upstreams.find((entry) => entry.id === upstreamId);
+    if (!upstream || upstream.key !== "own") throw new Error("This upstream takes no key of its own.");
+    return { secret: upstreamSecret(upstream.id), origin: originOf(upstream.baseUrl) };
+  }
+  /**
+   * «Проверить»: GETs of the upstream's model list (and OpenRouter's /key) with its key: no prompt, no tokens spent.
+   * Says whether the key works and which configured model ids the upstream does not list.
+   */
+  async test(upstreamId) {
+    const upstream = this.settings.upstreams.find((entry) => entry.id === upstreamId);
+    if (!upstream) throw new Error("Unknown upstream.");
+    const key = await this.keyFor(upstream);
+    if (upstream.key !== "none" && !key) return { ok: false, status: null, missing: [], listed: null };
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), TEST_TIMEOUT_MS);
+    try {
+      const get = (path) => (this.options.transport ?? fetch)(`${upstream.baseUrl}${path}`, { headers: { accept: "application/json", ...key ? { authorization: `Bearer ${key}` } : {} }, signal: controller.signal, redirect: "error" });
+      if (upstream.preset === "openrouter") {
+        const checked = await get("/key");
+        if (!checked.ok) return { ok: false, status: checked.status, missing: [], listed: null };
+      }
+      const answer = await get("/models");
+      if (!answer.ok) return { ok: false, status: answer.status, missing: [], listed: null };
+      const body = await answer.json().catch(() => null);
+      const ids = new Set((Array.isArray(body?.data) ? body.data : []).map((entry) => entry?.id).filter((id) => typeof id === "string"));
+      return { ok: true, status: answer.status, missing: ids.size ? upstream.models.map((model) => model.id).filter((id) => !ids.has(id)) : [], listed: ids.size };
+    } catch {
+      return { ok: false, status: null, missing: [], listed: null };
+    } finally {
+      clearTimeout(timer);
+    }
+  }
+};
+
 // src/service/assistant.ts
 var DECIDE_BUDGET_MS = 45e3;
 var TRIAGE_DEADLINE_MS = 2e4;
@@ -9778,6 +11034,10 @@ var Assistant = class {
   /** The same for the harness switches (routing, loop alerts, flows): their defaults apply, nothing is saved over. */
   harnessReadable;
   harness;
+  /** Model: Auto (Jev): the router, its settings and the launch contribution. */
+  auto;
+  /** Each card's effective data class, so a subagent's can be clamped to its parent's. */
+  classes = /* @__PURE__ */ new Map();
   constructor(options) {
     this.host = options.host;
     this.settingsReadable = options.settingsUnavailable !== true;
@@ -9795,7 +11055,8 @@ var Assistant = class {
       modelDifficulty: async (task, caller, deadlineMs) => {
         const answer = await this.advice(task, null, caller.workingDirectory || caller.cwd || process.cwd(), caller.id, deadlineMs, requesterOf(caller.role));
         return answer.kind === "advice" ? answer.advice.difficulty : null;
-      }
+      },
+      autoLaunchOptions: (caller) => this.auto.launchOptionsFor(caller.id)
     });
     this.harness.loadSettings(options.harness);
     const secrets = {
@@ -9813,9 +11074,25 @@ var Assistant = class {
     };
     this.engine = new AssistantEngine({
       settings: () => this.settings,
-      directory: join8(options.dataDir, "assistant"),
+      directory: join12(options.dataDir, "assistant"),
       secrets,
       ...options.transport ? { transport: options.transport } : {}
+    });
+    this.auto = new AutoService({
+      host: options.host,
+      dataDir: options.dataDir,
+      locale,
+      saved: options.autoRouting,
+      savedUnavailable: options.autoRoutingUnavailable === true,
+      readKey: (owner) => this.readKey(owner),
+      dataClassMode: () => this.settings.dataClassMode,
+      decide: (text5, grant, signal) => this.turnDifficulty(text5, grant.dataClass, grant.sessionId, grant.role, signal),
+      publishBadge: (sessionId, badge) => {
+        void this.harness.setBadge(sessionId, "model", badge);
+      },
+      ...options.transport ? { transport: options.transport } : {},
+      ...options.now ? { now: options.now } : {},
+      ...options.autoTimeouts ? { timeouts: options.autoTimeouts } : {}
     });
     this.review = new ReviewService({
       engine: this.engine,
@@ -9856,6 +11133,7 @@ var Assistant = class {
     if (!Array.isArray(list)) return;
     this.harness.sessionsKnown(list);
     for (const session of list) if (session && typeof session === "object" && typeof session.id === "string") this.sessions.set(session.id, session);
+    this.auto.sessionsKnown(new Set(this.sessions.keys()));
   }
   sessionEvent(event) {
     const session = event.session;
@@ -9864,6 +11142,8 @@ var Assistant = class {
     if (event.type === "closed") {
       this.sessions.delete(session.id);
       this.review.forget(session.id);
+      this.classes.delete(session.id);
+      this.auto.sessionClosed(session.id);
       return;
     }
     this.sessions.set(session.id, session);
@@ -9889,16 +11169,52 @@ var Assistant = class {
    * `isolation.state` says which. A worktree is not an isolated environment, so the old "YOLO only isolated" option
    * (which counted it as one) is gone and a saved value of it is ignored.
    */
-  launch(context) {
+  async launch(context) {
     if (context.chosen === false) return null;
     const options = context.options ?? {};
     const task = text4(options.task, 2e3) || null;
-    const dataClass = DATA_CLASSES.includes(options.dataClass) ? options.dataClass : null;
+    const requested = DATA_CLASSES.includes(options.dataClass) ? options.dataClass : null;
+    const parentClass = context.role === "subagent" && context.parentSessionId ? this.classes.get(context.parentSessionId) ?? null : null;
+    const dataClass = requested ? clampClass(requested, parentClass) : parentClass;
+    this.classes.set(context.sessionId, dataClass ?? this.settings.defaultDataClass);
+    while (this.classes.size > 4096) this.classes.delete(this.classes.keys().next().value);
+    const model = options.model ?? "off";
+    if (model !== "off" && model !== "auto") {
+      const refusal = AUTO_STRINGS[this.locale].unknownValue;
+      return { refuse: { reason: refusal } };
+    }
     const mode = this.engine.mode("task.route");
     const triage = !!task && (mode === "suggest" || mode === "auto" || mode === "shadow");
     this.review.noteLaunch(context.sessionId, { task, dataClass, triage: triage && mode !== "shadow" });
     if (triage) void this.triage(context.sessionId, task, dataClass, context.cwd);
-    return null;
+    if (model !== "auto") return null;
+    return this.auto.prepare({
+      sessionId: context.sessionId,
+      provider: context.provider,
+      role: context.role,
+      cwd: context.cwd,
+      parentSessionId: context.parentSessionId ?? null,
+      environment: context.environment,
+      dataClass: dataClass ?? this.settings.defaultDataClass
+    });
+  }
+  /**
+   * Jev's view of one Auto turn: the existing task triage (task.route) on the latest user text only, through the
+   * engine (data-class gate, budget, cache, breaker, log). Only while task triage is Suggest or Auto; otherwise, or
+   * without an answer, null and the router uses word rules.
+   */
+  async turnDifficulty(task, dataClass, sessionId, role, signal) {
+    const mode = this.engine.mode("task.route");
+    if (mode !== "suggest" && mode !== "auto") return null;
+    const { triage } = await askTaskRoute(this.engine, { task, dataClass }, {
+      signal,
+      assertCurrent: () => {
+        if (signal.aborted) throw new Error("aborted");
+      },
+      requester: role === "subagent" ? "orchestrator" : "person",
+      sessionId
+    });
+    return triage ? { difficulty: triage.difficulty, strong: triage.p3 >= ROUTE_TAUS.strong } : null;
   }
   async triage(sessionId, task, dataClass, cwd) {
     const advice = await this.advice(task, dataClass, cwd, sessionId).catch(() => null);
@@ -10035,6 +11351,7 @@ ${JSON.stringify({ ...a, model: answer.model })}` };
       this.harness.loadSettings(stored.harness);
       this.harnessReadable = true;
     }
+    if ("autoRouting" in stored) this.auto.loaded(stored.autoRouting);
     this.host.emit("settings", null);
   }
   /** «Проверить»: the synthetic battery (no user data). It can take longer than a page request, so the answer is an event. */
@@ -10083,7 +11400,7 @@ function requesterOf(role) {
 }
 
 // src/service/startup.ts
-var STORED_KEYS = ["settings", "harness"];
+var STORED_KEYS = ["settings", "harness", "autoRouting"];
 var RETRY_DELAYS_MS = [2e3, 1e4, 3e4, 6e4, 3e5];
 async function readStored(host, keys = STORED_KEYS) {
   const values = {};
@@ -10128,8 +11445,8 @@ function retryStored(host, failed, apply, delays = RETRY_DELAYS_MS) {
 
 // src/service/main.ts
 var resolveReady;
-var ready = new Promise((resolve4) => {
-  resolveReady = resolve4;
+var ready = new Promise((resolve5) => {
+  resolveReady = resolve5;
 });
 var assistant = null;
 var str2 = (value) => typeof value === "string" ? value : "";
@@ -10138,12 +11455,23 @@ serve({
   exit: (code) => {
     const done = () => process.exit(code);
     setTimeout(done, 500).unref();
-    void (assistant?.harness.flushWrites() ?? Promise.resolve()).finally(done);
+    void Promise.allSettled([assistant?.harness.flushWrites(), assistant?.auto.stop()]).finally(done);
   },
   onInitialize: async (params, host) => {
     const dataDir = typeof params.dataDir === "string" ? params.dataDir : process.cwd();
     const { values, failed } = await readStored(host);
-    assistant = new Assistant({ host, dataDir, settings: values.settings, settingsUnavailable: failed.includes("settings"), harness: values.harness, harnessUnavailable: failed.includes("harness"), locale: params.locale });
+    assistant = new Assistant({
+      host,
+      dataDir,
+      settings: values.settings,
+      settingsUnavailable: failed.includes("settings"),
+      harness: values.harness,
+      harnessUnavailable: failed.includes("harness"),
+      autoRouting: values.autoRouting,
+      autoRoutingUnavailable: failed.includes("autoRouting"),
+      locale: params.locale
+    });
+    await assistant.auto.resume();
     resolveReady(assistant);
     if (failed.length) retryStored(host, failed, (stored) => assistant?.storageRecovered(stored));
     try {
@@ -10176,6 +11504,11 @@ serve({
     // The settings page (four controls).
     "harness.settings": async () => (await ready).harnessState(),
     "harness.saveSettings": async (params) => (await ready).saveHarness(params.settings),
+    // Auto (Jev) rows on the decision models page.
+    "auto.state": async () => (await ready).auto.state(),
+    "auto.save": async (params) => (await ready).auto.save(params.settings),
+    "auto.keySlot": async (params) => (await ready).auto.keySlot(str2(params.upstreamId)),
+    "auto.test": async (params) => (await ready).auto.test(str2(params.upstreamId)),
     // The Flow preview and Task board cards.
     "harness.view": async () => (await ready).harness.view(),
     "flows.choices": async (params) => (await ready).harness.flowChoices(str2(params.orchestratorId)),

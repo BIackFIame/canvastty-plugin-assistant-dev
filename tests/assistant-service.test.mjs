@@ -273,8 +273,8 @@ test('launch: the Assistant never refuses a launch (YOLO and isolation are Canva
   const assistant = new Assistant({ host, dataDir, settings: { yoloOnlyIsolated: true } });
   const context = { sessionId: 's', provider: 'claude', role: 'agent', cwd: project, restoring: false, resume: false, options: {} };
   for (const environment of [null, { pluginId: 'e', kind: 'worktree' }]) {
-    assert.equal(assistant.launch({ ...context, profile: 'yolo', chosen: false, environment }), null);
-    assert.equal(assistant.launch({ ...context, profile: 'yolo', chosen: true, environment }), null);
+    assert.equal(await assistant.launch({ ...context, profile: 'yolo', chosen: false, environment }), null);
+    assert.equal(await assistant.launch({ ...context, profile: 'yolo', chosen: true, environment }), null);
   }
   assert.equal(host.calls.length, 0, 'nothing is called without a task');
   const { readFileSync } = await import('node:fs');
@@ -292,7 +292,7 @@ test('launch triage: the person\'s task feeds review and, when a model answers, 
     enabled: true, modes: { 'task.route': 'suggest', 'command.review': 'auto' },
     backends: [{ id: 'ollama-1', preset: 'emulated', runtime: 'ollama', model: 'qwen3.5:9b', url: ollama.url, enabled: true, localConfirmed: { port, at: 1 } }]
   } });
-  const answer = assistant.launch({ sessionId: 'card-1', provider: 'claude', profile: 'normal', role: 'agent', cwd: project, restoring: false, resume: false,
+  const answer = await assistant.launch({ sessionId: 'card-1', provider: 'claude', profile: 'normal', role: 'agent', cwd: project, restoring: false, resume: false,
     options: { task: 'Delete the old deploy branch and force-push main', dataClass: 'default' }, chosen: true, environment: null });
   assert.equal(answer, null);
   const deadline = Date.now() + 5_000;

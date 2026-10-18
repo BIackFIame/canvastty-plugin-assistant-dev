@@ -73,9 +73,9 @@ test('F1: a fresh install and an update from a version that saved nothing both s
 });
 
 test('F1: a storage read error is not a first run: Off, nothing saved over the stored value, read again later', async () => {
-  const host = fakeHost({ failReads: 2, storage: { settings: withCommandReview(DEFAULT_ASSISTANT_SETTINGS, 'strict'), harness: { routing: false, loopAlerts: true, flows: true } } });
+  const host = fakeHost({ failReads: 3, storage: { settings: withCommandReview(DEFAULT_ASSISTANT_SETTINGS, 'strict'), harness: { routing: false, loopAlerts: true, flows: true } } });
   const { values, failed } = await readStored(host);
-  assert.deepEqual(failed, ['settings', 'harness']);
+  assert.deepEqual(failed, ['settings', 'harness', 'autoRouting']);
   assert.deepEqual(values, {});
   assert.ok(host.logs.some(entry => entry.level === 'warn' && /storage\.get settings failed/u.test(entry.message)));
   const assistant = new Assistant({ host, dataDir: mkdtempSync(join(base, 'data-')), git: null, locale: 'ru', settings: values.settings, settingsUnavailable: true, harness: values.harness, harnessUnavailable: true });

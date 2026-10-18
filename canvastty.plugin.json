@@ -4,8 +4,8 @@
   "name": "CanvasTTY Assistant",
   "name.ru": "Ассистент CanvasTTY",
   "version": "0.2.0",
-  "description": "The Assistant: reviews agents' shell commands and file writes before they run, and helps orchestrators: a route tool that suggests provider and model for a subagent, flows (roles and tasks an orchestrator asks you to approve), a task board, loop alerts on cards and a session report. Decision models (Jev, Laya, Eikos, Ollama) are optional. Settings → Plugins → CanvasTTY Assistant → Settings.",
-  "description.ru": "Помощник: проверяет команды и записи файлов агентов до запуска и помогает оркестраторам: инструмент route предлагает провайдера и модель для субагента, сценарии (роли и задачи, которые оркестратор просит одобрить), доска задач, сигнал «цикл?» на окне и отчёт о сессии. Модели решений (Jev, Laya, Eikos, Ollama) не обязательны. Настройки → Плагины → Ассистент CanvasTTY → Настройки.",
+  "description": "The Assistant: reviews agents' shell commands and file writes before they run, and helps orchestrators: a route tool that suggests provider and model for a subagent, flows (roles and tasks an orchestrator asks you to approve), a task board, loop alerts on cards a session report, and Model: Auto (Jev) for OpenCode (a local, key-protected router on 127.0.0.1 that picks an allowed model per turn). Decision models (Jev, Laya, Eikos, Ollama) are optional. Settings → Plugins → CanvasTTY Assistant → Settings.",
+  "description.ru": "Помощник: проверяет команды и записи файлов агентов до запуска и помогает оркестраторам: инструмент route предлагает провайдера и модель для субагента, сценарии (роли и задачи, которые оркестратор просит одобрить), доска задач, сигнал «цикл?» на окне отчёт о сессии и модель «Авто (Jev)» для OpenCode (локальный маршрутизатор на 127.0.0.1 с ключом, выбирает разрешённую модель на каждый ход). Модели решений (Jev, Laya, Eikos, Ollama) не обязательны. Настройки → Плагины → Ассистент CanvasTTY → Настройки.",
   "author": "CanvasTTY contributors",
   "permissions": [
     "storage",
@@ -29,8 +29,8 @@
     },
     {
       "path": "services/assistant.mjs",
-      "bytes": 498853,
-      "sha256": "06f0f1e80a3638df2fb8b37f07d1622e030ac3949afca6c96bc9303abc82c5d0"
+      "bytes": 565427,
+      "sha256": "84840d38841b8e05da685c911e0594a7ad23f3b56054a471f596f60f780c8568"
     },
     {
       "path": "settings/assistant.html",
@@ -87,7 +87,7 @@
     {
       "id": "assistant",
       "title": "Assistant",
-      "description": "Command review, launch triage, routing, flows, task boards, loop alerts and session reports.",
+      "description": "Command review, launch triage, routing, flows, task boards, loop alerts, session reports and the Auto (Jev) model router (127.0.0.1 only, while Auto is used).",
       "entry": "services/assistant.mjs",
       "decide": {
         "events": [
@@ -96,6 +96,7 @@
         "timeoutMs": 45000
       },
       "launch": {
+        "delegable": true,
         "fields": [
           {
             "key": "task",
@@ -131,6 +132,23 @@
               {
                 "value": "D3",
                 "label": "D3 secret (stays on this computer)"
+              }
+            ]
+          },
+          {
+            "key": "model",
+            "label": "Model: Auto picks one per turn (OpenCode; keep Model at Default, no account)",
+            "label.ru": "Модель: Авто выбирает на каждый ход (OpenCode; без аккаунта и своей модели)",
+            "kind": "select",
+            "default": "off",
+            "options": [
+              {
+                "value": "off",
+                "label": "Off (the agent's own model)"
+              },
+              {
+                "value": "auto",
+                "label": "Auto (Jev)"
               }
             ]
           }
@@ -412,7 +430,7 @@
       "kind": "canvas-app",
       "title": "Decision models",
       "title.ru": "Модели решений",
-      "description": "Optional decision models (Jev, Laya, Eikos, Ollama), data rules and recent reviews.",
+      "description": "Optional decision models (Jev, Laya, Eikos, Ollama), data rules, recent reviews and Auto (Jev) model routing.",
       "entry": "settings/assistant.html",
       "defaultSize": {
         "width": 760,

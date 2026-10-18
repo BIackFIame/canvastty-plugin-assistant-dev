@@ -52,6 +52,11 @@ export interface HarnessOptions {
   locale: Locale;
   /** Difficulty from the Assistant's decision model (`task.route`), or null to use the word rules. */
   modelDifficulty?: (task: string, caller: CardSummary, deadlineMs: number) => Promise<Difficulty | null>;
+  /**
+   * Launch options that put a subagent on Model: Auto (Jev), when the caller runs on it (OpenCode only for now);
+   * null otherwise. `route` then hands them out instead of a model.
+   */
+  autoLaunchOptions?: (caller: CardSummary) => Record<string, Record<string, string>> | null;
   /** Publishes the plugin's one badge on a card. */
   publishBadge: (sessionId: string, badge: Badge | null) => Promise<void>;
   /** Whether command review is on (the Report says "reviewed" only then). */
@@ -72,6 +77,7 @@ export class Harness {
   private readonly now: () => number;
   private readonly modelDifficulty: HarnessOptions['modelDifficulty'];
   private readonly reviewOn: () => boolean;
+  private readonly autoLaunchOptions: HarnessOptions['autoLaunchOptions'];
   private readonly sessions = new Map<string, CardSummary>();
   /** When a card last stopped working (turn boundaries; a short flicker is not a new turn). */
   private readonly stoppedAt = new Map<string, number>();
@@ -90,6 +96,7 @@ export class Harness {
     this.now = options.now ?? Date.now;
     this.modelDifficulty = options.modelDifficulty;
     this.reviewOn = options.reviewOn ?? (() => false);
+    this.autoLaunchOptions = options.autoLaunchOptions;
     this.dir = join(options.dataDir, 'harness');
     this.badges = new BadgeBoard(options.publishBadge);
     this.journals = new Journals(this.now);
@@ -281,7 +288,8 @@ export class Harness {
     const suggestion = suggestRoute({
       difficulty: difficulty ?? ruleDifficulty(task), source, callerProvider: caller.provider ?? null, providers: this.providersOf(input),
       prefer: text(input.prefer, 40) || null,
-      launchOptionTools: strings(input.launchOptionTools, 8)
+      launchOptionTools: strings(input.launchOptionTools, 8),
+      autoLaunchOptions: this.autoLaunchOptions?.(caller) ?? null
     });
     if (!suggestion) return { content: 'No listed provider is available for a subagent. Call list_providers and pick one yourself.' };
     return { content: routeAnswer(suggestion) };

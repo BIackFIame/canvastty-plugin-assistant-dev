@@ -16,13 +16,19 @@ serve({
   exit: code => {
     const done = (): never => process.exit(code);
     setTimeout(done, 500).unref();
-    void (assistant?.harness.flushWrites() ?? Promise.resolve()).finally(done);
+    // The router stops listening and aborts calls in flight; the OS frees the port in any case.
+    void Promise.allSettled([assistant?.harness.flushWrites(), assistant?.auto.stop()]).finally(done);
   },
   onInitialize: async (params, host: Host) => {
     const dataDir = typeof params.dataDir === 'string' ? params.dataDir : process.cwd();
     // A failed read is not "nothing saved": see startup.ts.
     const { values, failed } = await readStored(host);
-    assistant = new Assistant({ host, dataDir, settings: values.settings, settingsUnavailable: failed.includes('settings'), harness: values.harness, harnessUnavailable: failed.includes('harness'), locale: params.locale });
+    assistant = new Assistant({
+      host, dataDir, settings: values.settings, settingsUnavailable: failed.includes('settings'), harness: values.harness, harnessUnavailable: failed.includes('harness'),
+      autoRouting: values.autoRouting, autoRoutingUnavailable: failed.includes('autoRouting'), locale: params.locale
+    });
+    // Cards that run on Auto (Jev) keep working after a service restart: same port, same keys (hashes on disk).
+    await assistant.auto.resume();
     resolveReady(assistant);
     if (failed.length) retryStored(host, failed, stored => assistant?.storageRecovered(stored));
     try {
@@ -50,6 +56,11 @@ serve({
     // The settings page (four controls).
     'harness.settings': async () => (await ready).harnessState(),
     'harness.saveSettings': async params => (await ready).saveHarness(params.settings),
+    // Auto (Jev) rows on the decision models page.
+    'auto.state': async () => (await ready).auto.state(),
+    'auto.save': async params => (await ready).auto.save(params.settings),
+    'auto.keySlot': async params => (await ready).auto.keySlot(str(params.upstreamId)),
+    'auto.test': async params => (await ready).auto.test(str(params.upstreamId)),
     // The Flow preview and Task board cards.
     'harness.view': async () => (await ready).harness.view(),
     'flows.choices': async params => (await ready).harness.flowChoices(str(params.orchestratorId)),
