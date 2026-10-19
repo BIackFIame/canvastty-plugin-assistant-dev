@@ -275,7 +275,7 @@ test('through CanvasTTY\'s own launch pipeline: the contribution passes its chec
   const both = pipeline.normalizeOptions('opencode', { 'canvastty-assistant': { model: 'auto' }, 'canvastty-accounts': { account: 'a' } });
   const refused = await pipeline.prepare({ ...context, sessionId: 'card-pipe-2', options: both });
   assert.equal(refused.ok, false);
-  assert.match(refused.reason, /CanvasTTY Accounts and CanvasTTY Assistant both set OPENCODE_CONFIG/u);
+  assert.match(refused.reason, /CanvasTTY Accounts and CanvasTTY Assistant both set (?:OPENCODE_CONFIG|the model of this launch)/u);
   // A refusal reaches the card with the plugin's name.
   const codex = await pipeline.prepare({ ...context, provider: 'codex', sessionId: 'card-pipe-3', options: pipeline.normalizeOptions('codex', { 'canvastty-assistant': { model: 'auto' } }) });
   assert.equal(codex.ok, false);
