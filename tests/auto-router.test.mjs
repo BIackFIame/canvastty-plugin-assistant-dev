@@ -392,3 +392,48 @@ test('classification and candidates (pure)', () => {
   assert.throws(() => validateAutoSettings({ ...settings, upstreams: [{ ...settings.upstreams[1], baseUrl: 'http://example.com/v1', trust: 'D1' }] }), /http on this computer only/u);
   assert.throws(() => validateAutoSettings({ ...settings, upstreams: [{ ...settings.upstreams[1], preset: 'openai-compatible', key: 'jev', trust: 'D1' }] }), /Jev · OpenRouter key/u);
 });
+
+test('live run 15: a stream kept alive by keep-alive comments ends at the idle limit; a trickle ends at the turn deadline; no usage → an estimated cost is counted', async t => {
+  const models = [{ id: 'm/keepalive', tier: 'medium', priceIn: 2, priceOut: 10 }];
+  {
+    const { router, token, port } = await setup(t, { models, behaviours: { 'm/keepalive': 'keepalive' }, timeouts: { idleMs: 300, turnMs: 5_000 } });
+    const started = Date.now();
+    const answer = await call(port, { token, body: userTurn('Write a function') });
+    assert.ok(Date.now() - started < 3_000, 'keep-alive comments are not progress');
+    assert.match(answer.text, /upstream_idle/u);
+    assert.match(answer.text, /data: \[DONE\]/u, 'the turn ends cleanly');
+    const record = router.recent()[0];
+    assert.deepEqual([record.status, record.reason], [502, 'upstream_idle']);
+    assert.equal(record.costEstimated, true);
+    assert.ok(record.costUsd > 0, 'counted, not left out');
+    assert.equal(router.statsView().spentToday, Math.round(record.costUsd * 1e6) / 1e6);
+  }
+  {
+    const { router, token, port } = await setup(t, { models: [{ id: 'm/trickle', tier: 'medium', priceIn: 2, priceOut: 10 }], behaviours: { 'm/trickle': 'trickle' }, timeouts: { idleMs: 300, turnMs: 500 } });
+    const answer = await call(port, { token, body: userTurn('Write a function') });
+    assert.match(answer.text, /turn_deadline/u);
+    const record = router.recent()[0];
+    assert.deepEqual([record.status, record.reason], [504, 'turn_deadline']);
+    assert.ok(record.tokensOut > 0, 'what streamed, estimated');
+  }
+  {
+    // The long-reasoning efforts get the longer deadline.
+    const { router, token, port } = await setup(t, { models: [{ id: 'm/trickle', tier: 'medium', effort: 'xhigh', priceIn: 2, priceOut: 10 }], behaviours: { 'm/trickle': 'trickle' }, timeouts: { idleMs: 300, turnMs: 300, turnXhighMs: 900 } });
+    const started = Date.now();
+    await call(port, { token, body: userTurn('Write a function') });
+    assert.ok(Date.now() - started >= 800, 'xhigh: not cut at the short deadline');
+    assert.equal(router.recent()[0].reason, 'turn_deadline');
+  }
+});
+
+test('today survives a restart: paid calls are kept with the spend, and the last decisions come back from the log', async t => {
+  const first = await setup(t);
+  assert.equal((await call(first.port, { token: first.token, body: userTurn('hello') })).status, 200);
+  assert.equal(first.router.statsView().callsToday, 1);
+  await first.router.stop();
+  const again = new AutoRouter({ directory: first.dir, settings: () => settingsFor(first.upstream.url, TIERED), inventory: () => inventoryOf(settingsFor(first.upstream.url, TIERED)), dataClassMode: () => 'strict', key: async () => 'up-key' });
+  t.after(() => again.stop());
+  assert.equal(again.statsView().callsToday, 1);
+  assert.equal(again.statsView().requests, 0, 'this run\'s counters start at 0');
+  assert.equal(again.recent()[0].model, 'vendor/medium-a', 'the decision log is read back');
+});

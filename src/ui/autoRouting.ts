@@ -17,7 +17,7 @@ export interface AutoState {
   readable: boolean;
   keys: Record<string, boolean>;
   recent: DecisionRecord[];
-  stats: RouterStats & { spentToday: number; listening: boolean; cards: number };
+  stats: RouterStats & { spentToday: number; callsToday?: number; listening: boolean; cards: number };
   /** Absent from an older service. */
   catalog?: CatalogStatus;
   models?: Record<string, ModelRow[]>;
@@ -207,11 +207,11 @@ export function renderAuto(state: AutoState, t: Strings, page: AutoPageHost, vie
     el('p', { className: 'muted', textContent: t.prefHelp }),
     checkOf('auto-cheaper', settings.cheaperFallback, t.cheaper, value => save(next => { next.cheaperFallback = value; })),
     labelled(t.decider, selectOf('auto-decider', settings.decider, [['jev', t.deciderJev], ['rules', t.deciderRules]], value => save(next => { next.decider = value; }))));
-  const daily = el('input', { type: 'number', name: 'auto-daily', min: '0', max: '100', step: '0.01', value: String(settings.dailyUsdCap) });
+  // The daily limit is in the short view above; here only the limit per card.
   const perCard = el('input', { type: 'number', name: 'auto-per-card', min: '0', max: '100', step: '0.01', value: String(settings.perCardUsdCap) });
   const saveCaps = el('button', { type: 'button', textContent: t.save, name: 'auto-caps-save' });
-  saveCaps.addEventListener('click', () => save(next => { next.dailyUsdCap = Number(daily.value); next.perCardUsdCap = Number(perCard.value); }));
-  section.append(el('div', { className: 'row' }, el('span', { className: 'label', textContent: t.daily }), daily, el('span', { textContent: t.perCard }), perCard, saveCaps),
+  saveCaps.addEventListener('click', () => save(next => { next.perCardUsdCap = Number(perCard.value); }));
+  section.append(el('div', { className: 'row' }, el('span', { className: 'label', textContent: t.perCard }), perCard, saveCaps),
     el('p', { className: 'muted', textContent: t.capsHelp }));
 
   section.append(strategySection(settings, t, save));

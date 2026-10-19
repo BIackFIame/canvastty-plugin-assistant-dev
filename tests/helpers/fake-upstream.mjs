@@ -59,6 +59,19 @@ export async function startFakeUpstream({ behaviours = {}, key = 'up-key', first
         return;
       }
       if (behaviour === 'hang') return;
+      if (behaviour === 'keepalive' || behaviour === 'trickle') {
+        // One real chunk, then only keep-alive comments (OpenRouter's ": OPENROUTER PROCESSING"), or a trickle of
+        // real text that never ends; no usage ever.
+        response.writeHead(200, { 'content-type': 'text/event-stream', 'cache-control': 'no-cache' });
+        const base = { id: 'chatcmpl-k', object: 'chat.completion.chunk', created: 1, model: entry.model };
+        response.write(sse({ ...base, choices: [{ index: 0, delta: { role: 'assistant', content: 'Thinking about it' }, finish_reason: null }] }));
+        const timer = setInterval(() => {
+          if (response.destroyed) { clearInterval(timer); return; }
+          response.write(behaviour === 'keepalive' ? ': OPENROUTER PROCESSING\n\n' : sse({ ...base, choices: [{ index: 0, delta: { content: ' more' }, finish_reason: null }] }));
+        }, 40);
+        response.on('close', () => clearInterval(timer));
+        return;
+      }
       if (behaviour === 'text' || behaviour === 'text-slow') {
         // A text answer even with tools offered; a judge's request (it carries the drafts) gets a merged answer.
         const last = json?.messages?.at(-1);

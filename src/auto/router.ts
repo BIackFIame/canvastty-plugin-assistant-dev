@@ -58,8 +58,15 @@ export interface RouterDeps {
 }
 
 /** `memberMs`: the whole time one buffered draft of a fan-out may take; a later one is dropped from the merge. */
-export interface RouterTimeouts { jevMs: number; headersMs: number; firstChunkMs: number; idleMs: number; totalMs: number; memberMs: number }
-export const ROUTER_TIMEOUTS: RouterTimeouts = { jevMs: 2_500, headersMs: 60_000, firstChunkMs: 60_000, idleMs: 90_000, totalMs: 15 * 60_000, memberMs: 180_000 };
+/**
+ * `turnMs` / `turnXhighMs`: the whole time one streamed answer may take once it started (xhigh and above reason long).
+ * Keep-alive data (SSE comments, blank lines) does not count as progress for `idleMs`.
+ */
+export interface RouterTimeouts { jevMs: number; headersMs: number; firstChunkMs: number; idleMs: number; totalMs: number; memberMs: number; turnMs: number; turnXhighMs: number }
+export const ROUTER_TIMEOUTS: RouterTimeouts = { jevMs: 2_500, headersMs: 60_000, firstChunkMs: 60_000, idleMs: 90_000, totalMs: 15 * 60_000, memberMs: 180_000, turnMs: 120_000, turnXhighMs: 240_000 };
+const LONG_EFFORTS = new Set(['xhigh', 'max', 'ultra']);
+/** A stream chunk with real data (not only SSE comments such as OpenRouter's keep-alive, or blank lines). */
+export const meaningful = (text: string): boolean => text.split('\n').some(line => line.trim() !== '' && !line.startsWith(':'));
 export const ROUTER_LIMITS = Object.freeze({ bodyBytes: 32 * 1_048_576, perCard: 16, total: 64, attempts: 6, conversations: 1_024, leaseMs: 30 * 60_000, recent: 50, logBytes: 512 * 1_024, outcomes: 512 });
 /** One draft of a fan-out, as recorded (no text). */
 export interface DraftRecord { upstream: string; model: string; effort: string | null; status: 'text' | 'tool_calls' | 'failed' | 'timeout' | 'stopped' | 'capped'; http: number | null; ms: number; costUsd: number | null }
@@ -114,6 +121,8 @@ export interface DecisionRecord {
   tokensIn: number | null;
   tokensOut: number | null;
   costUsd: number | null;
+  /** The upstream reported no usage: `costUsd` is estimated from the request and the streamed answer. */
+  costEstimated?: boolean;
   /** single / consensus / best-of-n, why (consensus.ts reasons), and the expected-value terms when computed. */
   strategy?: StrategyKind;
   strategyWhy?: string | null;
@@ -165,6 +174,8 @@ export function percentile(values: readonly number[], p: number): number {
 class Spend {
   private day = '';
   private total = 0;
+  /** Paid calls today (kept with the spend, so "today" survives a restart). */
+  private calls = 0;
   private held = 0;
   private readonly cards = new Map<string, { spent: number; held: number }>();
   private readonly file: string | null;
@@ -174,19 +185,21 @@ class Spend {
     this.now = now;
     this.file = directory ? join(directory, 'spend.json') : null;
     try {
-      const saved = JSON.parse(readFileSync(this.file!, 'utf8')) as { day?: unknown; total?: unknown; cards?: unknown };
+      const saved = JSON.parse(readFileSync(this.file!, 'utf8')) as { day?: unknown; total?: unknown; cards?: unknown; calls?: unknown };
       if (saved.day === this.dayKey() && typeof saved.total === 'number' && saved.total >= 0) {
         this.day = saved.day; this.total = saved.total;
+        if (Number.isInteger(saved.calls) && (saved.calls as number) >= 0) this.calls = saved.calls as number;
         if (saved.cards && typeof saved.cards === 'object') for (const [id, usd] of Object.entries(saved.cards)) if (typeof usd === 'number' && usd >= 0) this.cards.set(id, { spent: usd, held: 0 });
       }
     } catch { /* nothing saved today */ }
   }
 
   private dayKey(): string { const d = new Date(this.now()); return `${d.getFullYear()}-${d.getMonth() + 1}-${d.getDate()}`; }
-  private roll(): void { const key = this.dayKey(); if (key !== this.day) { this.day = key; this.total = 0; this.held = 0; for (const card of this.cards.values()) { card.spent = 0; } } }
+  private roll(): void { const key = this.dayKey(); if (key !== this.day) { this.day = key; this.total = 0; this.calls = 0; this.held = 0; for (const card of this.cards.values()) { card.spent = 0; } } }
   private card(id: string): { spent: number; held: number } { let card = this.cards.get(id); if (!card) { card = { spent: 0, held: 0 }; this.cards.set(id, card); } return card; }
 
   today(): number { this.roll(); return this.total; }
+  callsToday(): number { this.roll(); return this.calls; }
   ofCard(id: string): number { this.roll(); return this.cards.get(id)?.spent ?? 0; }
 
   /**
@@ -205,7 +218,7 @@ class Spend {
     let done = false;
     const free = (): void => { if (done) return; done = true; this.held = Math.max(0, this.held - estimate); card.held = Math.max(0, card.held - estimate); };
     return {
-      commit: cost => { free(); const usd = cost ?? estimate; this.total += usd; card.spent += usd; this.save(); },
+      commit: cost => { free(); const usd = cost ?? estimate; this.total += usd; this.calls++; card.spent += usd; this.save(); },
       release: free
     };
   }
@@ -215,7 +228,7 @@ class Spend {
   private save(): void {
     if (!this.file) return;
     try {
-      writeFileSync(`${this.file}.tmp`, JSON.stringify({ day: this.day, total: this.total, cards: Object.fromEntries([...this.cards].map(([id, card]) => [id, card.spent])) }), { mode: 0o600 });
+      writeFileSync(`${this.file}.tmp`, JSON.stringify({ day: this.day, total: this.total, calls: this.calls, cards: Object.fromEntries([...this.cards].map(([id, card]) => [id, card.spent])) }), { mode: 0o600 });
       renameSync(`${this.file}.tmp`, this.file);
     } catch { /* kept in memory */ }
   }
@@ -225,6 +238,8 @@ class Spend {
 class UsageReader {
   private rest = '';
   usage: { in: number | null; out: number | null; cost: number | null } = { in: null, out: null, cost: null };
+  /** Characters of answer text, reasoning and tool arguments streamed (for an estimate when usage never comes). */
+  streamedChars = 0;
   push(text: string): void {
     const lines = (this.rest + text).split('\n');
     this.rest = lines.pop() ?? '';
@@ -241,8 +256,17 @@ class UsageReader {
     if (typeof u.cost === 'number' && Number.isFinite(u.cost) && u.cost >= 0) this.usage.cost = u.cost;
   }
   private line(line: string): void {
-    if (!line.startsWith('data:') || !line.includes('"usage"')) return;
-    try { this.json(JSON.parse(line.slice(5).trim())); } catch { /* not JSON */ }
+    if (!line.startsWith('data:')) return;
+    const data = line.slice(5).trim();
+    if (!data || data === '[DONE]') return;
+    let value: unknown;
+    try { value = JSON.parse(data); } catch { return; }
+    for (const choice of Array.isArray((value as { choices?: unknown })?.choices) ? (value as { choices: Array<{ delta?: Record<string, unknown> }> }).choices : []) {
+      const delta = choice?.delta ?? {};
+      for (const key of ['content', 'reasoning', 'reasoning_content']) if (typeof delta[key] === 'string') this.streamedChars += (delta[key] as string).length;
+      if (Array.isArray(delta.tool_calls)) for (const call of delta.tool_calls as Array<{ function?: { arguments?: unknown } }>) if (typeof call?.function?.arguments === 'string') this.streamedChars += call.function.arguments.length;
+    }
+    if (data.includes('"usage"')) this.json(value);
   }
 }
 
@@ -286,6 +310,21 @@ export class AutoRouter {
     this.salt = this.loadSalt();
     this.spend = new Spend(deps.directory, this.now);
     this.loadOutcomes();
+    this.loadRecent();
+  }
+
+  /** The last decisions from the log (no text in it), so the page shows them after a restart too. */
+  private loadRecent(): void {
+    if (!this.deps.directory) return;
+    try {
+      const lines = readFileSync(join(this.deps.directory, 'decisions.jsonl'), 'utf8').trim().split('\n').slice(-ROUTER_LIMITS.recent);
+      for (const line of lines.reverse()) {
+        try {
+          const record = JSON.parse(line) as DecisionRecord;
+          if (record && typeof record.at === 'number' && typeof record.kind === 'string') this.recentRecords.push(record);
+        } catch { /* a cut line */ }
+      }
+    } catch { /* none yet */ }
   }
 
   private outcomesFile(): string | null { return this.deps.directory ? join(this.deps.directory, 'fanout-outcomes.json') : null; }
@@ -407,8 +446,8 @@ export class AutoRouter {
   async resume(): Promise<void> { if (this.tokens.size > 0) await this.start().catch(error => this.deps.log?.('warn', `Auto (Jev): the router could not listen: ${String(error).slice(0, 120)}`)); }
 
   recent(): DecisionRecord[] { return [...this.recentRecords]; }
-  statsView(): RouterStats & { spentToday: number; listening: boolean; cards: number } {
-    return { ...this.stats, hosts: [...this.hosts], spentToday: Math.round(this.spend.today() * 1e6) / 1e6, listening: !!this.server, cards: this.tokens.size };
+  statsView(): RouterStats & { spentToday: number; callsToday: number; listening: boolean; cards: number } {
+    return { ...this.stats, hosts: [...this.hosts], spentToday: Math.round(this.spend.today() * 1e6) / 1e6, callsToday: this.spend.callsToday(), listening: !!this.server, cards: this.tokens.size };
   }
 
   // ---------------------------------------------------------------------------------------------------------------
@@ -748,26 +787,43 @@ export class AutoRouter {
         take(first.value);
         response.write(first.value);
         let failed = false;
-        for (;;) {
-          clearTimeout(timer);
-          timer = setTimeout(() => attempt.abort(), stream ? this.timeouts.idleMs : this.timeouts.totalMs);
-          let next: ReadableStreamReadResult<Uint8Array>;
-          try { next = await reader.read(); } catch { failed = true; break; }
-          if (next.done) break;
-          take(next.value);
-          if (!response.write(next.value)) await new Promise<void>(resolve => { response.once('drain', resolve); response.once('close', resolve); });
-          if (response.destroyed) { failed = true; break; }
-        }
+        let stalled: 'idle' | 'deadline' | null = null;
+        // Progress is real data only: keep-alive comments do not hold the idle timer off. The whole answer has its
+        // own deadline from the first byte (longer for the long-reasoning efforts).
+        const idle = (): void => { clearTimeout(timer); timer = setTimeout(() => { stalled ??= 'idle'; attempt.abort(); }, stream ? this.timeouts.idleMs : this.timeouts.totalMs); };
+        idle();
+        const turnLimit = entry.effort && LONG_EFFORTS.has(entry.effort) ? this.timeouts.turnXhighMs : this.timeouts.turnMs;
+        const deadline = setTimeout(() => { stalled ??= 'deadline'; attempt.abort(); }, stream ? turnLimit : this.timeouts.totalMs);
+        try {
+          for (;;) {
+            let next: ReadableStreamReadResult<Uint8Array>;
+            try { next = await reader.read(); } catch { failed = true; break; }
+            if (next.done) break;
+            if (stalled) { failed = true; break; }
+            take(next.value);
+            if (!stream || meaningful(Buffer.from(next.value).toString('utf8'))) idle();
+            if (!response.write(next.value)) await new Promise<void>(resolve => { response.once('drain', resolve); response.once('close', resolve); });
+            if (response.destroyed) { failed = true; break; }
+          }
+        } finally { clearTimeout(deadline); }
         if (stream) usage.end(); else { try { usage.json(JSON.parse(chunks.join(''))); } catch { /* no usage */ } }
         record.tokensIn = usage.usage.in; record.tokensOut = usage.usage.out;
         this.sawOutput(grant.sessionId, usage.usage.out);
-        const cost = this.costOf(entry, usage.usage);
+        let cost = this.costOf(entry, usage.usage);
+        if (cost === null && (entry.priceIn !== null || entry.priceOut !== null)) {
+          // No usage came (a cut or stalled stream): the input at its price and what streamed at the output price, so
+          // the day's spend is not counted low; marked as an estimate.
+          cost = ((payload.length / 4) * (entry.priceIn ?? 0) + (usage.streamedChars / 4) * (entry.priceOut ?? 0)) / 1e6;
+          record.costEstimated = true;
+          record.tokensOut ??= Math.ceil(usage.streamedChars / 4);
+        }
         record.costUsd = cost;
         reservation.commit(cost);
         if (failed && !controller.signal.aborted && !response.destroyed) {
           // Never replayed: the CLI got part of an answer; it sees an error and decides itself.
-          response.write(stream ? `data: ${JSON.stringify({ error: { message: 'Auto (Jev): the upstream stopped in the middle of the answer.', type: 'canvastty_auto', code: 'upstream_interrupted' } })}\n\n` : '');
-          record.status = 502; record.reason ||= 'interrupted';
+          const message = stalled === 'deadline' ? 'Auto (Jev): the answer took longer than this turn may take; it was ended.' : stalled === 'idle' ? 'Auto (Jev): the upstream sent nothing new for too long; the answer was ended.' : 'Auto (Jev): the upstream stopped in the middle of the answer.';
+          response.write(stream ? `data: ${JSON.stringify({ error: { message, type: 'canvastty_auto', code: stalled === 'deadline' ? 'turn_deadline' : stalled === 'idle' ? 'upstream_idle' : 'upstream_interrupted' } })}\n\ndata: [DONE]\n\n` : '');
+          record.status = stalled === 'deadline' ? 504 : 502; if (stalled) record.reason = stalled === 'deadline' ? 'turn_deadline' : 'upstream_idle'; else record.reason ||= 'interrupted';
         } else record.status = controller.signal.aborted ? 499 : 200;
         response.end();
         return;

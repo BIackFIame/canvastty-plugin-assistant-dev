@@ -255,7 +255,8 @@ test('decision models page: Auto (Jev) rows in Russian and English — upstreams
   assert.match(ru, /Поставщики/u);
   assert.match(ru, /Ключ Jev · OpenRouter/u);
   assert.match(ru, /Предпочтение .*Сбалансированно/u);
-  assert.match(ru, /Предел в день, USD/u);
+  assert.match(ru, /На окно, USD/u);
+  assert.doesNotMatch(ru, /Предел в день, USD/u, 'the daily limit is in the short view only');
   assert.match(ru, /ход · средняя · qwen\/qwen3-coder/u);
   assert.doesNotMatch(ru, /Model calls|Upstreams/u, 'no English left in the Auto rows');
   // Add an OpenAI-compatible upstream on this computer: the service gets the whole Auto settings to validate.
@@ -512,10 +513,10 @@ test('decision models page: a short default view (Auto, one key, preference, dai
   assert.equal(advanced.open, false, 'Advanced starts closed');
   assert.ok(controls().length <= 9, `a short default view (${controls().length} controls)`);
   const quick = ui.app.all().find(node => node.dataset?.section === 'quick').text();
-  assert.match(quick, /Auto \(Jev\) Auto .* OpenRouter key not saved/u);
+  assert.match(quick, /Auto \(Jev\) Auto .* OpenRouter key Not saved\./u);
   assert.match(quick, /Cheaper Balanced Better/u);
   assert.match(quick, /Daily limit, \$/u);
-  assert.match(quick, /\$0\.39 · 14 calls google\/gemini-3\.1-pro-preview · writing, large · several models · \$0\.1840/u);
+  assert.match(quick, /\$0\.39 google\/gemini-3\.1-pro-preview · writing, large · several models · \$0\.1840/u);
   assert.doesNotMatch(quick, /D0|D1|D2|D3|tier|effort|upstream|cohort|8 \/ 5 \/ 3/u, 'no jargon in the default view');
   // Paste the key: the Jev · OpenRouter decision model is added, the key stored for OpenRouter's address only, then the service sets Jev and Auto up.
   const key = ['sk', 'or', 'v1', 'a'.repeat(24)].join('-');
@@ -528,7 +529,7 @@ test('decision models page: a short default view (Auto, one key, preference, dai
   assert.ok(ui.requests.some(r => r.method === 'quickKeySaved' && r.params.backendId === main.settings.backends[0].id));
   assert.equal(input.value, '', 'cleared once stored');
   await settle();
-  assert.match(ui.app.all().find(node => node.dataset?.section === 'quick').text(), /OpenRouter key saved/u);
+  assert.match(ui.app.all().find(node => node.dataset?.section === 'quick').text(), /OpenRouter key Saved\./u);
   // Auto off: every upstream off (the person's list stays).
   const toggle = ui.app.all().find(node => node.name === 'auto-on');
   assert.equal(toggle.checked, true);
@@ -539,10 +540,38 @@ test('decision models page: a short default view (Auto, one key, preference, dai
   // Russian: the same view, no English.
   ui.context('ru', 'night');
   const ru = ui.app.all().find(node => node.dataset?.section === 'quick').text();
-  assert.match(ru, /Ключ OpenRouter сохранён/u);
+  assert.match(ru, /Ключ OpenRouter Сохранён\./u);
   assert.match(ru, /Дешевле Сбалансированно Лучше/u);
   assert.match(ru, /Предел в день, \$/u);
   assert.match(ru, /исследование|тексты/u);
   assert.doesNotMatch(ru, /Auto[^ ]|Cheaper|Daily|calls|several|saved|writing/u, 'no English in the Russian default view');
   assert.match(ui.app.all().find(node => node.tagName === 'DETAILS').text(), /Дополнительно/u);
+});
+
+test('re-audit: today is consistent after a restart; a model on your own server is behind its link; no daily limit twice; plain words in Advanced', async () => {
+  const { DEFAULT_ASSISTANT_SETTINGS } = await import('../src/shared/settings.ts');
+  const auto = {
+    jevKey: true,
+    settings: { upstreams: [{ id: 'openrouter', preset: 'openrouter', baseUrl: 'https://openrouter.ai/api/v1', trust: 'D1', key: 'jev', models: [], allModels: true, excluded: [], enabled: true }], preference: 'balanced', cheaperFallback: false, decider: 'jev', dailyUsdCap: 1, perCardUsdCap: 0.4, catalog: { autoRefresh: true, refreshHours: 168 } },
+    readable: true, keys: { openrouter: true }, recent: [],
+    // After a restart: this run made no calls yet, the day's spend and paid calls come from disk.
+    stats: { requests: 0, turns: 0, continuations: 0, small: 0, jevAsked: 0, jevAnswered: 0, rules: 0, leaseReuses: 0, failovers: 0, hosts: [], spentToday: 0.39, callsToday: 14, listening: false, cards: 0 }
+  };
+  const ui = page('settings/assistant.js', {
+    state: { settings: structuredClone(DEFAULT_ASSISTANT_SETTINGS), status: { enabled: false, backends: [] }, slots: {}, checks: {}, recent: [] },
+    'auto.state': auto, 'auto.save': ({ settings }) => settings
+  }, { secrets: { set: async () => undefined, delete: async () => undefined } });
+  await settle();
+  ui.context('ru', 'night');
+  const quick = ui.app.all().find(node => node.dataset?.section === 'quick').text();
+  assert.match(quick, /\$0\.39 · вызовов: 14/u);
+  assert.doesNotMatch(quick, /Ходов пока не было/u, 'no "nothing yet" next to a spend');
+  const all = ui.app.all();
+  const presets = all.find(node => node.name === 'preset').children.map(option => option.value);
+  assert.ok(!presets.includes('emulated') && !presets.includes('laya') && presets.includes('openrouter'), presets.join());
+  all.find(node => node.name === 'add-local').click();
+  assert.ok(ui.app.all().find(node => node.name === 'preset').children.some(option => option.value === 'emulated'), 'shown after the link');
+  assert.equal(ui.app.all().filter(node => node.name === 'auto-daily').length, 0, 'the daily limit only in the short view');
+  const text = ui.app.text();
+  assert.doesNotMatch(text, /R²|пояснени|окна качества|баллов от лучшей|typesafe|TypeSafe/u, 'no jargon left');
 });

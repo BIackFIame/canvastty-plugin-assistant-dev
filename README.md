@@ -36,6 +36,8 @@ The Assistant only knows the orchestrator's task as **yours** from what reaches 
 
 **Tests under the trust chain.** It also lets such a subagent run its tests when the command is a plain known runner (`node --test <files>`, `pytest <files>`, or `npm`/`pnpm`/`yarn test` whose package.json the review saw or git tracks unchanged, with a plain runner as its test script and no pre/post scripts or package-manager config) and every file it runs or imports is one the review allowed whole in this card (same content now) or is committed and unchanged; the review must be at least 75% sure it serves the task, every risk but a hidden effect at most 10%. Shell syntax, packages, dynamic imports, `go test` and `cargo test` still go to you. The review log says `trust-chain-test`.
 
+**Compound commands under the trust chain.** `a; b` or `a && b` (nothing else: no pipes, redirects, subshells or `&`) is allowed when every part is allowed on its own (read-only, inspection or its tests). OpenCode's edit with its old and new text counts as a rewrite of the card's own file once CanvasTTY passes that text on (1.8.2 passes only the new text).
+
 **Looking and fixing under the trust chain.** Such a subagent may also run plain inspection inside the project (`pwd`, `ls`, `cat`/`head`/`tail`/`wc` of files, `git status`/`diff`/`log` with plain flags in a repository whose own config runs no pager or diff program; never secrets, protected paths or `.git`), and rewrite a file it wrote itself earlier, when nobody changed it since: a whole new content, or an edit with its old and new text that is reviewed as the whole resulting file, under the same bars as a new file with every other risk at most 10%. OpenCode's edit as CanvasTTY 1.8.2 sends it cannot be told from a partial edit and still goes to you. The log says `trust-chain-inspect` or `trust-chain-own-file`.
 
 For a longer task, put its first line in the Task field (with the file names the subagents will create) and the details in your first message to the orchestrator. Without the Task field, an orchestrator on a model account or its own sign-in gets no trust chain, and its subagents' writes go to you as before.
@@ -175,6 +177,7 @@ model account (an account and Auto on one launch are refused: both configure Ope
   failed one down (429 honours `Retry-After`); so does a 400 that names an unknown model id (OpenRouter's "is not a
   valid model ID", cooled down 15 min); any other bad request (400) is returned; a stream that fails midway ends with an
   error and is never replayed.
+- **Stalled answers**: keep-alive comments do not count as progress (90 s idle limit), and an answer that has started may take at most 120 s (240 s at xhigh and above) before it is ended with an error; a call whose upstream never reports usage is counted at an estimate (marked so).
 - **Caps**: per card and per day in USD, held before each call so parallel calls cannot pass them; counted from the
   cost the upstream reports (OpenRouter does) or your prices. A spent cap answers 402.
 - **Several models on hard turns** (Decision models page; consensus **Auto** by default, best of N **off**): a hard
