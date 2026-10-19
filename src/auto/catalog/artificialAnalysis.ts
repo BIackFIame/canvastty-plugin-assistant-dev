@@ -1,5 +1,5 @@
 import { isEffort, type ReasoningEffort } from './identity.ts';
-import type { CatalogBenchmark } from './catalog.ts';
+import type { CatalogBenchmark, CatalogSpeed } from './catalog.ts';
 
 /**
  * Artificial Analysis: the public model page carries its comparison rows (each variant with its effort) as React
@@ -9,6 +9,10 @@ import type { CatalogBenchmark } from './catalog.ts';
  * lacks (catalog.ts, mergePartialRefresh). The page is read as text: no key, no script runs. Only measured values are kept:
  * an estimated Intelligence Index is dropped, and a variant whose reasoning setup is not an exact effort keeps that
  * label in `thinking`, which routing never scores.
+ *
+ * Speed: each full row carries `performanceByPromptType.medium` (AA's medium prompt, medians on the model's
+ * reference endpoint): `medianOutputSpeed` (output tokens per second) and `medianTimeToFirstChunk` (seconds). They are
+ * kept as the row's `speed` when the page states them; a row without them has no speed.
  */
 export const ARTIFICIAL_ANALYSIS_URL = 'https://artificialanalysis.ai/models/glm-5-3';
 export const ARTIFICIAL_ANALYSIS_METHODOLOGY = 'https://artificialanalysis.ai/methodology';
@@ -23,6 +27,16 @@ const text = (v: unknown, max = 256): string => {
 const slug = (v: unknown): string => { const s = text(v); if (!/^[A-Za-z0-9][A-Za-z0-9._-]*$/.test(s)) throw Error('Invalid Artificial Analysis slug'); return s; };
 const points = (v: unknown): number | null => typeof v === 'number' && Number.isFinite(v) && v >= 0 && v <= 100 ? v : null;
 const percent = (v: unknown): number | null => typeof v === 'number' && Number.isFinite(v) && v >= 0 && v <= 1 ? v * 100 : null;
+const round = (v: number, digits: number): number => Math.round(v * 10 ** digits) / 10 ** digits;
+
+/** The medium-prompt medians, when both are plausible numbers (output speed alone is enough; latency may be missing). */
+export function speedOf(row: Record<string, unknown>): CatalogSpeed | null {
+  const medium = object(object(row.performanceByPromptType)?.medium);
+  const tps = medium?.medianOutputSpeed;
+  if (typeof tps !== 'number' || !Number.isFinite(tps) || tps < 0.1 || tps > 100_000) return null;
+  const latency = medium?.medianTimeToFirstChunk;
+  return { outputTps: round(tps, 2), latencyS: typeof latency === 'number' && Number.isFinite(latency) && latency >= 0 && latency <= 3_600 ? round(latency, 3) : null };
+}
 
 export function normalizeArtificialAnalysis(html: string, fetchedAt: number): CatalogBenchmark[] {
   if (Buffer.byteLength(html) > ARTIFICIAL_ANALYSIS_BYTES) throw Error('Artificial Analysis response too large');
@@ -67,6 +81,8 @@ export function normalizeArtificialAnalysis(html: string, fetchedAt: number): Ca
         overall: measured,
         source: { kind: 'artificial-analysis', url: ARTIFICIAL_ANALYSIS_URL, releaseDate: null, fetchedAt, indexVersion, modelUrl: `https://artificialanalysis.ai/models/${modelSlug}` }
       };
+      const speed = speedOf(row);
+      if (speed) benchmark.speed = speed;
       const prior = rows.get(benchmark.id);
       if (prior && JSON.stringify(prior) !== JSON.stringify(benchmark)) throw Error('Conflicting duplicate Artificial Analysis variant');
       rows.set(benchmark.id, benchmark);
