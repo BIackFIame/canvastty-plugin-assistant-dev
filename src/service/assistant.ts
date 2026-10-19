@@ -20,6 +20,7 @@ import { clampClass } from '../auto/launch.ts';
 import type { RouterDeps } from '../auto/router.ts';
 import { decisionFromTriage, type TurnDecision } from '../auto/select.ts';
 import { RouteService } from '../route/service.ts';
+import { DEFAULT_MAX_PARALLEL } from '../route/settings.ts';
 
 /**
  * The Assistant service: one process that answers CanvasTTY's decision hook (command review), its launch pipeline
@@ -117,6 +118,10 @@ export class Assistant {
       // Each new user turn is the task command review checks this card's actions against (memory only).
       turn: (text, grant) => this.review.noteTurn(grant.sessionId, text, { role: grant.role, parentSessionId: grant.parentSessionId }),
       publishBadge: (sessionId, badge) => { void this.harness.setBadge(sessionId, 'model', badge); },
+      // A fan-out keeps a subscription-like upstream (an address the person marked flat-rate) at its parallel cap.
+      parallelCap: upstream => {
+        try { return this.routing.settings.flat.includes(`host:${new URL(upstream.baseUrl).host}`) ? DEFAULT_MAX_PARALLEL : null; } catch { return null; }
+      },
       ...(options.transport ? { transport: options.transport } : {}),
       ...(options.catalogTransport ? { catalogTransport: options.catalogTransport } : {}),
       ...(options.now ? { now: options.now } : {}),

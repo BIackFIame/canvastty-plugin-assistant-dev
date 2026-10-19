@@ -1,7 +1,7 @@
 import type { RoutingCatalog } from './catalog/catalog.ts';
 import type { ReasoningEffort } from './catalog/identity.ts';
 import { offeredByDefault, type OpenRouterModel } from './catalog/openrouter.ts';
-import { BenchmarkIndex, bareModelId, chooseCohort, TASK_TYPES, variantScores, type MatchContext, type Score, type TaskType } from './catalog/scoring.ts';
+import { BenchmarkIndex, bareModelId, chooseCohort, TASK_TYPES, variantScores, type MatchContext, type MeasuredSpeed, type Score, type TaskType } from './catalog/scoring.ts';
 import type { AutoModel, AutoRoutingSettings, AutoTier, AutoUpstream } from './settings.ts';
 
 /**
@@ -40,6 +40,8 @@ export interface InventoryEntry {
   measuredEfforts: ReasoningEffort[];
   /** Scores in the decision's cohort for each task type (absent: unknown). */
   scores: Partial<Record<TaskType, Score>>;
+  /** Measured speed of exactly this model and effort (Artificial Analysis), or null: unknown. */
+  speed: MeasuredSpeed | null;
 }
 
 export interface Inventory {
@@ -107,7 +109,7 @@ export function buildInventory(settings: AutoRoutingSettings, catalog: RoutingCa
       }
       for (const variant of efforts) {
         if (entries.length >= MAX_INVENTORY) break;
-        const entry: InventoryEntry = { key: `${upstream.id}|${id}|${variant.effort ?? ''}`, ...base, effort: variant.effort, sendEffort: variant.send, scores: {} };
+        const entry: InventoryEntry = { key: `${upstream.id}|${id}|${variant.effort ?? ''}`, ...base, effort: variant.effort, sendEffort: variant.send, scores: {}, speed: bare ? index.speed(bare, variant.effort, context) : null };
         entries.push(entry);
         const maps = new Map<TaskType, Map<string, Score>>();
         for (const type of TASK_TYPES) maps.set(type, variantScores(index, bare, variant.effort, context, type));

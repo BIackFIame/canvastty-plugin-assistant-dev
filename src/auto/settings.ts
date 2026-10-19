@@ -60,6 +60,17 @@ export interface AutoCatalogSettings {
   refreshHours: number;
 }
 
+/**
+ * Several models on one hard turn (request level, text turns only; see consensus.ts). `consensus`: off; auto (only when
+ * its expected value beats the single strong model); always (every eligible hard turn the caps allow). `bestOfN`:
+ * compare and keep the best draft instead of merging — only when the person turns it on. `k` models at most (≤ 3),
+ * and the whole fan-out of one turn (drafts + judge) within `turnUsdCap` and the daily and per-card caps.
+ */
+export type ConsensusMode = 'off' | 'auto' | 'always';
+export const CONSENSUS_MODES: readonly ConsensusMode[] = ['off', 'auto', 'always'];
+export interface AutoStrategySettings { consensus: ConsensusMode; k: number; bestOfN: boolean; turnUsdCap: number }
+export const MAX_CONSENSUS_K = 3;
+
 export interface AutoRoutingSettings {
   upstreams: AutoUpstream[];
   preference: AutoPreference;
@@ -70,6 +81,7 @@ export interface AutoRoutingSettings {
   dailyUsdCap: number;
   perCardUsdCap: number;
   catalog: AutoCatalogSettings;
+  strategy: AutoStrategySettings;
 }
 
 export const OPENROUTER_BASE_URL = 'https://openrouter.ai/api/v1';
@@ -81,10 +93,11 @@ export const DEFAULT_OUTPUT = 8_192;
 
 export const DEFAULT_AUTO_SETTINGS: AutoRoutingSettings = {
   upstreams: [], preference: 'balanced', cheaperFallback: false, decider: 'jev', dailyUsdCap: 1, perCardUsdCap: 0.4,
-  catalog: { autoRefresh: true, refreshHours: 168 }
+  catalog: { autoRefresh: true, refreshHours: 168 },
+  strategy: { consensus: 'auto', k: 3, bestOfN: false, turnUsdCap: 1 }
 };
 /** Fields older saved settings may lack: filled with these. */
-const OPTIONAL_KEYS = ['catalog'];
+const OPTIONAL_KEYS = ['catalog', 'strategy'];
 
 const ID = /^[a-z0-9][a-z0-9-]{0,23}$/u;
 const MODEL_ID = /^[A-Za-z0-9][A-Za-z0-9._:/@+-]{0,159}$/u;
@@ -165,7 +178,15 @@ export function validateAutoSettings(value: unknown): AutoRoutingSettings {
   if (!isRecord(catalog)) fail('Invalid catalog settings.');
   only(catalog, ['autoRefresh', 'refreshHours'], 'Catalog settings');
   if (typeof catalog.autoRefresh !== 'boolean' || !Number.isInteger(catalog.refreshHours) || (catalog.refreshHours as number) < 1 || (catalog.refreshHours as number) > 720) fail('Catalog refresh: every 1 to 720 hours.');
-  return { upstreams, preference: value.preference as AutoPreference, cheaperFallback: value.cheaperFallback, decider: value.decider, dailyUsdCap: value.dailyUsdCap as number, perCardUsdCap: value.perCardUsdCap as number, catalog: { autoRefresh: catalog.autoRefresh, refreshHours: catalog.refreshHours as number } };
+  const strategy = value.strategy ?? DEFAULT_AUTO_SETTINGS.strategy;
+  if (!isRecord(strategy)) fail('Invalid strategy settings.');
+  only(strategy, ['consensus', 'k', 'bestOfN', 'turnUsdCap'], 'Strategy settings');
+  if (!CONSENSUS_MODES.includes(strategy.consensus as ConsensusMode)) fail('Invalid consensus choice.');
+  if (!Number.isInteger(strategy.k) || (strategy.k as number) < 2 || (strategy.k as number) > MAX_CONSENSUS_K) fail(`Consensus: 2 to ${MAX_CONSENSUS_K} models.`);
+  if (typeof strategy.bestOfN !== 'boolean') fail('Invalid best-of-N choice.');
+  if (!usd(strategy.turnUsdCap)) fail('Caps are USD from 0 to 100.');
+  return { upstreams, preference: value.preference as AutoPreference, cheaperFallback: value.cheaperFallback, decider: value.decider, dailyUsdCap: value.dailyUsdCap as number, perCardUsdCap: value.perCardUsdCap as number, catalog: { autoRefresh: catalog.autoRefresh, refreshHours: catalog.refreshHours as number },
+    strategy: { consensus: strategy.consensus as ConsensusMode, k: strategy.k as number, bestOfN: strategy.bestOfN, turnUsdCap: strategy.turnUsdCap as number } };
 }
 
 /** As saved, made valid: a bad upstream disables only itself; other fields fall back to their defaults alone. */

@@ -7,7 +7,7 @@ import type { CatalogStatus } from '../auto/catalog/catalog.ts';
 import { EFFORTS } from '../auto/catalog/identity.ts';
 import type { DecisionRecord, RouterStats } from '../auto/router.ts';
 import type { ModelRow } from '../auto/service.ts';
-import type { AutoModel, AutoRoutingSettings, AutoTier, AutoUpstream } from '../auto/settings.ts';
+import { DEFAULT_AUTO_SETTINGS, type AutoModel, type AutoRoutingSettings, type AutoStrategySettings, type AutoTier, type AutoUpstream } from '../auto/settings.ts';
 import { el } from './common.ts';
 
 export interface AutoState {
@@ -72,6 +72,13 @@ export const AUTO_PAGE_STRINGS = {
     decider: 'Who judges a turn', deciderJev: 'Jev, word rules when it does not answer', deciderRules: 'Word rules only',
     daily: 'Daily cap, USD', perCard: 'Per card, USD', capsHelp: 'Counted from the cost the upstream reports, or from the catalog\'s prices. 0 stops Auto.',
     save: 'Save',
+    strategies: 'Several models on hard turns', consensus: 'Consensus', consensusMode: { off: 'Off', auto: 'Auto: only when it pays', always: 'Always for hard turns' } as Record<string, string>,
+    models_k: 'Models in a consensus', bestOfN: 'Compare several models and keep the best answer (best of N)', turnCap: 'At most per turn, USD',
+    strategyHelp: 'Only hard text turns (architecture, design, research, review, writing) of an agent card; never a tool step, a title or an orchestrator. One very strong model answers by default. Consensus asks 2–3 slightly weaker models from different vendors (up to 8 points below the best), then a strong model merges their drafts; on Auto only when its expected value beats the single model: the judge\'s score plus 1.5 points per extra vendor (at most 3), minus its cost (Cheap ×3, Balanced ×1, Best ×0 per doubling) and its wait (when speeds are known). Best of N (off unless you turn it on) compares instead of merging. A draft that calls a tool makes the turn a normal one: the single model\'s answer is used and the others stop. Every draft and the judge are reserved against the caps first; a plan address marked flat-rate takes at most 2 at once.',
+    strategyOf: { single: 'one model', consensus: 'consensus', 'best-of-n': 'best of N' } as Record<string, string>,
+    fanOutcome: { merged: 'merged', picked: 'best picked', tool_calls: 'tool call: one model', one_draft: 'one draft left', no_draft: 'no draft: one model', judge_failed: 'judge failed: best draft' } as Record<string, string>,
+    drafts: (ok: number, all: number) => `${ok} of ${all} drafts`,
+    fanStats: (s: AutoState['stats']) => s.fanOuts ? ` Several models: ${s.fanOuts} turns, ${s.merged} merged, ${s.fanOutToolCalls} turned out to call tools, ${s.fanOutDegraded} with drafts missing, ${s.judgeFailed} judge failures.` : '',
     recent: 'Recent decisions', noRecent: 'Nothing routed yet.',
     stats: (s: AutoState['stats']) => `${s.requests} model calls, Jev asked ${s.jevAsked} times (${s.jevAnswered} answered), ${s.leaseReuses} reused a turn's choice, ${s.failovers} failovers; today $${s.spentToday.toFixed(4)}; ${s.listening ? `listening for ${s.cards} card(s)` : 'not listening'}${s.hosts.length ? `; sent to ${s.hosts.join(', ')}` : ''}.`,
     kind: { turn: 'turn', continuation: 'tool step', small: 'title' } as Record<string, string>,
@@ -113,6 +120,13 @@ export const AUTO_PAGE_STRINGS = {
     decider: 'Кто оценивает ход', deciderJev: 'Jev, словесные правила, если он не ответил', deciderRules: 'Только словесные правила',
     daily: 'Предел в день, USD', perCard: 'На окно, USD', capsHelp: 'Считается по стоимости, которую сообщает поставщик, или по ценам каталога. 0 останавливает «Авто».',
     save: 'Сохранить',
+    strategies: 'Несколько моделей на сложных ходах', consensus: 'Консенсус', consensusMode: { off: 'Выключен', auto: 'Авто: только когда окупается', always: 'Всегда на сложных ходах' } as Record<string, string>,
+    models_k: 'Моделей в консенсусе', bestOfN: 'Сравнивать несколько моделей и оставлять лучший ответ (лучший из N)', turnCap: 'Не больше за ход, USD',
+    strategyHelp: 'Только сложные текстовые ходы (архитектура, дизайн, исследование, ревью, тексты) окна агента; никогда шаг инструмента, заголовок или оркестратор. По умолчанию отвечает одна очень сильная модель. Консенсус спрашивает 2–3 чуть более слабые модели разных производителей (до 8 баллов ниже лучшей), затем сильная модель сводит их черновики; в режиме «Авто» — только когда ожидаемая польза выше, чем у одной модели: оценка судьи плюс 1,5 балла за каждого другого производителя (не больше 3) минус стоимость («Дешевле» ×3, «Сбалансированно» ×1, «Лучше» ×0 за каждое удвоение) и ожидание (когда скорости известны). «Лучший из N» (выключен, пока вы его не включите) сравнивает вместо сведения. Если черновик вызывает инструмент, ход становится обычным: берётся ответ одной модели, остальные останавливаются. Все черновики и судья сначала резервируются в пределах лимитов; адрес плана с фиксированным тарифом получает не больше 2 запросов одновременно.',
+    strategyOf: { single: 'одна модель', consensus: 'консенсус', 'best-of-n': 'лучший из N' } as Record<string, string>,
+    fanOutcome: { merged: 'сведено', picked: 'выбран лучший', tool_calls: 'вызов инструмента: одна модель', one_draft: 'остался один черновик', no_draft: 'нет черновиков: одна модель', judge_failed: 'судья не ответил: лучший черновик' } as Record<string, string>,
+    drafts: (ok: number, all: number) => `черновиков: ${ok} из ${all}`,
+    fanStats: (s: AutoState['stats']) => s.fanOuts ? ` Несколько моделей: ходов ${s.fanOuts}, сведено ${s.merged}, оказались с инструментами ${s.fanOutToolCalls}, без части черновиков ${s.fanOutDegraded}, отказов судьи ${s.judgeFailed}.` : '',
     recent: 'Последние решения', noRecent: 'Пока ничего не маршрутизировано.',
     stats: (s: AutoState['stats']) => `Вызовов моделей: ${s.requests}, Jev спрошен ${s.jevAsked} раз (ответил ${s.jevAnswered}), решение хода повторно: ${s.leaseReuses}, переключений: ${s.failovers}; сегодня $${s.spentToday.toFixed(4)}; ${s.listening ? `слушает, окон: ${s.cards}` : 'не слушает'}${s.hosts.length ? `; отправлено на ${s.hosts.join(', ')}` : ''}.`,
     kind: { turn: 'ход', continuation: 'шаг инструмента', small: 'заголовок' } as Record<string, string>,
@@ -174,12 +188,32 @@ export function renderAuto(state: AutoState, t: Strings, page: AutoPageHost, vie
   section.append(el('div', { className: 'row' }, el('span', { className: 'label', textContent: t.daily }), daily, el('span', { textContent: t.perCard }), perCard, saveCaps),
     el('p', { className: 'muted', textContent: t.capsHelp }));
 
-  section.append(el('h2', { textContent: t.recent }), el('p', { className: 'muted', textContent: t.stats(state.stats), dataset: { auto: 'stats' } }));
+  section.append(strategySection(settings, t, save));
+
+  section.append(el('h2', { textContent: t.recent }), el('p', { className: 'muted', textContent: t.stats(state.stats) + t.fanStats(state.stats), dataset: { auto: 'stats' } }));
   const recent = el('ul', { className: 'recent', dataset: { auto: 'recent' } });
   if (!state.recent.length) recent.append(el('li', { className: 'muted', textContent: t.noRecent }));
   for (const record of state.recent.slice(0, 20)) recent.append(recentRow(record, t));
   section.append(recent);
   return section;
+}
+
+/** Several models on hard turns: consensus mode, K, best of N (off by default), the cap per turn. */
+function strategySection(settings: AutoRoutingSettings, t: Strings, save: (change: (next: AutoRoutingSettings) => void) => void): HTMLElement {
+  // An older service sends no strategy: its defaults are shown, and saving adds them.
+  const current: AutoStrategySettings = settings.strategy ?? DEFAULT_AUTO_SETTINGS.strategy;
+  const edit = (change: (strategy: AutoStrategySettings) => void): void => save(next => { next.strategy = { ...current }; change(next.strategy); });
+  const box = el('div', { dataset: { auto: 'strategies' } });
+  const cap = el('input', { type: 'number', name: 'auto-turn-cap', min: '0', max: '100', step: '0.01', value: String(current.turnUsdCap) });
+  const saveCap = el('button', { type: 'button', textContent: t.save, name: 'auto-turn-cap-save' });
+  saveCap.addEventListener('click', () => edit(strategy => { strategy.turnUsdCap = Number(cap.value); }));
+  box.append(el('h2', { textContent: t.strategies }),
+    labelled(t.consensus, selectOf('auto-consensus', current.consensus, (['off', 'auto', 'always'] as const).map(mode => [mode, t.consensusMode[mode]!] as [typeof mode, string]), value => edit(strategy => { strategy.consensus = value; }))),
+    labelled(t.models_k, selectOf('auto-consensus-k', String(current.k), [['2', '2'], ['3', '3']], value => edit(strategy => { strategy.k = Number(value); }))),
+    checkOf('auto-best-of-n', current.bestOfN, t.bestOfN, value => edit(strategy => { strategy.bestOfN = value; })),
+    el('div', { className: 'row' }, el('span', { className: 'label', textContent: t.turnCap }), cap, saveCap),
+    el('p', { className: 'muted', textContent: t.strategyHelp }));
+  return box;
 }
 
 /** What a decision gave up against the best-scored model for its type, when it took another one. */
@@ -207,6 +241,11 @@ function recentRow(record: DecisionRecord, t: Strings): HTMLLIElement {
   tail.push(`${t.sourceOf[record.source] ?? record.source} (${record.why ? t.why[record.why] ?? record.why : record.reason})`);
   const trade = tradeoffText(record, t);
   if (trade) tail.push(trade);
+  if (record.strategy && record.strategy !== 'single') {
+    const drafts = record.fanOut?.drafts ?? [];
+    tail.push([t.strategyOf[record.strategy] ?? record.strategy, record.fanOut?.outcome ? t.fanOutcome[record.fanOut.outcome] ?? record.fanOut.outcome : null,
+      drafts.length ? t.drafts(drafts.filter(d => d.status === 'text' || d.status === 'tool_calls').length, drafts.length) : null].filter(Boolean).join(', '));
+  } else if (record.fanOut === null && record.strategyWhy === 'single_better') tail.push(t.strategyOf.single!);
   tail.push(String(record.status));
   if (record.failovers.length) tail.push(`↷${record.failovers.length}`);
   if (record.costUsd !== null) tail.push(`$${record.costUsd.toFixed(5)}`);

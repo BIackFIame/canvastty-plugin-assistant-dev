@@ -34,6 +34,8 @@ The Assistant only knows the orchestrator's task as **yours** from what reaches 
 - the launcher's **Task** field (Advanced → CanvasTTY Assistant). CanvasTTY limits it to 200 characters;
 - or the turns of an orchestrator on Model: Auto (Jev).
 
+**Tests under the trust chain.** It also lets such a subagent run its tests when the command is a plain known runner (`node --test <files>`, `pytest <files>`, or `npm`/`pnpm`/`yarn test` whose package.json the review saw or git tracks unchanged, with a plain runner as its test script and no pre/post scripts or package-manager config) and every file it runs or imports is one the review allowed whole in this card (same content now) or is committed and unchanged; the review must be at least 75% sure it serves the task, every risk but a hidden effect at most 10%. Shell syntax, packages, dynamic imports, `go test` and `cargo test` still go to you. The review log says `trust-chain-test`.
+
 For a longer task, put its first line in the Task field (with the file names the subagents will create) and the details in your first message to the orchestrator. Without the Task field, an orchestrator on a model account or its own sign-in gets no trust chain, and its subagents' writes go to you as before.
 
 ## For orchestrators
@@ -173,6 +175,20 @@ model account (an account and Auto on one launch are refused: both configure Ope
   error and is never replayed.
 - **Caps**: per card and per day in USD, held before each call so parallel calls cannot pass them; counted from the
   cost the upstream reports (OpenRouter does) or your prices. A spent cap answers 402.
+- **Several models on hard turns** (Decision models page; consensus **Auto** by default, best of N **off**): a hard
+  text turn (design-level, or research/review/writing at the large level; never a tool step, a title, an orchestrator
+  card or a conversation that already called tools) may go to 2–3 slightly weaker models of different vendors (other
+  upstreams first; an address marked flat-rate on the routing page takes at most 2 at once) whose drafts a strong
+  model merges, streamed to the CLI. On Auto only when that pays: the judge's score + 1.5 points per extra vendor (at
+  most 3) − the single model's score − cost (Cheap ×3, Balanced ×1, Best ×0 per doubling) − wait (½ per doubling, only
+  with known speeds) > 0; **Always** skips that test. **Best of N** compares and keeps one draft. All drafts and the
+  judge are reserved against the caps and a cap per turn ($1) first. A draft that calls a tool makes the turn a
+  normal one (the single model's answer, unchanged; the others stop); a failed or late draft is dropped; a failed
+  judge leaves the best draft. Each decision records the drafts' outcomes (no text); a route failing half of ≥ 10
+  fan-outs is not asked again.
+- **Speed**: Artificial Analysis's measured output speed and time to first chunk per exact model and effort are kept
+  with the catalog (OpenRouter's public list states none). They feed plan time on the routing page and the wait in
+  the rule above; an unknown speed is neutral.
 - **Subagents**: Auto is one of `route`'s routes for OpenCode subagents (`launchOptions: {"canvastty-assistant": {"model":
   "auto"}}`, no model); a subagent's data class is never below its parent's.
 - **Privacy**: prompts go only to the upstream that answers; Jev gets only the latest user text, through the same data

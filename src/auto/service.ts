@@ -10,6 +10,7 @@ import { normalizeModelIdentity, type ReasoningEffort } from './catalog/identity
 import { upstreamAllowed } from './classify.ts';
 import { plan, type TurnView } from './select.ts';
 import { AUTO_STRINGS, badgeText } from './i18n.ts';
+import type { RouteOutcome } from './consensus.ts';
 import { buildInventory, type Inventory, type InventoryEntry } from './inventory.ts';
 import { autoRefusal, limitsFor, openCodeContribution } from './launch.ts';
 import { AutoRouter, type DecisionRecord, type RouterDeps, type RouterStats, type TurnDecision } from './router.ts';
@@ -42,6 +43,8 @@ export interface AutoServiceOptions {
   /** A new user turn of a card (its latest user text), for the card's command review. */
   turn?(text: string, grant: LaunchGrant): void;
   publishBadge(sessionId: string, badge: Badge | null): void;
+  /** At most this many calls at once on a subscription-like upstream (the person marked its address flat-rate). */
+  parallelCap?(upstream: AutoUpstream): number | null;
   transport?: typeof fetch;
   /** For the public catalog downloads (tests pass a fake; nothing else may reach the network). */
   catalogTransport?: typeof fetch;
@@ -110,6 +113,7 @@ export class AutoService {
       ...(options.turn ? { turn: options.turn } : {}),
       badge: (sessionId, model) => options.publishBadge(sessionId, model ? { text: badgeText(model.model), tone: 'neutral', tooltip: strings.badgeTip(model.tier, model.source) } : null),
       log: (level, message) => options.host.log(level, message),
+      ...(options.parallelCap ? { parallelCap: options.parallelCap } : {}),
       ...(options.transport ? { transport: options.transport } : {}),
       ...(options.now ? { now: options.now } : {}),
       ...(options.timeouts ? { timeouts: options.timeouts } : {})
@@ -235,10 +239,10 @@ export class AutoService {
   // The decision models page
   // ---------------------------------------------------------------------------------------------------------------
 
-  async state(): Promise<{ settings: AutoRoutingSettings; readable: boolean; keys: Record<string, boolean>; recent: DecisionRecord[]; stats: RouterStats & { spentToday: number; listening: boolean; cards: number }; catalog: CatalogStatus; models: Record<string, ModelRow[]>; waitingForList: string[] }> {
+  async state(): Promise<{ settings: AutoRoutingSettings; readable: boolean; keys: Record<string, boolean>; recent: DecisionRecord[]; stats: RouterStats & { spentToday: number; listening: boolean; cards: number }; catalog: CatalogStatus; models: Record<string, ModelRow[]>; waitingForList: string[]; outcomes: Record<string, RouteOutcome> }> {
     const keys: Record<string, boolean> = {};
     for (const upstream of this.settings.upstreams) keys[upstream.id] = upstream.key === 'none' ? true : !!(await this.keyFor(upstream).catch(() => null));
-    return { settings: this.settings, readable: this.readable, keys, recent: this.router.recent(), stats: this.router.statsView(), catalog: this.catalog.status(), models: this.modelRows(), waitingForList: this.inventory().waitingForList };
+    return { settings: this.settings, readable: this.readable, keys, recent: this.router.recent(), stats: this.router.statsView(), catalog: this.catalog.status(), models: this.modelRows(), waitingForList: this.inventory().waitingForList, outcomes: this.router.routeOutcomes() };
   }
 
   async save(value: unknown): Promise<AutoRoutingSettings> {

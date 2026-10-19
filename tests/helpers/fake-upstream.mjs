@@ -25,7 +25,7 @@ export function streamChunks(model, { cost = 0.000123, text = 'Hello', toolCall 
 }
 
 /**
- * behaviours: { [modelId]: 'stream' | 'json' | 'cut' | 'hang' | 'slow-first' | number (an HTTP status) | { status, headers, body } }
+ * behaviours: { [modelId]: 'stream' | 'json' | 'text' | 'text-slow' | 'cut' | 'hang' | 'slow-first' | number (an HTTP status) | { status, headers, body } }
  * A model without a behaviour streams: a tool call while tools are offered, plain text after a tool result.
  */
 export async function startFakeUpstream({ behaviours = {}, key = 'up-key', firstChunkDelayMs = 0 } = {}) {
@@ -59,6 +59,32 @@ export async function startFakeUpstream({ behaviours = {}, key = 'up-key', first
         return;
       }
       if (behaviour === 'hang') return;
+      if (behaviour === 'text' || behaviour === 'text-slow') {
+        // A text answer even with tools offered; a judge's request (it carries the drafts) gets a merged answer.
+        const last = json?.messages?.at(-1);
+        const said = typeof last?.content === 'string' ? last.content : '';
+        const drafts = (said.match(/--- Draft \d+ ---/gu) ?? []).length;
+        const text = drafts ? `MERGED ANSWER from ${drafts} drafts` : `Draft from ${entry.model}`;
+        if (json?.stream === false) {
+          const body = JSON.stringify({ id: 'chatcmpl-3', object: 'chat.completion', model: entry.model, choices: [{ index: 0, message: { role: 'assistant', content: text }, finish_reason: 'stop' }], usage: { prompt_tokens: 50, completion_tokens: 9, cost: 0.0002 } });
+          sent.push({ model: entry.model, bytes: body });
+          response.writeHead(200, { 'content-type': 'application/json' });
+          response.end(body);
+          return;
+        }
+        response.writeHead(200, { 'content-type': 'text/event-stream', 'cache-control': 'no-cache' });
+        const record = { model: entry.model, bytes: '' };
+        sent.push(record);
+        if (behaviour === 'text-slow') await new Promise(resolve => setTimeout(resolve, 400));
+        for (const chunk of streamChunks(entry.model, { toolCall: false, text, cost: 0.0002 })) {
+          if (response.destroyed) return;
+          record.bytes += chunk;
+          response.write(chunk);
+          await new Promise(resolve => setImmediate(resolve));
+        }
+        response.end();
+        return;
+      }
       if (behaviour === 'json') {
         response.writeHead(200, { 'content-type': 'application/json' });
         const body = JSON.stringify({ id: 'chatcmpl-2', object: 'chat.completion', model: entry.model, choices: [{ index: 0, message: { role: 'assistant', content: 'Hi' }, finish_reason: 'stop' }], usage: { prompt_tokens: 10, completion_tokens: 2, cost: 0.00001 } });

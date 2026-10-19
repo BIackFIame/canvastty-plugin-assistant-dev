@@ -192,7 +192,7 @@ export interface Candidate {
    * plan's top model — its quota share (expected tokens × quota weight) and, when speeds are known, its time —
    * folded into `cost` (lower is better) with the person's "value speed". Null off a plan.
    */
-  planCost: { cost: number; quota: number; time: number | null; faster: number | null; against: string | null; tokens: number } | null;
+  planCost: { cost: number; quota: number; time: number | null; faster: number | null; speedFrom: 'person' | 'measured' | 'mixed' | null; against: string | null; tokens: number } | null;
   spawn: Spawn;
   /** Specific model without a score of its own (unscored or provisional). */
   newModel: boolean;
@@ -656,11 +656,27 @@ function expectedTokens(identity: string | null, level: Level, ctx: RouteContext
   return Math.round(base * (learned ?? (identity && SMALL_MODEL.test(identity) ? SMALL_MODEL_TOKENS : 1)));
 }
 
+/** Model calls one task of each level makes (the live runs: 5–30 per turn), for the latency part of its time. */
+export const TASK_CALLS: Readonly<Record<Level, number>> = { small: 5, medium: 15, large: 30 };
+
+/** A model's output speed for plan time: the person's figure (tokens/s) first, else Artificial Analysis's measurement. */
+export interface SpeedView { outputTps: number; latencyS: number | null; source: 'person' | 'measured'; label: string | null }
+export function speedFor(c: Pick<Candidate, 'identity' | 'scoredEffort'>, ctx: Pick<RouteContext, 'settings' | 'index'>): SpeedView | null {
+  if (!c.identity) return null;
+  const person = ctx.settings.speeds[c.identity];
+  if (person !== undefined) return { outputTps: person, latencyS: null, source: 'person', label: null };
+  const effort = c.scoredEffort && (EFFORT_RANK as readonly string[]).includes(c.scoredEffort) ? c.scoredEffort as ReasoningEffort : null;
+  const measured = ctx.index.speed(c.identity, effort, { openRouter: true, origin: null });
+  return measured ? { outputTps: measured.outputTps, latencyS: measured.latencyS, source: 'measured', label: measured.label } : null;
+}
+
 /**
  * Plan cost: within one plan (a plan's sign-in, or a flat-rate account address), each model's quota share against
  * the plan's top model (the one with the highest API price): expected tokens × quota weight, where the weight is the
  * person's multiplier, else the API price ratio when the plan counts tokens (1 when it counts prompts or nobody knows).
- * With every member's speed known, the relative time counts too, weighted by "value speed".
+ * Time: the task's expected output at the model's speed (the person's figure, else Artificial Analysis's measured
+ * output tokens/s) plus, when both are measured, its calls × time to first chunk — relative to the top model's, and
+ * weighted by "value speed". An unknown speed (on either side) is neutral: time 1, as long as the top model's.
  */
 function planCosts(candidates: Candidate[], ctx: RouteContext, raws: Raw[]): void {
   const groupOf = (c: Candidate): string | null => c.kind === 'subscription' || c.kind === 'coding-plan' || c.kind === 'cli-default' ? c.signIn : c.costBasis === 'flat' ? `flat:${c.endpoint}` : null;
@@ -670,6 +686,7 @@ function planCosts(candidates: Candidate[], ctx: RouteContext, raws: Raw[]): voi
   void raws;
   const blend = (identity: string | null): number | null => { const p = apiPrice(ctx.catalog, identity); return p ? (p.priceIn ?? 0) + (p.priceOut ?? 0) * 3 : null; };
   const weightK = SPEED_WEIGHT[ctx.settings.valueSpeed];
+  const base = TASK_TOKENS[ctx.view.level].input + TASK_TOKENS[ctx.view.level].output;
   for (const [key, members] of groups) {
     const plan = plans.get(key);
     const quotaBy = plan?.quotaBy ?? 'tokens';
@@ -682,15 +699,18 @@ function planCosts(candidates: Candidate[], ctx: RouteContext, raws: Raw[]): voi
       const price = blend(c.identity);
       return quotaBy === 'tokens' && price !== null && topPrice ? price / topPrice : 1;
     };
-    const speedOf = (c: Candidate): number | null => c.identity ? ctx.settings.speeds[c.identity] ?? null : null;
-    const timed = members.every(c => speedOf(c) !== null);
+    const topSpeed = speedFor(top, ctx);
+    const outputOf = (c: Candidate): number => TASK_TOKENS[ctx.view.level].output * (tokensOf(c) / base);
+    const secondsOf = (speed: SpeedView, c: Candidate, latency: boolean): number => (latency ? TASK_CALLS[ctx.view.level] * (speed.latencyS ?? 0) : 0) + outputOf(c) / speed.outputTps;
     const topQuota = quotaBy === 'prompts' ? 1 : tokensOf(top) * weightOf(top);
-    const topTime = timed ? tokensOf(top) / speedOf(top)! : null;
     for (const c of members) {
       const quota = quotaBy === 'prompts' ? 1 : (tokensOf(c) * weightOf(c)) / topQuota;
-      const time = timed && topTime ? (tokensOf(c) / speedOf(c)!) / topTime : null;
-      c.planCost = { cost: Math.round((quota + (time === null ? 0 : weightK * time)) * 1_000) / 1_000, quota: Math.round(quota * 1_000) / 1_000, time,
-        faster: time ? Math.round((1 / time) * 10) / 10 : null, against: c === top ? null : top.identity ?? top.model, tokens: tokensOf(c) };
+      const speed = c === top ? topSpeed : speedFor(c, ctx);
+      const latency = !!speed && !!topSpeed && speed.latencyS !== null && topSpeed.latencyS !== null;
+      const time = speed && topSpeed ? Math.round((secondsOf(speed, c, latency) / secondsOf(topSpeed, top, latency)) * 1_000) / 1_000 : null;
+      c.planCost = { cost: Math.round((quota + weightK * (time ?? 1)) * 1_000) / 1_000, quota: Math.round(quota * 1_000) / 1_000, time,
+        faster: time ? Math.round((1 / time) * 10) / 10 : null, speedFrom: time === null ? null : speed!.source === 'person' && topSpeed!.source === 'person' ? 'person' : speed!.source === 'measured' && topSpeed!.source === 'measured' ? 'measured' : 'mixed',
+        against: c === top ? null : top.identity ?? top.model, tokens: tokensOf(c) };
     }
   }
 }
@@ -762,7 +782,8 @@ export function costText(c: Candidate, now: number): string {
   const base = costBase(c, now);
   const p = c.planCost;
   if (!p || !p.against) return base;
-  return `${base}; ~${Math.round(p.quota * 100)}% of the plan quota ${p.against} would use${p.faster && p.faster !== 1 ? `, ~${p.faster}× ${p.faster > 1 ? 'faster' : 'as fast'}` : ''}`;
+  const from = p.speedFrom === 'measured' ? ' (Artificial Analysis speeds)' : p.speedFrom === 'mixed' ? ' (your and measured speeds)' : '';
+  return `${base}; ~${Math.round(p.quota * 100)}% of the plan quota ${p.against} would use${p.faster && p.faster !== 1 ? `, ~${p.faster}× ${p.faster > 1 ? 'faster' : 'as fast'}${from}` : ''}`;
 }
 
 function costBase(c: Candidate, now: number): string {

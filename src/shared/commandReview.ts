@@ -45,4 +45,4 @@ export type ReviewReason =
   | 'rule-deny' | 'rule-ask' | 'rule-allow'
   | 'person-only' | 'unseeable' | 'risk' | 'not-requested' | 'external' | 'suspect' | 'circuit'
   | 'auto-band' | 'both-agree' | 'model-deny' | 'smart-deny' | 'disagree' | 'needs-second' | 'no-verifier'
-  | 'unavailable' | 'no-kind' | 'learning' | 'trust-chain';
+  | 'unavailable' | 'no-kind' | 'learning' | 'trust-chain' | 'trust-chain-test';

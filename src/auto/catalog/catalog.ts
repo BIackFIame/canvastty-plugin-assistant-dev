@@ -53,6 +53,12 @@ export interface CatalogModel {
 /** A models.dev provider and the API origin it states (to recognise an OpenAI-compatible upstream). */
 export interface CatalogProvider { id: string; origin: string | null }
 export interface BenchmarkSource { kind: 'livebench' | 'artificial-analysis'; url: string; releaseDate: string | null; fetchedAt: number; indexVersion?: string; modelUrl?: string }
+/**
+ * Measured speed of one Artificial Analysis variant on its reference endpoint (the model page's "medium" prompt,
+ * medians): output tokens per second once the answer streams, and seconds to the first chunk. Only what the page
+ * states; a row without it has no speed, never an estimated one. It has its row's age.
+ */
+export interface CatalogSpeed { outputTps: number; latencyS: number | null }
 export interface CatalogBenchmark {
   /** The exact row id; never look a score up by model id alone. */
   id: string;
@@ -64,6 +70,8 @@ export interface CatalogBenchmark {
   /** Null unless every category is complete (LiveBench) or the index is measured (Artificial Analysis). */
   overall: number | null;
   source: BenchmarkSource;
+  /** Artificial Analysis only, when the page states it. */
+  speed?: CatalogSpeed;
 }
 export interface RatingsSnapshot {
   version: 2;
@@ -282,7 +290,9 @@ export function validateRatings(input: unknown, now: number): RatingsSnapshot {
     const categories = Object.fromEntries(entries.map(([key, v]) => { boundedText(key, 128); if (v !== null && score(v) !== v) fail(); return [key, v as number | null]; }));
     const overall = aa ? categories['Intelligence Index']! : mean(Object.values(categories));
     if (b.overall !== overall) fail();
-    return { ...variant, categories, overall, source };
+    if (b.speed === undefined) return { ...variant, categories, overall, source };
+    if (!aa) fail();
+    return { ...variant, categories, overall, source, speed: validSpeed(b.speed) };
   });
   if (!benchmarks.some(b => Object.values(b.categories).some(v => v !== null))) fail();
   const sourceErrors: RatingsSnapshot['sourceErrors'] = {};
@@ -291,6 +301,16 @@ export function validateRatings(input: unknown, now: number): RatingsSnapshot {
     sourceErrors[key as SourceId] = boundedText(value, 160);
   }
   return { version: 2, fetchedAt, modelsFetchedAt, models, providers, benchmarks, sourceErrors };
+}
+
+/** Bounds for a stated speed: 0.1–100,000 tokens/s, 0–3,600 s to the first chunk. */
+export function validSpeed(value: unknown): CatalogSpeed {
+  const v = record(value);
+  if (Object.keys(v).some(key => key !== 'outputTps' && key !== 'latencyS')) fail();
+  const tps = v.outputTps, latency = v.latencyS;
+  if (typeof tps !== 'number' || !Number.isFinite(tps) || tps < 0.1 || tps > 100_000) fail();
+  if (latency !== null && (typeof latency !== 'number' || !Number.isFinite(latency) || latency < 0 || latency > 3_600)) fail();
+  return { outputTps: tps as number, latencyS: latency as number | null };
 }
 
 function freeze<T>(value: T): T {

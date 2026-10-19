@@ -14,7 +14,7 @@ import {
 } from '../src/auto/catalog/catalog.ts';
 import { normalizeOpenRouterModels, offeredByDefault, perMillion, OPENROUTER_MODELS_URL } from '../src/auto/catalog/openrouter.ts';
 import { ARTIFICIAL_ANALYSIS_URL } from '../src/auto/catalog/artificialAnalysis.ts';
-import { benchmarkScore } from '../src/auto/catalog/scoring.ts';
+import { BenchmarkIndex, benchmarkScore, callSeconds } from '../src/auto/catalog/scoring.ts';
 import { aaHtml, aaRows, catalogTransport, DAY, livebenchCategories, livebenchCsv, livebenchListing, modelsDev, openRouterList } from './helpers/catalog-fixtures.mjs';
 
 const epoch = Date.parse('2026-10-18T10:00:00Z');
@@ -273,4 +273,46 @@ test('the OpenRouter cache is validated before use', async t => {
   await again.load();
   assert.equal(again.openRouter(), null);
   assert.match(again.status().sources.find(s => s.id === 'openrouter').error, /unavailable/u);
+});
+
+test('speed: Artificial Analysis rows keep the medium-prompt output speed and first-chunk time when stated; nothing is estimated', async t => {
+  const perf = (tps, ttfc) => ({ performanceByPromptType: { medium: { medianOutputSpeed: tps, medianTimeToFirstChunk: ttfc, medianTimeToFirstAnswerToken: 99 }, long: { medianOutputSpeed: 1 } } });
+  const rows = aaRows();
+  rows[0] = { ...rows[0], ...perf(120.123456, 0.8) };
+  rows[1] = { ...rows[1], ...perf(-3, 1) };
+  rows[2] = { ...rows[2], ...perf(55, null) };
+  const parsed = Object.fromEntries(normalizeArtificialAnalysis(aaHtml(rows), epoch).map(row => [row.id, row]));
+  assert.deepEqual(parsed['aa:a1h'].speed, { outputTps: 120.12, latencyS: 0.8 }, 'the medium prompt only, rounded');
+  assert.equal(parsed['aa:a1l'].speed, undefined, 'an implausible value is no speed');
+  assert.deepEqual(parsed['aa:b2'].speed, { outputTps: 55, latencyS: null }, 'speed without a latency');
+  assert.equal(parsed['aa:d4h'].speed, undefined, 'not stated: unknown');
+  // The cache checks: only Artificial Analysis rows carry one, bounded, no extra fields.
+  const snapshot = { version: 2, fetchedAt: epoch, modelsFetchedAt: null, models: [], providers: [], benchmarks: Object.values(parsed), sourceErrors: {} };
+  assert.deepEqual(validateRatings(snapshot, epoch).benchmarks.find(row => row.id === 'aa:a1h').speed, { outputTps: 120.12, latencyS: 0.8 });
+  const bad = speed => ({ ...snapshot, benchmarks: snapshot.benchmarks.map(row => row.id === 'aa:a1h' ? { ...row, speed } : row) });
+  assert.throws(() => validateRatings(bad({ outputTps: 0, latencyS: 1 }), epoch));
+  assert.throws(() => validateRatings(bad({ outputTps: 10, latencyS: 99_999 }), epoch));
+  assert.throws(() => validateRatings(bad({ outputTps: 10, latencyS: 1, guess: true }), epoch));
+  const livebench = validateRatings(bundled, epoch).benchmarks.find(row => row.source.kind === 'livebench');
+  assert.throws(() => validateRatings({ ...bundled, benchmarks: [{ ...livebench, speed: { outputTps: 10, latencyS: 1 } }] }, epoch), 'LiveBench measures no speed');
+  // The bundled snapshot ships the speeds the page stated for its rows; the rest have none.
+  const withSpeed = validateRatings(bundled, epoch).benchmarks.filter(row => row.speed);
+  assert.ok(withSpeed.length >= 15 && withSpeed.every(row => row.source.kind === 'artificial-analysis'));
+  // The index: exact model and effort only, like scores.
+  const index = new BenchmarkIndex({ asOf: epoch, benchmarks: validateRatings(snapshot, epoch).benchmarks.map(row => ({ ...row, historical: false })), models: [], providers: [], pricesStale: true, openRouter: null, openRouterPricesStale: true });
+  assert.equal(index.speed('alpha-1', 'high', { openRouter: true, origin: null }).outputTps, 120.12);
+  assert.equal(index.speed('alpha-1', 'low', { openRouter: true, origin: null }), null, 'another effort has its own speed or none');
+  assert.equal(index.speed('alpha-1', null, { openRouter: true, origin: null }), null);
+  assert.equal(callSeconds({ outputTps: 100, latencyS: 2 }, 500), 7);
+  assert.equal(callSeconds(null, 500), null, 'unknown stays unknown');
+  // A partial refresh keeps the earlier rows with their speeds; a fresh row says what the page says now.
+  const transport = catalogTransport({ overrides: { [ARTIFICIAL_ANALYSIS_URL]: () => new Response(aaHtml(rows)) } });
+  const { catalog } = await store(t, { transport, bundled });
+  await catalog.load();
+  await catalog.refresh({ force: true });
+  const after = catalog.ratings().benchmarks;
+  assert.equal(after.find(row => row.id === 'aa:a1h').speed.outputTps, 120.12);
+  // GLM-5.3 at max is on the fresh page (without a speed there): the fresh row replaces it; the others keep theirs.
+  for (const row of withSpeed.filter(row => !(row.modelId === 'glm-5-3' && row.reasoningEffort === 'max'))) assert.deepEqual(after.find(kept => kept.id === row.id)?.speed, row.speed, `${row.modelId} keeps its speed`);
+  assert.equal(after.find(row => row.id === 'aa:glm').speed, undefined, 'the page now states none for it: none');
 });

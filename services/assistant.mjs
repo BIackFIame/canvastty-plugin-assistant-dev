@@ -76,7 +76,7 @@ function serve({ methods, notifications = {}, onInitialize, input = process.stdi
     return true;
   };
   const host = {
-    callHost: (method, params) => new Promise((resolve6, reject) => {
+    callHost: (method, params) => new Promise((resolve7, reject) => {
       if (hostGone) {
         reject(new Error("The host connection is closed."));
         return;
@@ -90,7 +90,7 @@ function serve({ methods, notifications = {}, onInitialize, input = process.stdi
         pending.delete(id);
         reject(new Error(`The host did not answer ${method} in time.`));
       }, limit2.hostCallMs);
-      pending.set(id, { resolve: resolve6, reject, timer });
+      pending.set(id, { resolve: resolve7, reject, timer });
       if (!send({ id, method, params })) {
         clearTimeout(timer);
         pending.delete(id);
@@ -228,7 +228,7 @@ function serve({ methods, notifications = {}, onInitialize, input = process.stdi
 }
 
 // src/service/assistant.ts
-import { join as join14 } from "node:path";
+import { join as join15 } from "node:path";
 
 // src/engine/AssistantEngine.ts
 import { randomUUID } from "node:crypto";
@@ -1356,14 +1356,14 @@ function retryDelayMs(attempt, headers, timing) {
   return timing.now + delay + timing.expectedLatencyMs < timing.deadlineAt ? delay : null;
 }
 function sleep(ms, signal) {
-  return new Promise((resolve6, reject) => {
+  return new Promise((resolve7, reject) => {
     if (signal.aborted) {
       reject(signal.reason);
       return;
     }
     const timer = setTimeout(() => {
       signal.removeEventListener("abort", abort);
-      resolve6();
+      resolve7();
     }, ms);
     const abort = () => {
       clearTimeout(timer);
@@ -3174,11 +3174,11 @@ var AssistantBudget = class {
       if (onAbort) signal?.removeEventListener("abort", onAbort);
       onAbort = null;
     };
-    const ready2 = new Promise((resolve6, reject) => {
+    const ready2 = new Promise((resolve7, reject) => {
       wake = () => {
         admitted = true;
         unlisten();
-        resolve6();
+        resolve7();
       };
       if (!signal) return;
       onAbort = () => {
@@ -4012,12 +4012,12 @@ async function runConformance(backend, options) {
           let started = now();
           const asked = await backend.call("POST", `/v1/sessions/${id}/systemone`, { questions: { q_noul: Q_NOUL } }, call());
           sessionMs = now() - started;
-          const single = { model: backend.model, state: text6, questions: { q_noul: Q_NOUL } };
-          if (asked.status === 200) sessionP = decodeResponse("eikos", asked.json, single, { modelRule: "any" }).answers.q_noul.p;
+          const single2 = { model: backend.model, state: text6, questions: { q_noul: Q_NOUL } };
+          if (asked.status === 200) sessionP = decodeResponse("eikos", asked.json, single2, { modelRule: "any" }).answers.q_noul.p;
           started = now();
-          const stateless = await send(single);
+          const stateless = await send(single2);
           statelessMs = now() - started;
-          statelessP = decodeResponse("eikos", stateless.json, single, { modelRule: "any" }).answers.q_noul.p;
+          statelessP = decodeResponse("eikos", stateless.json, single2, { modelRule: "any" }).answers.q_noul.p;
           latencies.push(stateless.latencyMs);
         }
       }
@@ -4747,8 +4747,8 @@ var AssistantEngine = class _AssistantEngine {
       await this.capsStore.load();
       let lastReason = "no-backend";
       let lastGate = { sent: [], withheld: [] };
-      const chain = this.chain(assistant2);
-      const attempts = [...chain.map((entry) => ({ entry, pass: "full" })), ...chain.map((entry) => ({ entry, pass: "metadata" }))];
+      const chain2 = this.chain(assistant2);
+      const attempts = [...chain2.map((entry) => ({ entry, pass: "full" })), ...chain2.map((entry) => ({ entry, pass: "metadata" }))];
       for (const { entry, pass } of attempts) {
         if (this.epoch !== epoch) throw new StaleDecision("settings-changed");
         const { backend } = this.backendFor(entry);
@@ -5182,10 +5182,10 @@ var AssistantEngine = class _AssistantEngine {
 };
 
 // src/review/reviewService.ts
-import { createHash as createHash3 } from "node:crypto";
+import { createHash as createHash4 } from "node:crypto";
 import { lstatSync } from "node:fs";
 import { homedir as homedir2, tmpdir as tmpdir2 } from "node:os";
-import { isAbsolute as isAbsolute3, join as join4, relative as relative3, resolve as resolve3, sep as sep3 } from "node:path";
+import { isAbsolute as isAbsolute4, join as join5, relative as relative4, resolve as resolve4, sep as sep4 } from "node:path";
 
 // src/shared/commandReview.ts
 var REVIEWABLE_ACP_KINDS = ["read", "edit", "delete", "move", "search", "execute", "fetch"];
@@ -7460,6 +7460,202 @@ async function askCommandReview(engine, input, ctx) {
   }
 }
 
+// src/review/testChain.ts
+import { createHash as createHash3 } from "node:crypto";
+import { readFileSync, statSync as statSync2 } from "node:fs";
+import { builtinModules } from "node:module";
+import { dirname as dirname2, isAbsolute as isAbsolute3, join as join4, relative as relative3, resolve as resolve3, sep as sep3 } from "node:path";
+var SHELL_SYNTAX = /[|&;<>()$`\\"'*?{}[\]~!#%=\n\r\t^]/u;
+var JS_FILE = /^(?!-)[\w./-]+\.(?:mjs|cjs|js)$/u;
+var PY_FILE = /^(?!-)[\w./-]+\.py$/u;
+var PACKAGE_TEST = [["npm", "test"], ["npm", "t"], ["npm", "run", "test"], ["pnpm", "test"], ["pnpm", "run", "test"], ["yarn", "test"], ["yarn", "run", "test"]];
+var PACKAGE_CONFIG = [".npmrc", ".yarnrc", ".yarnrc.yml", ".pnpmfile.cjs"];
+var PYTEST_CONFIG = ["pytest.ini", "tox.ini", "setup.cfg", "pyproject.toml"];
+var TEST_CHAIN_MAX_FILES = 64;
+function parseRunner(command, allowPackage = true) {
+  const trimmed = command.trim();
+  if (!trimmed || trimmed.length > 1e3 || SHELL_SYNTAX.test(trimmed)) return null;
+  const words = trimmed.split(/ +/u);
+  if (words[0] === "node" && words[1] === "--test" && words.length > 2 && words.slice(2).every((word) => JS_FILE.test(word))) return { runner: "node", files: words.slice(2), viaPackage: false };
+  const py = words[0] === "pytest" ? 1 : (words[0] === "python" || words[0] === "python3") && words[1] === "-m" && words[2] === "pytest" ? 3 : 0;
+  if (py && words.length > py && words.slice(py).every((word) => PY_FILE.test(word))) return { runner: "pytest", files: words.slice(py), viaPackage: false };
+  if (allowPackage && PACKAGE_TEST.some((form) => form.length === words.length && form.every((word, i) => words[i] === word))) return { runner: "package" };
+  return null;
+}
+var sha2562 = (text6) => createHash3("sha256").update(text6, "utf8").digest("hex");
+var isFile = (path) => {
+  try {
+    return statSync2(path).isFile();
+  } catch {
+    return false;
+  }
+};
+var BUILTINS = new Set(builtinModules);
+function jsImports(source) {
+  const found = [];
+  const literal = /(?:\bimport\s+(?:[\w*{}\s,$]+\s+from\s+)?|\bexport\s+[\w*{}\s,$]+\s+from\s+)(['"])([^'"\n]+)\1/gu;
+  for (const match of source.matchAll(literal)) found.push(match[2]);
+  const calls = [...source.matchAll(/\b(?:import|require)\s*\(/gu)].length;
+  const literalCalls = [...source.matchAll(/\b(?:import|require)\s*\(\s*(['"])([^'"\n]+)\1\s*\)/gu)];
+  if (calls !== literalCalls.length) return null;
+  for (const match of literalCalls) found.push(match[2]);
+  return found;
+}
+function pyImports(source) {
+  if (/\b__import__\s*\(|\bimportlib\b|\bexec\s*\(|\beval\s*\(/u.test(source)) return null;
+  const found = [];
+  for (const line of source.split("\n")) {
+    const from = /^\s*from\s+(\.*[\w.]*)\s+import\s+([\w\s,.*()]+)/u.exec(line);
+    if (from) {
+      found.push(from[1]);
+      if (/^\.+$/u.test(from[1])) for (const name of from[2].replace(/[()]/gu, "").split(",")) {
+        const n = name.trim().split(/\s+/u)[0];
+        if (n && n !== "*") found.push(`${from[1]}${n}`);
+      }
+      continue;
+    }
+    const plain2 = /^\s*import\s+([\w\s,.]+)/u.exec(line);
+    if (plain2) for (const name of plain2[1].split(",")) {
+      const n = name.trim().split(/\s+/u)[0];
+      if (n) found.push(n);
+    }
+  }
+  return found;
+}
+function resolveJs(spec, from) {
+  if (spec.startsWith("node:") || BUILTINS.has(spec)) return "builtin";
+  if (!spec.startsWith("./") && !spec.startsWith("../")) return null;
+  const base = resolve3(dirname2(from), spec);
+  for (const candidate of [base, `${base}.js`, `${base}.mjs`, `${base}.cjs`, join4(base, "index.js")]) if (isFile(candidate)) return candidate;
+  return null;
+}
+function resolvePy(name, from, root) {
+  const dots = /^\.*/u.exec(name)[0].length;
+  const parts = name.slice(dots).split(".").filter(Boolean);
+  const candidates = (dir) => parts.length ? [join4(dir, ...parts) + ".py", join4(dir, ...parts, "__init__.py")] : [join4(dir, "__init__.py")];
+  if (dots) {
+    let dir = dirname2(from);
+    for (let i = 1; i < dots; i++) dir = dirname2(dir);
+    return candidates(dir).find(isFile) ?? null;
+  }
+  for (const dir of chain(dirname2(from), root)) {
+    const hit = candidates(dir).find(isFile);
+    if (hit) return hit;
+    try {
+      if (parts[0] && statSync2(join4(dir, parts[0])).isDirectory()) return null;
+    } catch {
+    }
+  }
+  return "external";
+}
+function chain(from, root) {
+  const dirs = [];
+  let dir = from;
+  for (; ; ) {
+    dirs.push(dir);
+    if (dir === root || !dir.startsWith(`${root}${sep3}`)) break;
+    dir = dirname2(dir);
+  }
+  return dirs;
+}
+async function verifyTestRun(input) {
+  const root = realish(resolve3(input.root));
+  const cwd = realish(resolve3(input.cwd));
+  const inside = (abs) => abs === root || abs.startsWith(`${root}${sep3}`);
+  if (!inside(cwd)) return { ok: false, why: "the command runs outside the project" };
+  let parsed = parseRunner(input.command);
+  if (!parsed) return { ok: false, why: "not a plain known test runner command" };
+  const mustCheck = [];
+  let viaPackage = false;
+  if (parsed.runner === "package") {
+    for (const dir of chain(cwd, root)) for (const name of PACKAGE_CONFIG) if (isFile(join4(dir, name))) return { ok: false, why: `${name} may change how the package manager runs scripts` };
+    const manifest = join4(cwd, "package.json");
+    if (!isFile(manifest)) return { ok: false, why: "no package.json in the folder it runs in" };
+    let scripts;
+    try {
+      scripts = JSON.parse(readFileSync(manifest, "utf8")).scripts ?? {};
+    } catch {
+      return { ok: false, why: "package.json cannot be read" };
+    }
+    if (scripts.pretest !== void 0 || scripts.posttest !== void 0) return { ok: false, why: "package.json has pretest or posttest scripts" };
+    const inner = typeof scripts.test === "string" ? parseRunner(scripts.test, false) : null;
+    if (!inner || inner.runner === "package") return { ok: false, why: "the package's test script is not a plain known test runner command" };
+    parsed = inner;
+    viaPackage = true;
+    mustCheck.push(manifest);
+  }
+  const run = parsed;
+  const files = run.files.map((file) => realish(isAbsolute3(file) ? file : resolve3(cwd, file)));
+  for (const file of files) {
+    if (!inside(file) || isCredentialPath(file) || isProtectedRel(relative3(root, file).split(sep3).join("/"))) return { ok: false, why: "a test file is outside the project or protected" };
+    if (!isFile(file)) return { ok: false, why: "a test file does not exist" };
+  }
+  if (run.runner === "pytest") {
+    for (const dir of new Set(files.flatMap((file) => chain(dirname2(file), root)))) {
+      if (isFile(join4(dir, "conftest.py"))) mustCheck.push(join4(dir, "conftest.py"));
+      for (const name of PYTEST_CONFIG) {
+        const path = join4(dir, name);
+        if (!isFile(path)) continue;
+        let text6;
+        try {
+          text6 = readFileSync(path, "utf8");
+        } catch {
+          return { ok: false, why: `${name} cannot be read` };
+        }
+        if (!/pytest/u.test(text6)) continue;
+        if (/\baddopts\b|\bplugins\b|(?:^|\s)-p\s/mu.test(text6)) return { ok: false, why: `${name} sets pytest options or plugins` };
+        mustCheck.push(path);
+      }
+    }
+  }
+  const seen = /* @__PURE__ */ new Set();
+  const queue = [...files, ...mustCheck.filter((path) => path.endsWith(".py"))];
+  while (queue.length) {
+    const file = queue.shift();
+    if (seen.has(file)) continue;
+    seen.add(file);
+    if (seen.size > TEST_CHAIN_MAX_FILES) return { ok: false, why: "it imports too many files to check" };
+    if (!inside(file) || isCredentialPath(file)) return { ok: false, why: "it imports a file outside the project" };
+    let source;
+    try {
+      source = readFileSync(file, "utf8");
+    } catch {
+      return { ok: false, why: "a file it runs cannot be read" };
+    }
+    if (file.endsWith(".py")) {
+      const names = pyImports(source);
+      if (!names) return { ok: false, why: "a file it runs imports modules dynamically" };
+      for (const name of names) {
+        const hit = resolvePy(name, file, root);
+        if (hit === null) return { ok: false, why: "it imports a project module that cannot be resolved" };
+        if (hit !== "external") queue.push(realish(hit));
+      }
+    } else {
+      const specs = jsImports(source);
+      if (!specs) return { ok: false, why: "a file it runs imports modules dynamically" };
+      for (const spec of specs) {
+        const hit = resolveJs(spec, file);
+        if (hit === null) return { ok: false, why: "it imports a package or a file that cannot be resolved" };
+        if (hit !== "builtin") queue.push(realish(hit));
+      }
+    }
+  }
+  const all = [.../* @__PURE__ */ new Set([...seen, ...mustCheck.map((path) => realish(path))])];
+  const unreviewed = all.filter((path) => {
+    try {
+      return input.reviewed.get(path) !== sha2562(readFileSync(path, "utf8"));
+    } catch {
+      return true;
+    }
+  });
+  if (unreviewed.length) {
+    if (!input.git) return { ok: false, why: "a file it runs was not reviewed in this card, or changed since" };
+    const state = await gitState(root, unreviewed, input.git, input.signal);
+    if (!state || !state.repo || unreviewed.some((path) => !state.tracked.has(path) || state.changed.has(path))) return { ok: false, why: "a file it runs was not reviewed in this card (or changed since) and is not tracked and unchanged in git" };
+  }
+  return { ok: true, runner: run.runner, files: all.map((path) => relative3(root, path).split(sep3).join("/")), viaPackage };
+}
+
 // src/review/commandRules.ts
 var ALLOW = {
   pwd: null,
@@ -7542,7 +7738,7 @@ function namedFolders(text6) {
 function newFileTargets(toolName, toolInput, truncated, cwd) {
   const raw = record(toolInput);
   if (truncated || !raw || !wholeContentWrite(toolName, toolInput, truncated, cwd)) return null;
-  const abs = (path) => isAbsolute3(path) ? path : join4(cwd, path);
+  const abs = (path) => isAbsolute4(path) ? path : join5(cwd, path);
   let paths;
   if (toolName === "apply_patch" || toolName === "patch") {
     const patch = [raw.command, raw.patch, raw.patchText, raw.input].find((value) => typeof value === "string") ?? "";
@@ -7556,6 +7752,7 @@ function newFileTargets(toolName, toolInput, truncated, cwd) {
   return targets.every(nothingAt) ? targets : null;
 }
 var MAX_SESSIONS = 512;
+var MAX_REVIEWED = 256;
 var MAX_TURNS = 5;
 var MAX_REQUEST_CHARS = 16384;
 var MIN_QUOTED_CHARS = 24;
@@ -7631,7 +7828,7 @@ function wholeContentWrite(toolName, toolInput, truncated, cwd = null) {
   if (truncated || !raw) return false;
   if (WHOLE_FILE_WRITES.has(toolName)) return typeof raw.content === "string" && [raw.file_path, raw.filePath, raw.path].some((value) => typeof value === "string" && value.length > 0);
   if (toolName === "edit" && Object.keys(raw).every((key) => key === "file_path" || key === "content") && typeof raw.content === "string" && typeof raw.file_path === "string" && raw.file_path.length > 0) {
-    const path = isAbsolute3(raw.file_path) ? raw.file_path : cwd ? join4(cwd, raw.file_path) : null;
+    const path = isAbsolute4(raw.file_path) ? raw.file_path : cwd ? join5(cwd, raw.file_path) : null;
     return path !== null && nothingAt(path);
   }
   if (toolName === "apply_patch" || toolName === "patch") {
@@ -7767,8 +7964,8 @@ function temporaryRoots() {
   return [...roots];
 }
 var within = (path, root) => {
-  const rel = relative3(root, path);
-  return rel === "" || !rel.startsWith("..") && !isAbsolute3(rel);
+  const rel = relative4(root, path);
+  return rel === "" || !rel.startsWith("..") && !isAbsolute4(rel);
 };
 function writesOnlyToTemp(facts, cwd) {
   if (facts.deletesOutside) return false;
@@ -7802,7 +7999,7 @@ var ReviewService = class {
   state(sessionId) {
     let state = this.sessions.get(sessionId);
     if (!state) {
-      state = { suspect: false, launchTask: null, turns: [], subagent: false, parent: null, dataClass: null, strict: false };
+      state = { suspect: false, launchTask: null, turns: [], subagent: false, parent: null, dataClass: null, strict: false, reviewed: /* @__PURE__ */ new Map() };
       this.sessions.set(sessionId, state);
       while (this.sessions.size > MAX_SESSIONS) this.forget(this.sessions.keys().next().value);
     }
@@ -7947,14 +8144,14 @@ var ReviewService = class {
         tracker: this.tracker,
         git,
         home,
-        agentRoots: [join4(home, ".claude")],
+        agentRoots: [join5(home, ".claude")],
         signal: AbortSignal.any([signal, AbortSignal.timeout(REVIEW_LIMITS.factsMs)])
       });
       const rules = tier1(facts);
       const summary = facts.kind === null ? `${request.tool.name.replace(/[^\w.:-]/gu, "").slice(0, 40)} (${facts.actionClass})` : reviewSummary(facts);
       if (facts.writeTargets.length) this.tracker.note(request.sessionId, facts.writeTargets.filter((path) => !facts.downloadTargets.includes(path)), "write");
       if (facts.downloadTargets.length) this.tracker.note(request.sessionId, facts.downloadTargets, "download");
-      if (action.kind === "edit") this.tracker.note(request.sessionId, action.paths.map((path) => isAbsolute3(path) ? path : join4(action.commandCwd ?? request.cwd, path)), "edit");
+      if (action.kind === "edit") this.tracker.note(request.sessionId, action.paths.map((path) => isAbsolute4(path) ? path : join5(action.commandCwd ?? request.cwd, path)), "edit");
       if (rules.verdict === "deny") {
         const reason = rules.rule === "write-outside" && writesOnlyToTemp(facts, request.cwd) ? TEMP_WRITE_MESSAGE : DENY_MESSAGES[rules.rule] ?? DENY_MESSAGES.elevation;
         this.remember(request.sessionId, summary, mode, { outcome: "deny", act: "deny", tier: "rule", reason: "rule-deny", model: null, auditId: null });
@@ -7971,8 +8168,14 @@ var ReviewService = class {
       const verdict = await run();
       const chained = !verdict.act && !signal.aborted && this.trustChain(request, state, rules, facts, verdict);
       if (chained) {
+        this.noteReviewed(state, request, action, visible);
         this.rememberVerdict(request.sessionId, summary, mode, { ...verdict, act: "allow", outcome: "allow", by: "assistant", reason: "trust-chain" }, "allow");
         return { verdict: "allow", reason: "CanvasTTY Assistant: allowed by the trust chain: the person asked its orchestrator for this task, and this writes a new file inside the project that the review is sure serves it" };
+      }
+      const tested = !verdict.act && !signal.aborted ? await this.testChain(request, state, rules, facts, verdict, action, signal) : null;
+      if (tested) {
+        this.rememberVerdict(request.sessionId, summary, mode, { ...verdict, act: "allow", outcome: "allow", by: "assistant", reason: "trust-chain-test" }, "allow");
+        return { verdict: "allow", reason: `CanvasTTY Assistant: allowed by the trust chain: the person asked its orchestrator for this task, and this runs the tests with ${tested.runner === "node" ? "node --test" : "pytest"} on files the review saw whole in this card or that are committed and unchanged (${tested.files.length} file${tested.files.length === 1 ? "" : "s"})` };
       }
       if (signal.aborted && !verdict.act) {
         const answer2 = ask("unavailable");
@@ -7980,6 +8183,7 @@ var ReviewService = class {
         return answer2;
       }
       if (verdict.act === "allow") {
+        this.noteReviewed(state, request, action, visible);
         this.rememberVerdict(request.sessionId, summary, mode, verdict, "allow");
         return { verdict: "allow", reason: verdict.by === "rule" ? "CanvasTTY Assistant: a read-only command" : "CanvasTTY Assistant: both reviews agree it serves the task" };
       }
@@ -8015,26 +8219,57 @@ var ReviewService = class {
     const cwd = action.commandCwd ?? request.agentCwd ?? request.cwd;
     const targets = newFileTargets(request.tool.name, request.input, request.truncated, cwd);
     if (!targets) return false;
-    const root = realish(resolve3(request.cwd));
-    const inside = (dir, abs) => abs.startsWith(`${dir}${sep3}`);
+    const root = realish(resolve4(request.cwd));
+    const inside = (dir, abs) => abs.startsWith(`${dir}${sep4}`);
     if (!targets.every((path) => {
-      const abs = realish(resolve3(path));
-      return inside(root, abs) && !isCredentialPath(abs) && !isProtectedRel(relative3(root, abs).split(sep3).join("/"));
+      const abs = realish(resolve4(path));
+      return inside(root, abs) && !isCredentialPath(abs) && !isProtectedRel(relative4(root, abs).split(sep4).join("/"));
     })) return false;
     if (verdict.probability >= TRUST_CHAIN_MIN_SERVES) return true;
     const risks = Object.entries(verdict.risks ?? {}).filter(([id]) => id !== "effect_hidden");
     if (!risks.length || risks.some(([, p2]) => typeof p2 !== "number" || p2 > TRUST_CHAIN_LOW_RISK)) return false;
     const texts = [...this.ownTexts(above), ...this.ownTexts(state)];
-    const folders = [realish(resolve3(request.agentCwd ?? request.cwd)), ...texts.flatMap(namedFolders).map((folder) => realish(resolve3(root, folder)))].filter((dir) => dir === root || inside(root, dir));
+    const folders = [realish(resolve4(request.agentCwd ?? request.cwd)), ...texts.flatMap(namedFolders).map((folder) => realish(resolve4(root, folder)))].filter((dir) => dir === root || inside(root, dir));
     return targets.every((path) => {
-      const abs = realish(resolve3(path));
+      const abs = realish(resolve4(path));
       return texts.some((text6) => namesFile(text6, abs)) && folders.some((dir) => inside(dir, abs));
     });
+  }
+  /** An allowed write whose whole content the review saw: its content hash, for a later test command of this card. */
+  noteReviewed(state, request, action, visible) {
+    if (!visible || action.inputTruncated || typeof action.content !== "string") return;
+    const raw = record(request.input);
+    const path = raw ? [raw.file_path, raw.filePath, raw.path].find((value) => typeof value === "string" && value.length > 0) : void 0;
+    if (!path || request.tool.name === "apply_patch" || request.tool.name === "patch") return;
+    const abs = realish(resolve4(isAbsolute4(path) ? path : join5(action.commandCwd ?? request.agentCwd ?? request.cwd, path)));
+    state.reviewed.delete(abs);
+    state.reviewed.set(abs, sha2562(action.content));
+    while (state.reviewed.size > MAX_REVIEWED) state.reviewed.delete(state.reviewed.keys().next().value);
+  }
+  /**
+   * The trust chain for a test command (the same switch and the same chain from the person as for new files): a
+   * plain known test runner, every file it runs seen whole by this card's review with the same content now, or
+   * tracked in git and unchanged (testChain.ts), the review at least TRUST_CHAIN_NAMED_MIN_SERVES sure it serves the
+   * request, and every risk but effect_hidden at most TRUST_CHAIN_LOW_RISK. Nothing it cannot determine.
+   */
+  async testChain(request, state, rules, facts, verdict, action, signal) {
+    if (this.options.trustChain?.() !== true) return null;
+    if (!state.subagent || !state.parent || state.suspect || this.circuit.personOnly(request.sessionId)) return null;
+    const above = this.sessions.get(state.parent);
+    if (!above || above.subagent || !this.ownTexts(above).length) return null;
+    if (rules.verdict || facts.kind !== "execute" || facts.actionClass !== "build_test" || facts.network !== "none" || facts.truncated || action.inputTruncated || facts.writesOutside || facts.credentialAccess || facts.protectedWrite || facts.pipeToShell || facts.subshell || facts.background || facts.inlineCode || facts.encoded || facts.unresolvedVariables) return null;
+    if (verdict.outcome === "deny" || verdict.modelDenied || typeof verdict.probability !== "number" || verdict.probability < TRUST_CHAIN_NAMED_MIN_SERVES) return null;
+    const risks = Object.entries(verdict.risks ?? {}).filter(([id]) => id !== "effect_hidden");
+    if (!risks.length || risks.some(([, p2]) => typeof p2 !== "number" || p2 > TRUST_CHAIN_LOW_RISK)) return null;
+    if (!action.command) return null;
+    const git = this.options.git === null ? null : this.options.git ?? defaultGit;
+    const checked = await verifyTestRun({ command: action.command, cwd: action.commandCwd ?? request.agentCwd ?? request.cwd, root: request.cwd, reviewed: state.reviewed, git, signal });
+    return checked.ok ? checked : null;
   }
   async ladder(request, state, personRequest, facts, rules, content, signal, contentVisible = false) {
     const settings = this.options.settings();
     const git = this.options.git === null ? null : this.options.git ?? defaultGit;
-    const cacheScope = createHash3("sha256").update(JSON.stringify([request.sessionId, request.cwd, facts.actionClass, factPhrases(facts), facts.shape])).digest("hex");
+    const cacheScope = createHash4("sha256").update(JSON.stringify([request.sessionId, request.cwd, facts.actionClass, factPhrases(facts), facts.shape])).digest("hex");
     const verdict = await askCommandReview(this.options.engine, {
       facts,
       tier1: rules,
@@ -8156,8 +8391,8 @@ function advise(triage, input) {
 }
 
 // src/triage/taskRoute.ts
-import { existsSync, statSync as statSync2 } from "node:fs";
-import { dirname as dirname2, isAbsolute as isAbsolute4, join as join5, relative as relative4, resolve as resolve4 } from "node:path";
+import { existsSync, statSync as statSync3 } from "node:fs";
+import { dirname as dirname3, isAbsolute as isAbsolute5, join as join6, relative as relative5, resolve as resolve5 } from "node:path";
 function actionable(triage) {
   return triage.kindBand === "auto" || triage.difficultyBand === "auto" || [triage.destructive, triage.networkPublish, triage.secrets, triage.outsideProject].some((p2) => p2 >= ROUTE_TAUS.risk) || triage.untrusted >= ROUTE_TAUS.untrusted || triage.parallel >= ROUTE_TAUS.parallel;
 }
@@ -8178,14 +8413,14 @@ async function askTaskRoute(engine, input, ctx) {
   return { decision, triage: decision.fallbackReason ? null : captured.triage };
 }
 function isGitRepository(cwd) {
-  let current = resolve4(cwd);
+  let current = resolve5(cwd);
   for (let depth = 0; depth < 64; depth++) {
     try {
-      if (existsSync(join5(current, ".git"))) return true;
+      if (existsSync(join6(current, ".git"))) return true;
     } catch {
       return false;
     }
-    const parent = dirname2(current);
+    const parent = dirname3(current);
     if (parent === current) return false;
     current = parent;
   }
@@ -8193,18 +8428,18 @@ function isGitRepository(cwd) {
 }
 var PATH_TOKEN = /(?:^|[\s"'`(\[<])((?:\.{0,2}\/)?[\w@.-]+(?:\/[\w@.-]+)*\.[A-Za-z0-9]{1,8}|(?:\.{0,2}\/)?[\w@.-]+(?:\/[\w@.-]+)+\/?)(?=$|[\s"'`)\]>,.:;!?])/gu;
 function mentionedExistingPaths(task, cwd) {
-  const root = resolve4(cwd);
+  const root = resolve5(cwd);
   const seen = /* @__PURE__ */ new Set();
   let found = 0, checked = 0;
   for (const match of task.slice(0, FIELD_BOUNDS.task * 4).matchAll(PATH_TOKEN)) {
     const token = match[1].replace(/\/$/u, "");
-    if (!token || isAbsolute4(token) || seen.has(token)) continue;
+    if (!token || isAbsolute5(token) || seen.has(token)) continue;
     seen.add(token);
     if (++checked > 64) break;
-    const target = resolve4(root, token), rel = relative4(root, target);
-    if (!rel || rel.startsWith("..") || isAbsolute4(rel)) continue;
+    const target = resolve5(root, token), rel = relative5(root, target);
+    if (!rel || rel.startsWith("..") || isAbsolute5(rel)) continue;
     try {
-      statSync2(target);
+      statSync3(target);
       found++;
     } catch {
     }
@@ -8213,9 +8448,9 @@ function mentionedExistingPaths(task, cwd) {
 }
 
 // src/harness/harness.ts
-import { readFileSync } from "node:fs";
+import { readFileSync as readFileSync2 } from "node:fs";
 import { mkdir as mkdir3, rename as rename2, writeFile as writeFile3 } from "node:fs/promises";
-import { join as join7 } from "node:path";
+import { join as join8 } from "node:path";
 
 // src/harness/badges.ts
 var PRIORITY = { loop: 0, flow: 1, review: 2, tasks: 3, triage: 4, model: 5 };
@@ -8269,7 +8504,7 @@ var BadgeBoard = class {
 import { randomBytes as randomBytes3 } from "node:crypto";
 import { constants as constants2 } from "node:fs";
 import { lstat, open, readdir as readdir2, realpath } from "node:fs/promises";
-import { basename as basename2, extname, join as join6, sep as sep4 } from "node:path";
+import { basename as basename2, extname, join as join7, sep as sep5 } from "node:path";
 
 // src/harness/flowFile.ts
 var FLOW_LIMITS = Object.freeze({ files: 32, fileBytes: 32768, roles: 8, name: 80, description: 400, task: 2e3, title: 60 });
@@ -8853,10 +9088,10 @@ async function projectFlows(cwd) {
   } catch {
     return { flows, problems };
   }
-  for (const [part, label2] of [[".canvastty", ".canvastty"], [join6(".canvastty", "flows"), ".canvastty/flows"]]) {
+  for (const [part, label2] of [[".canvastty", ".canvastty"], [join7(".canvastty", "flows"), ".canvastty/flows"]]) {
     let info;
     try {
-      info = await lstat(join6(root, part));
+      info = await lstat(join7(root, part));
     } catch {
       return { flows, problems };
     }
@@ -8866,9 +9101,9 @@ async function projectFlows(cwd) {
     }
     if (!info.isDirectory()) return { flows, problems };
   }
-  const folder = join6(root, ".canvastty", "flows");
+  const folder = join7(root, ".canvastty", "flows");
   try {
-    if (!(await realpath(folder)).startsWith(root + sep4)) {
+    if (!(await realpath(folder)).startsWith(root + sep5)) {
       problems.push({ file: ".canvastty/flows", problem: { code: "outside" } });
       return { flows, problems };
     }
@@ -8882,7 +9117,7 @@ async function projectFlows(cwd) {
     return { flows, problems };
   }
   for (const name of names) {
-    const path = join6(folder, name);
+    const path = join7(folder, name);
     try {
       const info = await lstat(path);
       if (info.isSymbolicLink()) throw new FlowFileError({ code: "link" });
@@ -9068,11 +9303,11 @@ var PlanStore = class {
   }
   /** Resolves on the next change or after `ms`. */
   waitForChange(ms) {
-    return new Promise((resolve6) => {
+    return new Promise((resolve7) => {
       const done = () => {
         clearTimeout(timer);
         this.waiters.delete(done);
-        resolve6();
+        resolve7();
       };
       const timer = setTimeout(done, ms);
       this.waiters.add(done);
@@ -9100,7 +9335,7 @@ var PlanStore = class {
 };
 
 // src/harness/loops.ts
-import { createHash as createHash4 } from "node:crypto";
+import { createHash as createHash5 } from "node:crypto";
 var MAX_SESSIONS2 = 512;
 var MAX_FINGERPRINTS = 64;
 var MAX_COMMAND = 4096;
@@ -9150,7 +9385,7 @@ var LoopWatch = class {
     if (command !== null && isPolling(command)) return null;
     const subject = command !== null ? normalizeCommand2(command) : (Array.isArray(tool.paths) ? tool.paths : []).join("\n");
     if (!subject) return null;
-    const fingerprint = createHash4("sha256").update(`${String(tool.name).slice(0, 80)}\0${subject}`).digest("hex");
+    const fingerprint = createHash5("sha256").update(`${String(tool.name).slice(0, 80)}\0${subject}`).digest("hex");
     if (!state) {
       state = { counts: /* @__PURE__ */ new Map(), alerted: false };
       this.sessions.set(sessionId, state);
@@ -9504,7 +9739,7 @@ var Harness = class {
     this.locale = options.locale;
     this.now = options.now ?? Date.now;
     this.reviewOn = options.reviewOn ?? (() => false);
-    this.dir = join7(options.dataDir, "harness");
+    this.dir = join8(options.dataDir, "harness");
     this.badges = new BadgeBoard(options.publishBadge);
     this.journals = new Journals(this.now);
     this.plans = new PlanStore(this.read("plans.json"), (plans) => this.write("plans.json", () => plans), this.now);
@@ -9545,7 +9780,7 @@ var Harness = class {
   read(name) {
     let raw;
     try {
-      raw = readFileSync(join7(this.dir, name), "utf8");
+      raw = readFileSync2(join8(this.dir, name), "utf8");
     } catch {
       return null;
     }
@@ -9578,7 +9813,7 @@ var Harness = class {
       for (const [name, json] of batch) {
         try {
           await mkdir3(this.dir, { recursive: true, mode: 448 });
-          const path = join7(this.dir, name);
+          const path = join8(this.dir, name);
           await writeFile3(`${path}.tmp`, json, { mode: 384 });
           await rename2(`${path}.tmp`, path);
         } catch (error) {
@@ -9952,16 +10187,16 @@ ${JSON.stringify(task)}` };
 };
 
 // src/auto/service.ts
-import { join as join12 } from "node:path";
+import { join as join13 } from "node:path";
 
 // src/auto/catalog/bundled.json
-var bundled_default = { version: 2, fetchedAt: 1791287509758, modelsFetchedAt: null, models: [], providers: [], benchmarks: [{ id: "claude-opus-4-5-20251101-thinking-64k-high-effort", modelId: "claude-opus-4-5-20251101", reasoningEffort: "high", thinking: "64k", categories: { Reasoning: 80.0865, Coding: 79.654, "Agentic Coding": 39.697, Mathematics: 90.38900000000001, "Data Analysis": 74.44166666666666, Language: 81.26100000000001, IF: 62.54599999999999 }, overall: 72.58216666666667, source: { url: "https://raw.githubusercontent.com/LiveBench/livebench.github.io/main/public/table_2026_06_25.csv", releaseDate: "2026-06-25", fetchedAt: 1791287509758, kind: "livebench" } }, { id: "claude-opus-4-6-thinking-auto-high-effort", modelId: "claude-opus-4-6", reasoningEffort: "high", thinking: "auto", categories: { Reasoning: 88.673, Coding: 78.1845, "Agentic Coding": 48.989666666666665, Mathematics: 89.31700000000001, "Data Analysis": 69.893, Language: 83.26966666666667, IF: 63.3125 }, overall: 74.51990476190477, source: { url: "https://raw.githubusercontent.com/LiveBench/livebench.github.io/main/public/table_2026_06_25.csv", releaseDate: "2026-06-25", fetchedAt: 1791287509758, kind: "livebench" } }, { id: "claude-opus-4-7-xhigh-effort", modelId: "claude-opus-4-7", reasoningEffort: "xhigh", thinking: null, categories: { Reasoning: 87.19225, Coding: 82.088, "Agentic Coding": 50.65633333333333, Mathematics: 92.85374999999999, "Data Analysis": 78.26366666666667, Language: 77.914, IF: 66.7375 }, overall: 76.52935714285714, source: { url: "https://raw.githubusercontent.com/LiveBench/livebench.github.io/main/public/table_2026_06_25.csv", releaseDate: "2026-06-25", fetchedAt: 1791287509758, kind: "livebench" } }, { id: "claude-opus-4-8-xhigh-effort", modelId: "claude-opus-4-8", reasoningEffort: "xhigh", thinking: null, categories: { Reasoning: 89.7115, Coding: 79.2715, "Agentic Coding": 56.06066666666667, Mathematics: 95.31649999999999, "Data Analysis": 78.344, Language: 81.41733333333333, IF: 72.371 }, overall: 78.9275, source: { url: "https://raw.githubusercontent.com/LiveBench/livebench.github.io/main/public/table_2026_06_25.csv", releaseDate: "2026-06-25", fetchedAt: 1791287509758, kind: "livebench" } }, { id: "claude-sonnet-4-6-thinking-auto-medium-effort", modelId: "claude-sonnet-4-6", reasoningEffort: "medium", thinking: "auto", categories: { Reasoning: 84.76925, Coding: 79.2715, "Agentic Coding": 42.626, Mathematics: 86.994, "Data Analysis": 77.946, Language: 76.10266666666666, IF: 63.22075 }, overall: 72.99002380952382, source: { url: "https://raw.githubusercontent.com/LiveBench/livebench.github.io/main/public/table_2026_06_25.csv", releaseDate: "2026-06-25", fetchedAt: 1791287509758, kind: "livebench" } }, { id: "claude-sonnet-5-xhigh-effort", modelId: "claude-sonnet-5", reasoningEffort: "xhigh", thinking: null, categories: { Reasoning: 88.69225, Coding: 80.68, "Agentic Coding": 51.06066666666667, Mathematics: 92.94225, "Data Analysis": 71.74066666666666, Language: 74.97033333333333, IF: 63.85850000000001 }, overall: 74.84923809523809, source: { url: "https://raw.githubusercontent.com/LiveBench/livebench.github.io/main/public/table_2026_06_25.csv", releaseDate: "2026-06-25", fetchedAt: 1791287509758, kind: "livebench" } }, { id: "deepseek-v4-flash", modelId: "deepseek-v4-flash", reasoningEffort: null, thinking: null, categories: { Reasoning: 70.58175, Coding: 69.22800000000001, "Agentic Coding": 37.626, Mathematics: 79.64750000000001, "Data Analysis": 68.02300000000001, Language: 70.12400000000001, IF: 63.137499999999996 }, overall: 65.48110714285716, source: { url: "https://raw.githubusercontent.com/LiveBench/livebench.github.io/main/public/table_2026_06_25.csv", releaseDate: "2026-06-25", fetchedAt: 1791287509758, kind: "livebench" } }, { id: "deepseek-v4-pro", modelId: "deepseek-v4-pro", reasoningEffort: null, thinking: null, categories: { Reasoning: 82.69225, Coding: 69.994, "Agentic Coding": 42.626, Mathematics: 90.6755, "Data Analysis": 74.53766666666667, Language: 78.13033333333333, IF: 62.35 }, overall: 71.57225000000001, source: { url: "https://raw.githubusercontent.com/LiveBench/livebench.github.io/main/public/table_2026_06_25.csv", releaseDate: "2026-06-25", fetchedAt: 1791287509758, kind: "livebench" } }, { id: "gemini-3.1-pro-preview-high", modelId: "gemini-3.1-pro-preview", reasoningEffort: "high", thinking: null, categories: { Reasoning: 84.00475, Coding: 76.4545, "Agentic Coding": 45.403999999999996, Mathematics: 91.04499999999999, "Data Analysis": 78.54133333333334, Language: 85.37599999999999, IF: 79.1 }, overall: 77.13222619047619, source: { url: "https://raw.githubusercontent.com/LiveBench/livebench.github.io/main/public/table_2026_06_25.csv", releaseDate: "2026-06-25", fetchedAt: 1791287509758, kind: "livebench" } }, { id: "gemini-3.5-flash-high", modelId: "gemini-3.5-flash", reasoningEffort: "high", thinking: null, categories: { Reasoning: 82.00475, Coding: 78.1845, "Agentic Coding": 48.989666666666665, Mathematics: 88.24375, "Data Analysis": 64.85733333333333, Language: 84.58433333333333, IF: 75.6 }, overall: 74.6377619047619, source: { url: "https://raw.githubusercontent.com/LiveBench/livebench.github.io/main/public/table_2026_06_25.csv", releaseDate: "2026-06-25", fetchedAt: 1791287509758, kind: "livebench" } }, { id: "glm-5.2", modelId: "glm-5.2", reasoningEffort: null, thinking: null, categories: { Reasoning: 78.625, Coding: 79.654, "Agentic Coding": 51.919333333333334, Mathematics: 89.78125, "Data Analysis": 73.73966666666666, Language: 76.24166666666666, IF: 62.29175000000001 }, overall: 73.17895238095238, source: { url: "https://raw.githubusercontent.com/LiveBench/livebench.github.io/main/public/table_2026_06_25.csv", releaseDate: "2026-06-25", fetchedAt: 1791287509758, kind: "livebench" } }, { id: "gpt-5.2-2025-12-11-high", modelId: "gpt-5.2-2025-12-11", reasoningEffort: "high", thinking: null, categories: { Reasoning: 83.2115, Coding: 76.0715, "Agentic Coding": 50.25266666666667, Mathematics: 93.166, "Data Analysis": 78.16333333333334, Language: 79.809, IF: 61.77074999999999 }, overall: 74.6349642857143, source: { url: "https://raw.githubusercontent.com/LiveBench/livebench.github.io/main/public/table_2026_06_25.csv", releaseDate: "2026-06-25", fetchedAt: 1791287509758, kind: "livebench" } }, { id: "gpt-5.2-codex", modelId: "gpt-5.2-codex", reasoningEffort: null, thinking: null, categories: { Reasoning: 77.7115, Coding: 83.61949999999999, "Agentic Coding": 49.394000000000005, Mathematics: 88.77375, "Data Analysis": 78.204, Language: 73.67833333333333, IF: 66.44574999999999 }, overall: 73.9752619047619, source: { url: "https://raw.githubusercontent.com/LiveBench/livebench.github.io/main/public/table_2026_06_25.csv", releaseDate: "2026-06-25", fetchedAt: 1791287509758, kind: "livebench" } }, { id: "gpt-5.4-mini-xhigh", modelId: "gpt-5.4-mini", reasoningEffort: "xhigh", thinking: null, categories: { Reasoning: 71.32375, Coding: 71.624, "Agentic Coding": 41.666666666666664, Mathematics: 78.462, "Data Analysis": 70.78566666666667, Language: 70.95166666666667, IF: 59.804 }, overall: 66.37396428571428, source: { url: "https://raw.githubusercontent.com/LiveBench/livebench.github.io/main/public/table_2026_06_25.csv", releaseDate: "2026-06-25", fetchedAt: 1791287509758, kind: "livebench" } }, { id: "gpt-5.4-nano-xhigh", modelId: "gpt-5.4-nano", reasoningEffort: "xhigh", thinking: null, categories: { Reasoning: 81.09700000000001, Coding: 70.83850000000001, "Agentic Coding": 46.76766666666666, Mathematics: 90.977, "Data Analysis": 67.64266666666667, Language: 62.507000000000005, IF: 67.20475 }, overall: 69.57636904761905, source: { url: "https://raw.githubusercontent.com/LiveBench/livebench.github.io/main/public/table_2026_06_25.csv", releaseDate: "2026-06-25", fetchedAt: 1791287509758, kind: "livebench" } }, { id: "gpt-5.4-xhigh", modelId: "gpt-5.4", reasoningEffort: "xhigh", thinking: null, categories: { Reasoning: 88.1155, Coding: 77.5415, "Agentic Coding": 53.83833333333333, Mathematics: 94.148, "Data Analysis": 79.31333333333333, Language: 82.63366666666667, IF: 70.21674999999999 }, overall: 77.97244047619049, source: { url: "https://raw.githubusercontent.com/LiveBench/livebench.github.io/main/public/table_2026_06_25.csv", releaseDate: "2026-06-25", fetchedAt: 1791287509758, kind: "livebench" } }, { id: "gpt-5.5", modelId: "gpt-5.5", reasoningEffort: null, thinking: null, categories: { Reasoning: 87.274, Coding: 78.6285, "Agentic Coding": 41.111, Mathematics: 69.7695, "Data Analysis": 76.98700000000001, Language: 85.57033333333334, IF: 65.73750000000001 }, overall: 72.1539761904762, source: { url: "https://raw.githubusercontent.com/LiveBench/livebench.github.io/main/public/table_2026_06_25.csv", releaseDate: "2026-06-25", fetchedAt: 1791287509758, kind: "livebench" } }, { id: "gpt-5.5-high", modelId: "gpt-5.5", reasoningEffort: "high", thinking: null, categories: { Reasoning: 89.673, Coding: 80.037, "Agentic Coding": 46.76766666666666, Mathematics: 95.19, "Data Analysis": 80.443, Language: 87.75999999999999, IF: 71.375 }, overall: 78.74938095238096, source: { url: "https://raw.githubusercontent.com/LiveBench/livebench.github.io/main/public/table_2026_06_25.csv", releaseDate: "2026-06-25", fetchedAt: 1791287509758, kind: "livebench" } }, { id: "gpt-5.5-xhigh", modelId: "gpt-5.5", reasoningEffort: "xhigh", thinking: null, categories: { Reasoning: 89.65375, Coding: 82.14949999999999, "Agentic Coding": 52.07066666666666, Mathematics: 95.85725, "Data Analysis": 81.57566666666666, Language: 87.363, IF: 70.72925000000001 }, overall: 79.91415476190477, source: { url: "https://raw.githubusercontent.com/LiveBench/livebench.github.io/main/public/table_2026_06_25.csv", releaseDate: "2026-06-25", fetchedAt: 1791287509758, kind: "livebench" } }, { id: "grok-4.3", modelId: "grok-4.3", reasoningEffort: null, thinking: null, categories: { Reasoning: 70.822, Coding: 69.9325, "Agentic Coding": 18.535333333333334, Mathematics: 84.339, "Data Analysis": 55.77266666666666, Language: 73.58, IF: 62.75 }, overall: 62.24735714285714, source: { url: "https://raw.githubusercontent.com/LiveBench/livebench.github.io/main/public/table_2026_06_25.csv", releaseDate: "2026-06-25", fetchedAt: 1791287509758, kind: "livebench" } }, { id: "grok-build-0.1", modelId: "grok-build-0.1", reasoningEffort: null, thinking: null, categories: { Reasoning: 76.37025, Coding: 65.38550000000001, "Agentic Coding": 45.808, Mathematics: 78.42875000000001, "Data Analysis": 70.794, Language: 72.46, IF: 65.22075000000001 }, overall: 67.78103571428571, source: { url: "https://raw.githubusercontent.com/LiveBench/livebench.github.io/main/public/table_2026_06_25.csv", releaseDate: "2026-06-25", fetchedAt: 1791287509758, kind: "livebench" } }, { id: "kimi-k2.6-thinking", modelId: "kimi-k2.6-thinking", reasoningEffort: null, thinking: null, categories: { Reasoning: 79.375, Coding: 78.56700000000001, "Agentic Coding": 46.919333333333334, Mathematics: 84.27625, "Data Analysis": 65.13433333333334, Language: 75.14133333333334, IF: 64.35825 }, overall: 70.53878571428572, source: { url: "https://raw.githubusercontent.com/LiveBench/livebench.github.io/main/public/table_2026_06_25.csv", releaseDate: "2026-06-25", fetchedAt: 1791287509758, kind: "livebench" } }, { id: "kimi-k2.7-code", modelId: "kimi-k2.7-code", reasoningEffort: null, thinking: null, categories: { Reasoning: 82.80775, Coding: 73.959, "Agentic Coding": 45.65633333333333, Mathematics: 79.60425000000001, "Data Analysis": 62.65733333333333, Language: 77.90566666666666, IF: 56.29175 }, overall: 68.41172619047619, source: { url: "https://raw.githubusercontent.com/LiveBench/livebench.github.io/main/public/table_2026_06_25.csv", releaseDate: "2026-06-25", fetchedAt: 1791287509758, kind: "livebench" } }, { id: "minimax-m3", modelId: "minimax-m3", reasoningEffort: null, thinking: null, categories: { Reasoning: 74.48075, Coding: 68.2025, "Agentic Coding": 40.65633333333333, Mathematics: 76.94749999999999, "Data Analysis": 76.16633333333334, Language: 76.83566666666667, IF: 57.50825 }, overall: 67.25676190476189, source: { url: "https://raw.githubusercontent.com/LiveBench/livebench.github.io/main/public/table_2026_06_25.csv", releaseDate: "2026-06-25", fetchedAt: 1791287509758, kind: "livebench" } }, { id: "qwen3.6-27b", modelId: "qwen3.6-27b", reasoningEffort: null, thinking: null, categories: { Reasoning: 70.28375, Coding: 71.785, "Agentic Coding": 39.29266666666667, Mathematics: 79.8685, "Data Analysis": 70.42666666666666, Language: 63.30433333333334, IF: 53.229 }, overall: 64.02713095238094, source: { url: "https://raw.githubusercontent.com/LiveBench/livebench.github.io/main/public/table_2026_06_25.csv", releaseDate: "2026-06-25", fetchedAt: 1791287509758, kind: "livebench" } }, { id: "qwen3.6-plus", modelId: "qwen3.6-plus", reasoningEffort: null, thinking: null, categories: { Reasoning: 75.827, Coding: 78.1845, "Agentic Coding": 41.36366666666667, Mathematics: 83.72475, "Data Analysis": 69.91166666666668, Language: 74.98933333333333, IF: 58.342 }, overall: 68.90613095238095, source: { url: "https://raw.githubusercontent.com/LiveBench/livebench.github.io/main/public/table_2026_06_25.csv", releaseDate: "2026-06-25", fetchedAt: 1791287509758, kind: "livebench" } }, { id: "qwen3.7-max", modelId: "qwen3.7", reasoningEffort: "max", thinking: null, categories: { Reasoning: 83.3365, Coding: 74.219, "Agentic Coding": 43.586000000000006, Mathematics: 85.24825, "Data Analysis": 71.786, Language: 79.73899999999999, IF: 74.0415 }, overall: 73.13660714285713, source: { url: "https://raw.githubusercontent.com/LiveBench/livebench.github.io/main/public/table_2026_06_25.csv", releaseDate: "2026-06-25", fetchedAt: 1791287509758, kind: "livebench" } }, { id: "claude-fable-5-xhigh-effort", modelId: "claude-fable-5", reasoningEffort: "xhigh", thinking: null, categories: { Reasoning: 87.7115, Coding: 82.5325, "Agentic Coding": 50.65633333333333, Mathematics: 95.69300000000001, "Data Analysis": 78.693, Language: 89.45766666666667, IF: 71.99575 }, overall: 79.53425000000001, source: { url: "https://raw.githubusercontent.com/LiveBench/livebench.github.io/main/public/table_2026_06_25.csv", releaseDate: "2026-06-25", fetchedAt: 1791287509758, kind: "livebench" } }, { id: "aa:cd684ea4-b475-4269-b001-d469d06d8a7a", modelId: "glm-5-3", reasoningEffort: "max", thinking: null, categories: { "Intelligence Index": 44.777392385614, "Terminal-Bench 4.0": 41.9191919191919, SciCode: 59.0277777777778 }, overall: 44.777392385614, source: { kind: "artificial-analysis", url: "https://artificialanalysis.ai/models/glm-5-3", releaseDate: null, fetchedAt: 1791286695126, indexVersion: "4.3.2", modelUrl: "https://artificialanalysis.ai/models/glm-5-3" } }, { id: "aa:0097ebf5-124f-42f6-9463-33b00e711f03", modelId: "gemini-3-5-flash", reasoningEffort: "high", thinking: null, categories: { "Intelligence Index": 32.5983283695905, "Terminal-Bench 4.0": 6.56565656565657, SciCode: 53.9351851851852 }, overall: 32.5983283695905, source: { kind: "artificial-analysis", url: "https://artificialanalysis.ai/models/glm-5-3", releaseDate: null, fetchedAt: 1791286695126, indexVersion: "4.3.2", modelUrl: "https://artificialanalysis.ai/models/gemini-3-5-flash" } }, { id: "aa:00f1248e-78e3-4230-8dc8-5e13ba8645e2", modelId: "mimo-v2-5-pro", reasoningEffort: null, thinking: "Reasoning", categories: { "Intelligence Index": 25.9868888896511, "Terminal-Bench 4.0": 0, SciCode: 50.578703703703695 }, overall: 25.9868888896511, source: { kind: "artificial-analysis", url: "https://artificialanalysis.ai/models/glm-5-3", releaseDate: null, fetchedAt: 1791286695126, indexVersion: "4.3.2", modelUrl: "https://artificialanalysis.ai/models/mimo-v2-5-pro" } }, { id: "aa:01459872-433a-4ab2-8e99-7083162172eb", modelId: "gpt-6-sol", reasoningEffort: "low", thinking: null, categories: { "Intelligence Index": 34.1548755585733, "Terminal-Bench 4.0": 9.09090909090909, SciCode: 50.2314814814815 }, overall: 34.1548755585733, source: { kind: "artificial-analysis", url: "https://artificialanalysis.ai/models/glm-5-3", releaseDate: null, fetchedAt: 1791286695126, indexVersion: "4.3.2", modelUrl: "https://artificialanalysis.ai/models/gpt-6-sol-low" } }, { id: "aa:016d330a-2141-4afa-b2fc-62b314423dc1", modelId: "mercury-2", reasoningEffort: "high", thinking: null, categories: { "Intelligence Index": null, "Terminal-Bench 4.0": 0, SciCode: 37.7314814814815 }, overall: null, source: { kind: "artificial-analysis", url: "https://artificialanalysis.ai/models/glm-5-3", releaseDate: null, fetchedAt: 1791286695126, indexVersion: "4.3.2", modelUrl: "https://artificialanalysis.ai/models/mercury-2" } }, { id: "aa:042e8a37-fcd0-40f4-8f41-99215fb68eda", modelId: "claude-sonnet-5-5", reasoningEffort: "medium", thinking: "Medium, Default Fallback", categories: { "Intelligence Index": 40.838652287929, "Terminal-Bench 4.0": 29.7979797979798, SciCode: 52.8935185185185 }, overall: 40.838652287929, source: { kind: "artificial-analysis", url: "https://artificialanalysis.ai/models/glm-5-3", releaseDate: null, fetchedAt: 1791286695126, indexVersion: "4.3.2", modelUrl: "https://artificialanalysis.ai/models/claude-sonnet-5-5-medium" } }, { id: "aa:04ee6719-0327-463b-a1a1-70a6a78254f9", modelId: "muse-spark-1-2", reasoningEffort: "xhigh", thinking: null, categories: { "Intelligence Index": 39.5758607970943, "Terminal-Bench 4.0": 7.07070707070707, SciCode: 57.4074074074074 }, overall: 39.5758607970943, source: { kind: "artificial-analysis", url: "https://artificialanalysis.ai/models/glm-5-3", releaseDate: null, fetchedAt: 1791286695126, indexVersion: "4.3.2", modelUrl: "https://artificialanalysis.ai/models/muse-spark-1-2" } }, { id: "aa:050c61cd-cddc-463a-a30a-a82aaa37be59", modelId: "gpt-5-6-luna", reasoningEffort: "low", thinking: null, categories: { "Intelligence Index": 21.0124783424265, "Terminal-Bench 4.0": 0, SciCode: 46.064814814814795 }, overall: 21.0124783424265, source: { kind: "artificial-analysis", url: "https://artificialanalysis.ai/models/glm-5-3", releaseDate: null, fetchedAt: 1791286695126, indexVersion: "4.3.2", modelUrl: "https://artificialanalysis.ai/models/gpt-5-6-luna-low" } }, { id: "aa:05776db7-f5c0-40f7-b824-079160f8cfa8", modelId: "claude-fable-5-1", reasoningEffort: "low", thinking: "Low, Default Fallback", categories: { "Intelligence Index": 46.8163422014862, "Terminal-Bench 4.0": 40.4040404040404, SciCode: 56.712962962963 }, overall: 46.8163422014862, source: { kind: "artificial-analysis", url: "https://artificialanalysis.ai/models/glm-5-3", releaseDate: null, fetchedAt: 1791286695126, indexVersion: "4.3.2", modelUrl: "https://artificialanalysis.ai/models/claude-fable-5-1-low" } }, { id: "aa:05a32e26-e609-4377-951b-8fa23d329926", modelId: "mistral-medium-3-1", reasoningEffort: null, thinking: null, categories: { "Intelligence Index": 9.18437902519296, "Terminal-Bench 4.0": 0, SciCode: 32.407407407407405 }, overall: 9.18437902519296, source: { kind: "artificial-analysis", url: "https://artificialanalysis.ai/models/glm-5-3", releaseDate: null, fetchedAt: 1791286695126, indexVersion: "4.3.2", modelUrl: "https://artificialanalysis.ai/models/mistral-medium-3-1" } }, { id: "aa:076f2674-bc4b-4925-be59-50832eb8c090", modelId: "o3-mini", reasoningEffort: "high", thinking: null, categories: { "Intelligence Index": 10.9643866525084, "Terminal-Bench 4.0": 0, SciCode: 42.8240740740741 }, overall: 10.9643866525084, source: { kind: "artificial-analysis", url: "https://artificialanalysis.ai/models/glm-5-3", releaseDate: null, fetchedAt: 1791286695126, indexVersion: "4.3.2", modelUrl: "https://artificialanalysis.ai/models/o3-mini-high" } }, { id: "aa:08242385-ee91-4de6-be7f-271a6d9780ce", modelId: "apodex-1-1", reasoningEffort: null, thinking: "Reasoning configuration unspecified", categories: { "Intelligence Index": 26.4103686249117, "Terminal-Bench 4.0": 0, SciCode: 45.4861111111111 }, overall: 26.4103686249117, source: { kind: "artificial-analysis", url: "https://artificialanalysis.ai/models/glm-5-3", releaseDate: null, fetchedAt: 1791286695126, indexVersion: "4.3.2", modelUrl: "https://artificialanalysis.ai/models/apodex-1-1" } }, { id: "aa:0904b596-8932-43bd-9b21-324f128e1723", modelId: "gpt-5-6-sol", reasoningEffort: "low", thinking: null, categories: { "Intelligence Index": 33.4731387646002, "Terminal-Bench 4.0": 1.01010101010101, SciCode: 56.3657407407407 }, overall: 33.4731387646002, source: { kind: "artificial-analysis", url: "https://artificialanalysis.ai/models/glm-5-3", releaseDate: null, fetchedAt: 1791286695126, indexVersion: "4.3.2", modelUrl: "https://artificialanalysis.ai/models/gpt-5-6-sol-low" } }, { id: "aa:092a3b0e-c5c8-45dc-bf1b-53673c8ff352", modelId: "gpt-6-1-sol", reasoningEffort: "xhigh", thinking: null, categories: { "Intelligence Index": 51.0377679093761, "Terminal-Bench 4.0": 54.040404040404, SciCode: 55.671296296296305 }, overall: 51.0377679093761, source: { kind: "artificial-analysis", url: "https://artificialanalysis.ai/models/glm-5-3", releaseDate: null, fetchedAt: 1791286695126, indexVersion: "4.3.2", modelUrl: "https://artificialanalysis.ai/models/gpt-6-1-sol-xhigh" } }, { id: "aa:093b9df2-ebee-4309-943f-5a7e88360adf", modelId: "gemini-3-5-flash-lite", reasoningEffort: "high", thinking: null, categories: { "Intelligence Index": 22.1685424839812, "Terminal-Bench 4.0": 1.01010101010101, SciCode: 41.3194444444444 }, overall: 22.1685424839812, source: { kind: "artificial-analysis", url: "https://artificialanalysis.ai/models/glm-5-3", releaseDate: null, fetchedAt: 1791286695126, indexVersion: "4.3.2", modelUrl: "https://artificialanalysis.ai/models/gemini-3-5-flash-lite" } }, { id: "aa:094ea3e3-ce41-419e-8bd1-723389663158", modelId: "step-5-preview", reasoningEffort: null, thinking: "Reasoning configuration unspecified", categories: { "Intelligence Index": 43.7343049141614, "Terminal-Bench 4.0": 33.3333333333333, SciCode: 58.912037037037 }, overall: 43.7343049141614, source: { kind: "artificial-analysis", url: "https://artificialanalysis.ai/models/glm-5-3", releaseDate: null, fetchedAt: 1791286695126, indexVersion: "4.3.2", modelUrl: "https://artificialanalysis.ai/models/step-5" } }, { id: "aa:09f43999-b67b-4c1b-b050-44df41ed7e62", modelId: "devstral-2", reasoningEffort: null, thinking: null, categories: { "Intelligence Index": 8.61676079574885, "Terminal-Bench 4.0": 0, SciCode: 32.7546296296296 }, overall: 8.61676079574885, source: { kind: "artificial-analysis", url: "https://artificialanalysis.ai/models/glm-5-3", releaseDate: null, fetchedAt: 1791286695126, indexVersion: "4.3.2", modelUrl: "https://artificialanalysis.ai/models/devstral-2" } }, { id: "aa:0a7dda4d-cc9c-4a90-abc1-abb5772c901b", modelId: "deepseek-v3-1-terminus", reasoningEffort: null, thinking: "Reasoning", categories: { "Intelligence Index": 14.7640236054576, "Terminal-Bench 4.0": 0, SciCode: 37.962962962963 }, overall: 14.7640236054576, source: { kind: "artificial-analysis", url: "https://artificialanalysis.ai/models/glm-5-3", releaseDate: null, fetchedAt: 1791286695126, indexVersion: "4.3.2", modelUrl: "https://artificialanalysis.ai/models/deepseek-v3-1-terminus-reasoning" } }, { id: "aa:0c64b008-20c3-408d-bd68-15136df8cd2c", modelId: "granite-4-2-3b", reasoningEffort: null, thinking: "Reasoning configuration unspecified", categories: { "Intelligence Index": 9.05588232376756, "Terminal-Bench 4.0": 0, SciCode: 25.3472222222222 }, overall: 9.05588232376756, source: { kind: "artificial-analysis", url: "https://artificialanalysis.ai/models/glm-5-3", releaseDate: null, fetchedAt: 1791286695126, indexVersion: "4.3.2", modelUrl: "https://artificialanalysis.ai/models/granite-4-2-3b" } }, { id: "aa:0de09623-2b1a-4c8d-86ef-7f5245d4e24b", modelId: "inkling", reasoningEffort: "xhigh", thinking: null, categories: { "Intelligence Index": 24.9847810999384, "Terminal-Bench 4.0": 1.01010101010101, SciCode: 46.9907407407407 }, overall: 24.9847810999384, source: { kind: "artificial-analysis", url: "https://artificialanalysis.ai/models/glm-5-3", releaseDate: null, fetchedAt: 1791286695126, indexVersion: "4.3.2", modelUrl: "https://artificialanalysis.ai/models/inkling" } }, { id: "aa:0de67206-4d36-4d10-b8f6-cf37fa747a03", modelId: "kimi-k2-6", reasoningEffort: null, thinking: "Reasoning", categories: { "Intelligence Index": 26.9791999742844, "Terminal-Bench 4.0": 0.505050505050505, SciCode: 51.5046296296296 }, overall: 26.9791999742844, source: { kind: "artificial-analysis", url: "https://artificialanalysis.ai/models/glm-5-3", releaseDate: null, fetchedAt: 1791286695126, indexVersion: "4.3.2", modelUrl: "https://artificialanalysis.ai/models/kimi-k2-6" } }, { id: "aa:0e34f05c-387e-4968-be15-ccec4a55d8c1", modelId: "deepseek-r1-0120", reasoningEffort: null, thinking: "Reasoning configuration unspecified", categories: { "Intelligence Index": 11.4109820044475, "Terminal-Bench 4.0": 0, SciCode: 38.310185185185205 }, overall: 11.4109820044475, source: { kind: "artificial-analysis", url: "https://artificialanalysis.ai/models/glm-5-3", releaseDate: null, fetchedAt: 1791286695126, indexVersion: "4.3.2", modelUrl: "https://artificialanalysis.ai/models/deepseek-r1-0120" } }, { id: "aa:0e66bae9-41f1-42fc-9276-ce8cb6f72919", modelId: "qwen3-5-397b-a17b", reasoningEffort: null, thinking: "Reasoning", categories: { "Intelligence Index": 18.4204249294815, "Terminal-Bench 4.0": 0, SciCode: 44.7916666666667 }, overall: 18.4204249294815, source: { kind: "artificial-analysis", url: "https://artificialanalysis.ai/models/glm-5-3", releaseDate: null, fetchedAt: 1791286695126, indexVersion: "4.3.2", modelUrl: "https://artificialanalysis.ai/models/qwen3-5-397b-a17b" } }, { id: "aa:1071dea1-43e7-4fe9-b936-3034bb622b2e", modelId: "granite-4-2-30b", reasoningEffort: null, thinking: "Reasoning configuration unspecified", categories: { "Intelligence Index": null, "Terminal-Bench 4.0": null, SciCode: 37.8472222222222 }, overall: null, source: { kind: "artificial-analysis", url: "https://artificialanalysis.ai/models/glm-5-3", releaseDate: null, fetchedAt: 1791286695126, indexVersion: "4.3.2", modelUrl: "https://artificialanalysis.ai/models/granite-4-2-30b" } }, { id: "aa:122a1fa1-976a-4089-87a2-5a0a13e2a52c", modelId: "k2-horizon-7b", reasoningEffort: null, thinking: "Reasoning configuration unspecified", categories: { "Intelligence Index": 20.5958819421354, "Terminal-Bench 4.0": 1.01010101010101, SciCode: 27.5462962962963 }, overall: 20.5958819421354, source: { kind: "artificial-analysis", url: "https://artificialanalysis.ai/models/glm-5-3", releaseDate: null, fetchedAt: 1791286695126, indexVersion: "4.3.2", modelUrl: "https://artificialanalysis.ai/models/k2-horizon-7b" } }, { id: "aa:127de816-57d3-4037-8484-480a613cd413", modelId: "mimo-v2-6-flash", reasoningEffort: null, thinking: "Reasoning configuration unspecified", categories: { "Intelligence Index": 37.8843590141754, "Terminal-Bench 4.0": 22.727272727272698, SciCode: 51.273148148148195 }, overall: 37.8843590141754, source: { kind: "artificial-analysis", url: "https://artificialanalysis.ai/models/glm-5-3", releaseDate: null, fetchedAt: 1791286695126, indexVersion: "4.3.2", modelUrl: "https://artificialanalysis.ai/models/mimo-v2-6-flash" } }, { id: "aa:1305c921-7aaa-4d6d-99b5-99b3acf15e19", modelId: "claude-opus-5", reasoningEffort: "xhigh", thinking: null, categories: { "Intelligence Index": 49.6773552926939, "Terminal-Bench 4.0": 46.4646464646465, SciCode: 55.671296296296305 }, overall: 49.6773552926939, source: { kind: "artificial-analysis", url: "https://artificialanalysis.ai/models/glm-5-3", releaseDate: null, fetchedAt: 1791286695126, indexVersion: "4.3.2", modelUrl: "https://artificialanalysis.ai/models/claude-opus-5-xhigh" } }, { id: "aa:142b93bf-09c4-42dc-9c3a-50b1a222cbd4", modelId: "claude-sonnet-5", reasoningEffort: "low", thinking: null, categories: { "Intelligence Index": 24.2638393579597, "Terminal-Bench 4.0": 2.52525252525253, SciCode: 50.1157407407407 }, overall: 24.2638393579597, source: { kind: "artificial-analysis", url: "https://artificialanalysis.ai/models/glm-5-3", releaseDate: null, fetchedAt: 1791286695126, indexVersion: "4.3.2", modelUrl: "https://artificialanalysis.ai/models/claude-sonnet-5-low" } }, { id: "aa:18721247-4e56-4cf7-9a9d-c71cc60c0961", modelId: "k-exaone-2-0-0803", reasoningEffort: null, thinking: "Reasoning configuration unspecified", categories: { "Intelligence Index": null, "Terminal-Bench 4.0": null, SciCode: 42.0138888888889 }, overall: null, source: { kind: "artificial-analysis", url: "https://artificialanalysis.ai/models/glm-5-3", releaseDate: null, fetchedAt: 1791286695126, indexVersion: "4.3.2", modelUrl: "https://artificialanalysis.ai/models/k-exaone-2-0-0803" } }, { id: "aa:19496b81-9f41-4214-a77a-1df803b3c5ae", modelId: "glm-5-3-flash", reasoningEffort: "max", thinking: null, categories: { "Intelligence Index": 41.807466113455, "Terminal-Bench 4.0": 32.8282828282828, SciCode: 51.6203703703704 }, overall: 41.807466113455, source: { kind: "artificial-analysis", url: "https://artificialanalysis.ai/models/glm-5-3", releaseDate: null, fetchedAt: 1791286695126, indexVersion: "4.3.2", modelUrl: "https://artificialanalysis.ai/models/glm-5-3-flash" } }, { id: "aa:19813eb2-460a-475c-af65-810bb8660fec", modelId: "gpt-6-luna", reasoningEffort: "xhigh", thinking: null, categories: { "Intelligence Index": 34.5587320217785, "Terminal-Bench 4.0": 8.08080808080808, SciCode: 51.73611111111111 }, overall: 34.5587320217785, source: { kind: "artificial-analysis", url: "https://artificialanalysis.ai/models/glm-5-3", releaseDate: null, fetchedAt: 1791286695126, indexVersion: "4.3.2", modelUrl: "https://artificialanalysis.ai/models/gpt-6-luna-xhigh" } }, { id: "aa:1b64aa81-c223-4b8f-909b-82185a234765", modelId: "solar-pro4", reasoningEffort: null, thinking: "Reasoning configuration unspecified", categories: { "Intelligence Index": null, "Terminal-Bench 4.0": 0.505050505050505, SciCode: 44.560185185185205 }, overall: null, source: { kind: "artificial-analysis", url: "https://artificialanalysis.ai/models/glm-5-3", releaseDate: null, fetchedAt: 1791286695126, indexVersion: "4.3.2", modelUrl: "https://artificialanalysis.ai/models/solar-pro4" } }, { id: "aa:1e9907e0-ffac-4595-b006-962e4f1da7cf", modelId: "north-mini-code", reasoningEffort: null, thinking: "Reasoning configuration unspecified", categories: { "Intelligence Index": 9.91462776590372, "Terminal-Bench 4.0": 0.505050505050505, SciCode: 38.7731481481481 }, overall: 9.91462776590372, source: { kind: "artificial-analysis", url: "https://artificialanalysis.ai/models/glm-5-3", releaseDate: null, fetchedAt: 1791286695126, indexVersion: "4.3.2", modelUrl: "https://artificialanalysis.ai/models/north-mini-code" } }, { id: "aa:1f054429-397e-4fdb-9e71-67bc92c1735e", modelId: "gpt-5-5", reasoningEffort: "xhigh", thinking: null, categories: { "Intelligence Index": 38.3556437590607, "Terminal-Bench 4.0": 14.6464646464646, SciCode: 55.787037037037 }, overall: 38.3556437590607, source: { kind: "artificial-analysis", url: "https://artificialanalysis.ai/models/glm-5-3", releaseDate: null, fetchedAt: 1791286695126, indexVersion: "4.3.2", modelUrl: "https://artificialanalysis.ai/models/gpt-5-5" } }, { id: "aa:1f541ef3-913f-4eb2-9d07-0e93c7a9a5e3", modelId: "gpt-6-astra", reasoningEffort: "xhigh", thinking: null, categories: { "Intelligence Index": 52.3863277108782, "Terminal-Bench 4.0": 59.5959595959596, SciCode: 55.671296296296305 }, overall: 52.3863277108782, source: { kind: "artificial-analysis", url: "https://artificialanalysis.ai/models/glm-5-3", releaseDate: null, fetchedAt: 1791286695126, indexVersion: "4.3.2", modelUrl: "https://artificialanalysis.ai/models/gpt-6-astra-xhigh" } }, { id: "aa:208c16f0-8c5b-4524-ac8a-ac74c02e80a9", modelId: "grok-4-7", reasoningEffort: "low", thinking: null, categories: { "Intelligence Index": 42.2166560223448, "Terminal-Bench 4.0": 16.161616161616198, SciCode: 54.86111111111111 }, overall: 42.2166560223448, source: { kind: "artificial-analysis", url: "https://artificialanalysis.ai/models/glm-5-3", releaseDate: null, fetchedAt: 1791286695126, indexVersion: "4.3.2", modelUrl: "https://artificialanalysis.ai/models/grok-4-7-low" } }, { id: "aa:20928ba9-3a3f-415f-9519-b84ff64ecf34", modelId: "claude-opus-5", reasoningEffort: "low", thinking: null, categories: { "Intelligence Index": 39.3543357992936, "Terminal-Bench 4.0": 26.2626262626263, SciCode: 49.189814814814795 }, overall: 39.3543357992936, source: { kind: "artificial-analysis", url: "https://artificialanalysis.ai/models/glm-5-3", releaseDate: null, fetchedAt: 1791286695126, indexVersion: "4.3.2", modelUrl: "https://artificialanalysis.ai/models/claude-opus-5-low" } }, { id: "aa:2236df45-0699-40d1-b5cc-69ee345d2257", modelId: "qwen3-5-122b-a10b", reasoningEffort: null, thinking: "Reasoning", categories: { "Intelligence Index": 15.5694009312969, "Terminal-Bench 4.0": 0, SciCode: 39.6990740740741 }, overall: 15.5694009312969, source: { kind: "artificial-analysis", url: "https://artificialanalysis.ai/models/glm-5-3", releaseDate: null, fetchedAt: 1791286695126, indexVersion: "4.3.2", modelUrl: "https://artificialanalysis.ai/models/qwen3-5-122b-a10b" } }, { id: "aa:22d09131-343b-4adf-8760-533e20a2155f", modelId: "mimo-v2-5-0424", reasoningEffort: null, thinking: "Reasoning configuration unspecified", categories: { "Intelligence Index": null, "Terminal-Bench 4.0": 0, SciCode: 43.8657407407407 }, overall: null, source: { kind: "artificial-analysis", url: "https://artificialanalysis.ai/models/glm-5-3", releaseDate: null, fetchedAt: 1791286695126, indexVersion: "4.3.2", modelUrl: "https://artificialanalysis.ai/models/mimo-v2-5-0424" } }, { id: "aa:23c86e4a-c769-43c0-a056-79e3cd15834f", modelId: "claude-sonnet-5", reasoningEffort: "max", thinking: null, categories: { "Intelligence Index": 38.1638712882576, "Terminal-Bench 4.0": 14.1414141414141, SciCode: 54.2824074074074 }, overall: 38.1638712882576, source: { kind: "artificial-analysis", url: "https://artificialanalysis.ai/models/glm-5-3", releaseDate: null, fetchedAt: 1791286695126, indexVersion: "4.3.2", modelUrl: "https://artificialanalysis.ai/models/claude-sonnet-5" } }, { id: "aa:24ac5b00-5f03-4c47-8e37-522d1195383e", modelId: "mistral-small-3-1", reasoningEffort: null, thinking: null, categories: { "Intelligence Index": 7.11735622656558, "Terminal-Bench 4.0": 0, SciCode: 27.7777777777778 }, overall: 7.11735622656558, source: { kind: "artificial-analysis", url: "https://artificialanalysis.ai/models/glm-5-3", releaseDate: null, fetchedAt: 1791286695126, indexVersion: "4.3.2", modelUrl: "https://artificialanalysis.ai/models/mistral-small-3-1" } }, { id: "aa:24d8fdfe-6241-424e-b7b7-1b6efb06e4fb", modelId: "mimo-v2-6-pro", reasoningEffort: null, thinking: "Reasoning configuration unspecified", categories: { "Intelligence Index": 46.3242065310383, "Terminal-Bench 4.0": 34.8484848484849, SciCode: 60.8796296296296 }, overall: 46.3242065310383, source: { kind: "artificial-analysis", url: "https://artificialanalysis.ai/models/glm-5-3", releaseDate: null, fetchedAt: 1791286695126, indexVersion: "4.3.2", modelUrl: "https://artificialanalysis.ai/models/mimo-v2-6-pro" } }, { id: "aa:26614164-6840-4e17-a65a-2deb2fe7e87b", modelId: "grok-4-6", reasoningEffort: "medium", thinking: null, categories: { "Intelligence Index": 42.836322654063, "Terminal-Bench 4.0": 13.1313131313131, SciCode: 55.9027777777778 }, overall: 42.836322654063, source: { kind: "artificial-analysis", url: "https://artificialanalysis.ai/models/glm-5-3", releaseDate: null, fetchedAt: 1791286695126, indexVersion: "4.3.2", modelUrl: "https://artificialanalysis.ai/models/grok-4-6-medium" } }, { id: "aa:268525e2-f873-4178-bc07-e6a0ee1f002d", modelId: "claude-sonnet-5-5", reasoningEffort: "high", thinking: "High, Default Fallback", categories: { "Intelligence Index": 46.7533528066958, "Terminal-Bench 4.0": 43.9393939393939, SciCode: 53.703703703703695 }, overall: 46.7533528066958, source: { kind: "artificial-analysis", url: "https://artificialanalysis.ai/models/glm-5-3", releaseDate: null, fetchedAt: 1791286695126, indexVersion: "4.3.2", modelUrl: "https://artificialanalysis.ai/models/claude-sonnet-5-5-high" } }, { id: "aa:26e0f83a-ca98-4f34-94ac-7c5e251ee410", modelId: "gpt-5-6-terra", reasoningEffort: "medium", thinking: null, categories: { "Intelligence Index": 30.0938023419377, "Terminal-Bench 4.0": 1.01010101010101, SciCode: 50.462962962963 }, overall: 30.0938023419377, source: { kind: "artificial-analysis", url: "https://artificialanalysis.ai/models/glm-5-3", releaseDate: null, fetchedAt: 1791286695126, indexVersion: "4.3.2", modelUrl: "https://artificialanalysis.ai/models/gpt-5-6-terra-medium" } }, { id: "aa:27202e5f-c82d-4710-92e9-4317877d4883", modelId: "gemini-2-5-pro", reasoningEffort: null, thinking: "Reasoning configuration unspecified", categories: { "Intelligence Index": 16.0778962941864, "Terminal-Bench 4.0": 0, SciCode: 46.296296296296305 }, overall: 16.0778962941864, source: { kind: "artificial-analysis", url: "https://artificialanalysis.ai/models/glm-5-3", releaseDate: null, fetchedAt: 1791286695126, indexVersion: "4.3.2", modelUrl: "https://artificialanalysis.ai/models/gemini-2-5-pro" } }, { id: "aa:272f5f03-aea9-4675-a244-2b753b618cdf", modelId: "grok-4-7", reasoningEffort: "high", thinking: null, categories: { "Intelligence Index": 46.3321770885625, "Terminal-Bench 4.0": 24.747474747474698, SciCode: 57.7546296296296 }, overall: 46.3321770885625, source: { kind: "artificial-analysis", url: "https://artificialanalysis.ai/models/glm-5-3", releaseDate: null, fetchedAt: 1791286695126, indexVersion: "4.3.2", modelUrl: "https://artificialanalysis.ai/models/grok-4-7-high" } }, { id: "aa:277f939a-985b-4b37-859d-b3eabc7c0b26", modelId: "minimax-m3", reasoningEffort: null, thinking: "Reasoning configuration unspecified", categories: { "Intelligence Index": 29.2202932236316, "Terminal-Bench 4.0": 2.02020202020202, SciCode: 47.1064814814815 }, overall: 29.2202932236316, source: { kind: "artificial-analysis", url: "https://artificialanalysis.ai/models/glm-5-3", releaseDate: null, fetchedAt: 1791286695126, indexVersion: "4.3.2", modelUrl: "https://artificialanalysis.ai/models/minimax-m3" } }, { id: "aa:29855680-7469-43eb-8b88-cd3fb1d99da3", modelId: "gpt-5-mini", reasoningEffort: "high", thinking: null, categories: { "Intelligence Index": 16.7730881042515, "Terminal-Bench 4.0": 0, SciCode: 39.0046296296296 }, overall: 16.7730881042515, source: { kind: "artificial-analysis", url: "https://artificialanalysis.ai/models/glm-5-3", releaseDate: null, fetchedAt: 1791286695126, indexVersion: "4.3.2", modelUrl: "https://artificialanalysis.ai/models/gpt-5-mini" } }, { id: "aa:29976311-665a-4b2f-ac72-557c33e0758e", modelId: "nemotron-3-5-lightning", reasoningEffort: null, thinking: "Reasoning configuration unspecified", categories: { "Intelligence Index": 12.8572306217144, "Terminal-Bench 4.0": 0.505050505050505, SciCode: 32.060185185185205 }, overall: 12.8572306217144, source: { kind: "artificial-analysis", url: "https://artificialanalysis.ai/models/glm-5-3", releaseDate: null, fetchedAt: 1791286695126, indexVersion: "4.3.2", modelUrl: "https://artificialanalysis.ai/models/nemotron-3-5-lightning" } }, { id: "aa:2bfdd17a-e027-4068-a54e-b0e90a6df118", modelId: "gemma-3-27b-instruct", reasoningEffort: null, thinking: null, categories: { "Intelligence Index": 4.85297805617922, "Terminal-Bench 4.0": 0, SciCode: 23.2638888888889 }, overall: 4.85297805617922, source: { kind: "artificial-analysis", url: "https://artificialanalysis.ai/models/glm-5-3", releaseDate: null, fetchedAt: 1791286695126, indexVersion: "4.3.2", modelUrl: "https://artificialanalysis.ai/models/gemma-3-27b" } }, { id: "aa:2d28a13a-096e-475a-beb8-26bbd1c7d51c", modelId: "qwen3-5-9b", reasoningEffort: null, thinking: "Reasoning", categories: { "Intelligence Index": 11.1961650827156, "Terminal-Bench 4.0": 0.505050505050505, SciCode: 29.5138888888889 }, overall: 11.1961650827156, source: { kind: "artificial-analysis", url: "https://artificialanalysis.ai/models/glm-5-3", releaseDate: null, fetchedAt: 1791286695126, indexVersion: "4.3.2", modelUrl: "https://artificialanalysis.ai/models/qwen3-5-9b" } }, { id: "aa:2e6400f5-85ca-4ebc-ba8f-c2811a631138", modelId: "gemma-3-12b-instruct", reasoningEffort: null, thinking: null, categories: { "Intelligence Index": 3.7508042118297, "Terminal-Bench 4.0": 0, SciCode: 16.4351851851852 }, overall: 3.7508042118297, source: { kind: "artificial-analysis", url: "https://artificialanalysis.ai/models/glm-5-3", releaseDate: null, fetchedAt: 1791286695126, indexVersion: "4.3.2", modelUrl: "https://artificialanalysis.ai/models/gemma-3-12b" } }, { id: "aa:2e9ff877-fd2c-4ce7-b631-7ca1bdb6d13e", modelId: "command-a-plus", reasoningEffort: null, thinking: "Reasoning configuration unspecified", categories: { "Intelligence Index": 13.1335002685349, "Terminal-Bench 4.0": 0.505050505050505, SciCode: 38.5416666666667 }, overall: 13.1335002685349, source: { kind: "artificial-analysis", url: "https://artificialanalysis.ai/models/glm-5-3", releaseDate: null, fetchedAt: 1791286695126, indexVersion: "4.3.2", modelUrl: "https://artificialanalysis.ai/models/command-a-plus" } }, { id: "aa:2f339a97-9a0d-499a-9cb5-e0db665bfa25", modelId: "gpt-6-astra", reasoningEffort: "max", thinking: null, categories: { "Intelligence Index": 52.673669395513, "Terminal-Bench 4.0": 59.09090909090911, SciCode: 56.4814814814815 }, overall: 52.673669395513, source: { kind: "artificial-analysis", url: "https://artificialanalysis.ai/models/glm-5-3", releaseDate: null, fetchedAt: 1791286695126, indexVersion: "4.3.2", modelUrl: "https://artificialanalysis.ai/models/gpt-6-astra" } }, { id: "aa:2f3c4dc9-a450-4303-8697-0237257cf08f", modelId: "claude-opus-5-5", reasoningEffort: "max", thinking: "Max, Default Fallback", categories: { "Intelligence Index": 57.6223698102963, "Terminal-Bench 4.0": 59.5959595959596, SciCode: 66.8981481481482 }, overall: 57.6223698102963, source: { kind: "artificial-analysis", url: "https://artificialanalysis.ai/models/glm-5-3", releaseDate: null, fetchedAt: 1791286695126, indexVersion: "4.3.2", modelUrl: "https://artificialanalysis.ai/models/claude-opus-5-5" } }, { id: "aa:31da3a71-0773-47d9-8560-9f19f069926b", modelId: "k2-horizon-3-7b", reasoningEffort: null, thinking: "Reasoning configuration unspecified", categories: { "Intelligence Index": 15.6103951330976, "Terminal-Bench 4.0": 0, SciCode: 21.990740740740698 }, overall: 15.6103951330976, source: { kind: "artificial-analysis", url: "https://artificialanalysis.ai/models/glm-5-3", releaseDate: null, fetchedAt: 1791286695126, indexVersion: "4.3.2", modelUrl: "https://artificialanalysis.ai/models/k2-horizon-3-7b" } }, { id: "aa:340fb211-4fad-41d3-87d5-ed0d0cd34088", modelId: "hypernova-60b", reasoningEffort: "high", thinking: "High, Based on gpt-oss-120b", categories: { "Intelligence Index": null, "Terminal-Bench 4.0": 0, SciCode: null }, overall: null, source: { kind: "artificial-analysis", url: "https://artificialanalysis.ai/models/glm-5-3", releaseDate: null, fetchedAt: 1791286695126, indexVersion: "4.3.2", modelUrl: "https://artificialanalysis.ai/models/hypernova-60b" } }, { id: "aa:353c92f3-2148-4c2d-9231-aa7e1322a1fd", modelId: "qwen3-8-27b", reasoningEffort: "none", thinking: null, categories: { "Intelligence Index": 20.1502427055595, "Terminal-Bench 4.0": 0, SciCode: 36.2268518518519 }, overall: 20.1502427055595, source: { kind: "artificial-analysis", url: "https://artificialanalysis.ai/models/glm-5-3", releaseDate: null, fetchedAt: 1791286695126, indexVersion: "4.3.2", modelUrl: "https://artificialanalysis.ai/models/qwen3-8-27b-non-reasoning" } }, { id: "aa:36667da0-9222-4967-adbb-f7efa15ad213", modelId: "gpt-6-luna", reasoningEffort: "medium", thinking: null, categories: { "Intelligence Index": 29.9251773515762, "Terminal-Bench 4.0": 2.52525252525253, SciCode: 50.925925925925895 }, overall: 29.9251773515762, source: { kind: "artificial-analysis", url: "https://artificialanalysis.ai/models/glm-5-3", releaseDate: null, fetchedAt: 1791286695126, indexVersion: "4.3.2", modelUrl: "https://artificialanalysis.ai/models/gpt-6-luna-medium" } }, { id: "aa:36f73aaf-d38a-4b56-a2b3-d04d17186910", modelId: "gpt-oss-20b", reasoningEffort: "high", thinking: null, categories: { "Intelligence Index": 8.9675171856126, "Terminal-Bench 4.0": 0, SciCode: 38.8888888888889 }, overall: 8.9675171856126, source: { kind: "artificial-analysis", url: "https://artificialanalysis.ai/models/glm-5-3", releaseDate: null, fetchedAt: 1791286695126, indexVersion: "4.3.2", modelUrl: "https://artificialanalysis.ai/models/gpt-oss-20b" } }, { id: "aa:3b5ba264-ad25-429b-a460-4d8698205f0d", modelId: "nex-n2-pro", reasoningEffort: null, thinking: "Based on Qwen3.5-397B-A17B", categories: { "Intelligence Index": null, "Terminal-Bench 4.0": null, SciCode: 43.287037037037 }, overall: null, source: { kind: "artificial-analysis", url: "https://artificialanalysis.ai/models/glm-5-3", releaseDate: null, fetchedAt: 1791286695126, indexVersion: "4.3.2", modelUrl: "https://artificialanalysis.ai/models/nex-n2-pro" } }, { id: "aa:3b7de71c-e034-4591-8ca6-6b6be2fa471f", modelId: "claude-fable-5-1", reasoningEffort: "medium", thinking: "Medium, Default Fallback", categories: { "Intelligence Index": 48.9206162609523, "Terminal-Bench 4.0": 44.949494949495, SciCode: 56.3657407407407 }, overall: 48.9206162609523, source: { kind: "artificial-analysis", url: "https://artificialanalysis.ai/models/glm-5-3", releaseDate: null, fetchedAt: 1791286695126, indexVersion: "4.3.2", modelUrl: "https://artificialanalysis.ai/models/claude-fable-5-1-medium" } }, { id: "aa:3b84fee3-b70a-41bc-819e-5fbdef9a0042", modelId: "gpt-6-1-sol", reasoningEffort: "high", thinking: null, categories: { "Intelligence Index": 50.2377777519769, "Terminal-Bench 4.0": 51.5151515151515, SciCode: 55.787037037037 }, overall: 50.2377777519769, source: { kind: "artificial-analysis", url: "https://artificialanalysis.ai/models/glm-5-3", releaseDate: null, fetchedAt: 1791286695126, indexVersion: "4.3.2", modelUrl: "https://artificialanalysis.ai/models/gpt-6-1-sol-high" } }, { id: "aa:3e87c73e-a257-495e-9730-367a66229811", modelId: "claude-fable-5-1", reasoningEffort: "max", thinking: "Max, Default Fallback", categories: { "Intelligence Index": 53.3549259623252, "Terminal-Bench 4.0": 52.020202020202, SciCode: 63.078703703703695 }, overall: 53.3549259623252, source: { kind: "artificial-analysis", url: "https://artificialanalysis.ai/models/glm-5-3", releaseDate: null, fetchedAt: 1791286695126, indexVersion: "4.3.2", modelUrl: "https://artificialanalysis.ai/models/claude-fable-5-1" } }, { id: "aa:3fd96175-4ef1-434c-8795-f873aec2abc1", modelId: "mistral-small-4", reasoningEffort: null, thinking: "Reasoning", categories: { "Intelligence Index": 11.2675794141469, "Terminal-Bench 4.0": 0, SciCode: 38.7731481481481 }, overall: 11.2675794141469, source: { kind: "artificial-analysis", url: "https://artificialanalysis.ai/models/glm-5-3", releaseDate: null, fetchedAt: 1791286695126, indexVersion: "4.3.2", modelUrl: "https://artificialanalysis.ai/models/mistral-small-4" } }, { id: "aa:426d24c8-49ae-482a-b4a8-20f1c53f21c1", modelId: "gpt-5-6-luna", reasoningEffort: "max", thinking: null, categories: { "Intelligence Index": 37.3244239690841, "Terminal-Bench 4.0": 11.6161616161616, SciCode: 53.587962962963 }, overall: 37.3244239690841, source: { kind: "artificial-analysis", url: "https://artificialanalysis.ai/models/glm-5-3", releaseDate: null, fetchedAt: 1791286695126, indexVersion: "4.3.2", modelUrl: "https://artificialanalysis.ai/models/gpt-5-6-luna" } }, { id: "aa:433d5c5d-3092-4026-9727-1587ca07915d", modelId: "ling-3-0-flash-vl", reasoningEffort: null, thinking: "Reasoning configuration unspecified", categories: { "Intelligence Index": 24.5693054077875, "Terminal-Bench 4.0": 0, SciCode: 44.212962962963 }, overall: 24.5693054077875, source: { kind: "artificial-analysis", url: "https://artificialanalysis.ai/models/glm-5-3", releaseDate: null, fetchedAt: 1791286695126, indexVersion: "4.3.2", modelUrl: "https://artificialanalysis.ai/models/ling-3-0-flash-vl" } }, { id: "aa:43da3718-3d6e-40dd-901a-05664179ff7f", modelId: "mistral-small-3-2", reasoningEffort: null, thinking: null, categories: { "Intelligence Index": null, "Terminal-Bench 4.0": 0, SciCode: 28.587962962962997 }, overall: null, source: { kind: "artificial-analysis", url: "https://artificialanalysis.ai/models/glm-5-3", releaseDate: null, fetchedAt: 1791286695126, indexVersion: "4.3.2", modelUrl: "https://artificialanalysis.ai/models/mistral-small-3-2" } }, { id: "aa:43fc5506-c5ed-4dee-9b85-962bf7ae3986", modelId: "deepseek-v3", reasoningEffort: null, thinking: null, categories: { "Intelligence Index": 8.48686760841828, "Terminal-Bench 4.0": 0, SciCode: 35.7638888888889 }, overall: 8.48686760841828, source: { kind: "artificial-analysis", url: "https://artificialanalysis.ai/models/glm-5-3", releaseDate: null, fetchedAt: 1791286695126, indexVersion: "4.3.2", modelUrl: "https://artificialanalysis.ai/models/deepseek-v3" } }, { id: "aa:4416ca93-fde6-4b7b-abbc-3a6be109cc3d", modelId: "claude-opus-5-5", reasoningEffort: "low", thinking: "Low, Default Fallback", categories: { "Intelligence Index": 42.3077781466168, "Terminal-Bench 4.0": 31.313131313131297, SciCode: 58.5648148148148 }, overall: 42.3077781466168, source: { kind: "artificial-analysis", url: "https://artificialanalysis.ai/models/glm-5-3", releaseDate: null, fetchedAt: 1791286695126, indexVersion: "4.3.2", modelUrl: "https://artificialanalysis.ai/models/claude-opus-5-5-low" } }, { id: "aa:4559e9f0-8aad-4681-89fb-68cb915e0f16", modelId: "qwen3-14b-instruct", reasoningEffort: null, thinking: "Reasoning", categories: { "Intelligence Index": null, "Terminal-Bench 4.0": 0, SciCode: 30.6712962962963 }, overall: null, source: { kind: "artificial-analysis", url: "https://artificialanalysis.ai/models/glm-5-3", releaseDate: null, fetchedAt: 1791286695126, indexVersion: "4.3.2", modelUrl: "https://artificialanalysis.ai/models/qwen3-14b-instruct-reasoning" } }, { id: "aa:46f11cdf-1725-4abb-b39b-bd6bd948149c", modelId: "jt-4-1-flash-236b-a21b", reasoningEffort: null, thinking: "Reasoning", categories: { "Intelligence Index": 33.9172581709394, "Terminal-Bench 4.0": 3.03030303030303, SciCode: 51.9675925925926 }, overall: 33.9172581709394, source: { kind: "artificial-analysis", url: "https://artificialanalysis.ai/models/glm-5-3", releaseDate: null, fetchedAt: 1791286695126, indexVersion: "4.3.2", modelUrl: "https://artificialanalysis.ai/models/jt-4-1-flash-236b-a21b" } }, { id: "aa:4928e950-7f37-4475-b0dc-c5bad781a321", modelId: "mistral-large-3", reasoningEffort: null, thinking: null, categories: { "Intelligence Index": 9.26608812860467, "Terminal-Bench 4.0": 0, SciCode: 36.5740740740741 }, overall: 9.26608812860467, source: { kind: "artificial-analysis", url: "https://artificialanalysis.ai/models/glm-5-3", releaseDate: null, fetchedAt: 1791286695126, indexVersion: "4.3.2", modelUrl: "https://artificialanalysis.ai/models/mistral-large-3" } }, { id: "aa:4bbceacb-cf47-464b-b60f-e1d1fe016d67", modelId: "minimax-m2-7", reasoningEffort: null, thinking: "Reasoning configuration unspecified", categories: { "Intelligence Index": 22.7578150287271, "Terminal-Bench 4.0": 0, SciCode: 50.1157407407407 }, overall: 22.7578150287271, source: { kind: "artificial-analysis", url: "https://artificialanalysis.ai/models/glm-5-3", releaseDate: null, fetchedAt: 1791286695126, indexVersion: "4.3.2", modelUrl: "https://artificialanalysis.ai/models/minimax-m2-7" } }, { id: "aa:512d17ef-13d2-4f65-bf9b-154b0dec7e8d", modelId: "kimi-k3", reasoningEffort: "low", thinking: null, categories: { "Intelligence Index": 30.0666987529068, "Terminal-Bench 4.0": 12.6262626262626, SciCode: 52.662037037037 }, overall: 30.0666987529068, source: { kind: "artificial-analysis", url: "https://artificialanalysis.ai/models/glm-5-3", releaseDate: null, fetchedAt: 1791286695126, indexVersion: "4.3.2", modelUrl: "https://artificialanalysis.ai/models/kimi-k3-low" } }, { id: "aa:52eebe3e-6ede-4e46-92db-c5dea49fc410", modelId: "gpt-6-sol", reasoningEffort: "high", thinking: null, categories: { "Intelligence Index": 42.4004513642985, "Terminal-Bench 4.0": 26.2626262626263, SciCode: 54.86111111111111 }, overall: 42.4004513642985, source: { kind: "artificial-analysis", url: "https://artificialanalysis.ai/models/glm-5-3", releaseDate: null, fetchedAt: 1791286695126, indexVersion: "4.3.2", modelUrl: "https://artificialanalysis.ai/models/gpt-6-sol-high" } }, { id: "aa:53b9e276-e360-4a39-9076-1a19d72c25fe", modelId: "k2-horizon-mova-36b-a4b", reasoningEffort: null, thinking: "Reasoning configuration unspecified", categories: { "Intelligence Index": 25.3037790731435, "Terminal-Bench 4.0": 0, SciCode: 40.046296296296305 }, overall: 25.3037790731435, source: { kind: "artificial-analysis", url: "https://artificialanalysis.ai/models/glm-5-3", releaseDate: null, fetchedAt: 1791286695126, indexVersion: "4.3.2", modelUrl: "https://artificialanalysis.ai/models/k2-horizon-mova-36b-a4b" } }, { id: "aa:583f98fb-c4b8-4df3-8d40-60ac0ed69882", modelId: "muse-glimmer", reasoningEffort: "high", thinking: null, categories: { "Intelligence Index": 17.4754176089465, "Terminal-Bench 4.0": 0.505050505050505, SciCode: 44.907407407407405 }, overall: 17.4754176089465, source: { kind: "artificial-analysis", url: "https://artificialanalysis.ai/models/glm-5-3", releaseDate: null, fetchedAt: 1791286695126, indexVersion: "4.3.2", modelUrl: "https://artificialanalysis.ai/models/muse-glimmer" } }, { id: "aa:58b812bf-8498-46db-b834-f43ccc614b61", modelId: "gpt-5-6-luna", reasoningEffort: "medium", thinking: null, categories: { "Intelligence Index": 25.0358741440784, "Terminal-Bench 4.0": 0.505050505050505, SciCode: 46.7592592592593 }, overall: 25.0358741440784, source: { kind: "artificial-analysis", url: "https://artificialanalysis.ai/models/glm-5-3", releaseDate: null, fetchedAt: 1791286695126, indexVersion: "4.3.2", modelUrl: "https://artificialanalysis.ai/models/gpt-5-6-luna-medium" } }, { id: "aa:59627802-1546-422c-9a65-65b61c022d36", modelId: "grok-4-7", reasoningEffort: "xhigh", thinking: null, categories: { "Intelligence Index": 46.4465506302286, "Terminal-Bench 4.0": 25.7575757575758, SciCode: 57.4074074074074 }, overall: 46.4465506302286, source: { kind: "artificial-analysis", url: "https://artificialanalysis.ai/models/glm-5-3", releaseDate: null, fetchedAt: 1791286695126, indexVersion: "4.3.2", modelUrl: "https://artificialanalysis.ai/models/grok-4-7" } }, { id: "aa:598190f8-dc9c-4fea-a7ea-4b81c402ab18", modelId: "gemini-3-1-flash-lite", reasoningEffort: "high", thinking: null, categories: { "Intelligence Index": 15.554288713025, "Terminal-Bench 4.0": 0.505050505050505, SciCode: 43.4027777777778 }, overall: 15.554288713025, source: { kind: "artificial-analysis", url: "https://artificialanalysis.ai/models/glm-5-3", releaseDate: null, fetchedAt: 1791286695126, indexVersion: "4.3.2", modelUrl: "https://artificialanalysis.ai/models/gemini-3-1-flash-lite-preview" } }, { id: "aa:5aa1c578-af76-4b91-8699-cdd43582b3af", modelId: "glm-5-1", reasoningEffort: null, thinking: "Reasoning", categories: { "Intelligence Index": 26.0585912980095, "Terminal-Bench 4.0": 2.02020202020202, SciCode: 44.7916666666667 }, overall: 26.0585912980095, source: { kind: "artificial-analysis", url: "https://artificialanalysis.ai/models/glm-5-3", releaseDate: null, fetchedAt: 1791286695126, indexVersion: "4.3.2", modelUrl: "https://artificialanalysis.ai/models/glm-5-1" } }, { id: "aa:5b52def2-ac9b-4465-ad80-91ea8079e253", modelId: "nemotron-3-ultra-550b-a55b", reasoningEffort: null, thinking: "Reasoning", categories: { "Intelligence Index": 22.9279123422858, "Terminal-Bench 4.0": 0.505050505050505, SciCode: 40.2777777777778 }, overall: 22.9279123422858, source: { kind: "artificial-analysis", url: "https://artificialanalysis.ai/models/glm-5-3", releaseDate: null, fetchedAt: 1791286695126, indexVersion: "4.3.2", modelUrl: "https://artificialanalysis.ai/models/nvidia-nemotron-3-ultra-550b-a55b" } }, { id: "aa:5c3bdc0d-abab-4526-8079-34de4089bb4a", modelId: "longcat-2-0", reasoningEffort: null, thinking: "Reasoning configuration unspecified", categories: { "Intelligence Index": 19.1123256610623, "Terminal-Bench 4.0": 0, SciCode: 36.342592592592595 }, overall: 19.1123256610623, source: { kind: "artificial-analysis", url: "https://artificialanalysis.ai/models/glm-5-3", releaseDate: null, fetchedAt: 1791286695126, indexVersion: "4.3.2", modelUrl: "https://artificialanalysis.ai/models/longcat-2-0" } }, { id: "aa:5e0164b3-d902-4bcb-a1b2-83b4f4cd6143", modelId: "qwen3-30b-a3b-2507-reasoning", reasoningEffort: null, thinking: "Reasoning configuration unspecified", categories: { "Intelligence Index": 9.80537532870426, "Terminal-Bench 4.0": 0, SciCode: 32.9861111111111 }, overall: 9.80537532870426, source: { kind: "artificial-analysis", url: "https://artificialanalysis.ai/models/glm-5-3", releaseDate: null, fetchedAt: 1791286695126, indexVersion: "4.3.2", modelUrl: "https://artificialanalysis.ai/models/qwen3-30b-a3b-2507-reasoning" } }, { id: "aa:5e5b4ce7-bc54-47b2-b911-21b9cad8394c", modelId: "qwen3-8-max", reasoningEffort: null, thinking: "Reasoning configuration unspecified", categories: { "Intelligence Index": 40.1528623585941, "Terminal-Bench 4.0": 18.6868686868687, SciCode: 53.2407407407407 }, overall: 40.1528623585941, source: { kind: "artificial-analysis", url: "https://artificialanalysis.ai/models/glm-5-3", releaseDate: null, fetchedAt: 1791286695126, indexVersion: "4.3.2", modelUrl: "https://artificialanalysis.ai/models/qwen3-8-max-0803" } }, { id: "aa:62ea3198-9866-4d9f-8406-a79ee78c7164", modelId: "solar-mini4", reasoningEffort: null, thinking: "Reasoning configuration unspecified", categories: { "Intelligence Index": 24.0522018844171, "Terminal-Bench 4.0": 1.01010101010101, SciCode: 47.5694444444444 }, overall: 24.0522018844171, source: { kind: "artificial-analysis", url: "https://artificialanalysis.ai/models/glm-5-3", releaseDate: null, fetchedAt: 1791286695126, indexVersion: "4.3.2", modelUrl: "https://artificialanalysis.ai/models/solar-mini4" } }, { id: "aa:63872e9c-3377-4a6b-b477-7bba244c38e9", modelId: "nvidia-nemotron-3-super-120b-a12b", reasoningEffort: null, thinking: "Reasoning", categories: { "Intelligence Index": 12.8287575290979, "Terminal-Bench 4.0": 0, SciCode: 36.2268518518519 }, overall: 12.8287575290979, source: { kind: "artificial-analysis", url: "https://artificialanalysis.ai/models/glm-5-3", releaseDate: null, fetchedAt: 1791286695126, indexVersion: "4.3.2", modelUrl: "https://artificialanalysis.ai/models/nvidia-nemotron-3-super-120b-a12b" } }, { id: "aa:63cb48ea-0b0c-4e07-8ded-6d28dec4fa28", modelId: "gpt-6-luna", reasoningEffort: "none", thinking: null, categories: { "Intelligence Index": 18.4678465935701, "Terminal-Bench 4.0": 1.51515151515152, SciCode: 43.0555555555556 }, overall: 18.4678465935701, source: { kind: "artificial-analysis", url: "https://artificialanalysis.ai/models/glm-5-3", releaseDate: null, fetchedAt: 1791286695126, indexVersion: "4.3.2", modelUrl: "https://artificialanalysis.ai/models/gpt-6-luna-non-reasoning" } }, { id: "aa:641a073a-41c9-4773-9b02-d965c16607c5", modelId: "minicpm5-2b", reasoningEffort: null, thinking: "Reasoning configuration unspecified", categories: { "Intelligence Index": 12.463354831996, "Terminal-Bench 4.0": 0, SciCode: 26.273148148148103 }, overall: 12.463354831996, source: { kind: "artificial-analysis", url: "https://artificialanalysis.ai/models/glm-5-3", releaseDate: null, fetchedAt: 1791286695126, indexVersion: "4.3.2", modelUrl: "https://artificialanalysis.ai/models/minicpm5-2b" } }, { id: "aa:6657d7de-a2a9-40bc-a32f-86e80ad63698", modelId: "qwen3-8-27b", reasoningEffort: "medium", thinking: null, categories: { "Intelligence Index": 27.5508228231586, "Terminal-Bench 4.0": 5.05050505050505, SciCode: 39.0046296296296 }, overall: 27.5508228231586, source: { kind: "artificial-analysis", url: "https://artificialanalysis.ai/models/glm-5-3", releaseDate: null, fetchedAt: 1791286695126, indexVersion: "4.3.2", modelUrl: "https://artificialanalysis.ai/models/qwen3-8-27b-medium" } }, { id: "aa:66f4ce73-9a9b-4b49-9c6e-bedb9bfdc720", modelId: "ministral-3-3b", reasoningEffort: null, thinking: null, categories: { "Intelligence Index": 4.83760020546443, "Terminal-Bench 4.0": 0, SciCode: 15.277777777777802 }, overall: 4.83760020546443, source: { kind: "artificial-analysis", url: "https://artificialanalysis.ai/models/glm-5-3", releaseDate: null, fetchedAt: 1791286695126, indexVersion: "4.3.2", modelUrl: "https://artificialanalysis.ai/models/ministral-3-3b" } }, { id: "aa:69534bed-2ffd-4235-832b-e20a810333ab", modelId: "qwen3-7-max", reasoningEffort: null, thinking: "Reasoning configuration unspecified", categories: { "Intelligence Index": 29.4571634255623, "Terminal-Bench 4.0": 1.51515151515152, SciCode: 49.537037037037 }, overall: 29.4571634255623, source: { kind: "artificial-analysis", url: "https://artificialanalysis.ai/models/glm-5-3", releaseDate: null, fetchedAt: 1791286695126, indexVersion: "4.3.2", modelUrl: "https://artificialanalysis.ai/models/qwen3-7-max" } }, { id: "aa:6b79f899-e3c0-45f6-923c-243faccdb2fc", modelId: "gpt-5-5", reasoningEffort: "medium", thinking: null, categories: { "Intelligence Index": 33.8043604432432, "Terminal-Bench 4.0": 5.05050505050505, SciCode: 54.51388888888889 }, overall: 33.8043604432432, source: { kind: "artificial-analysis", url: "https://artificialanalysis.ai/models/glm-5-3", releaseDate: null, fetchedAt: 1791286695126, indexVersion: "4.3.2", modelUrl: "https://artificialanalysis.ai/models/gpt-5-5-medium" } }, { id: "aa:6c7b322e-2f35-48ff-9171-fb621a726fc0", modelId: "step-3-7-flash", reasoningEffort: "high", thinking: null, categories: { "Intelligence Index": null, "Terminal-Bench 4.0": null, SciCode: 43.8657407407407 }, overall: null, source: { kind: "artificial-analysis", url: "https://artificialanalysis.ai/models/glm-5-3", releaseDate: null, fetchedAt: 1791286695126, indexVersion: "4.3.2", modelUrl: "https://artificialanalysis.ai/models/step-3-7-flash" } }, { id: "aa:6d6fa1c9-b833-40b2-8a58-fa810e24a84e", modelId: "ling-3-0-flash-fin", reasoningEffort: null, thinking: "Reasoning configuration unspecified", categories: { "Intelligence Index": 22.5965828940594, "Terminal-Bench 4.0": 0, SciCode: 42.3611111111111 }, overall: 22.5965828940594, source: { kind: "artificial-analysis", url: "https://artificialanalysis.ai/models/glm-5-3", releaseDate: null, fetchedAt: 1791286695126, indexVersion: "4.3.2", modelUrl: "https://artificialanalysis.ai/models/ling-3-0-flash-fin" } }, { id: "aa:6e1b44ff-c227-496b-aef4-19b70cd18c76", modelId: "gemma-4-26b-a4b", reasoningEffort: null, thinking: "Reasoning", categories: { "Intelligence Index": null, "Terminal-Bench 4.0": null, SciCode: 40.046296296296305 }, overall: null, source: { kind: "artificial-analysis", url: "https://artificialanalysis.ai/models/glm-5-3", releaseDate: null, fetchedAt: 1791286695126, indexVersion: "4.3.2", modelUrl: "https://artificialanalysis.ai/models/gemma-4-26b-a4b" } }, { id: "aa:6f174934-5b7d-4333-86cb-f5ebf4a862e3", modelId: "gpt-5-6-sol", reasoningEffort: "medium", thinking: null, categories: { "Intelligence Index": 39.2363585889147, "Terminal-Bench 4.0": 14.6464646464646, SciCode: 57.4074074074074 }, overall: 39.2363585889147, source: { kind: "artificial-analysis", url: "https://artificialanalysis.ai/models/glm-5-3", releaseDate: null, fetchedAt: 1791286695126, indexVersion: "4.3.2", modelUrl: "https://artificialanalysis.ai/models/gpt-5-6-sol-medium" } }, { id: "aa:6fb13851-40ce-4bda-ad3f-6b38e0c5daa7", modelId: "gpt-6-luna", reasoningEffort: "max", thinking: null, categories: { "Intelligence Index": 38.1245186869738, "Terminal-Bench 4.0": 12.6262626262626, SciCode: 54.6296296296296 }, overall: 38.1245186869738, source: { kind: "artificial-analysis", url: "https://artificialanalysis.ai/models/glm-5-3", releaseDate: null, fetchedAt: 1791286695126, indexVersion: "4.3.2", modelUrl: "https://artificialanalysis.ai/models/gpt-6-luna" } }, { id: "aa:712be54a-77ae-41b2-9a58-21181479d6ee", modelId: "claude-opus-5", reasoningEffort: "high", thinking: null, categories: { "Intelligence Index": 48.1219182595908, "Terminal-Bench 4.0": 45.959595959596, SciCode: 55.4398148148148 }, overall: 48.1219182595908, source: { kind: "artificial-analysis", url: "https://artificialanalysis.ai/models/glm-5-3", releaseDate: null, fetchedAt: 1791286695126, indexVersion: "4.3.2", modelUrl: "https://artificialanalysis.ai/models/claude-opus-5-high" } }, { id: "aa:713fae11-c75c-4f10-ae2c-8e4074cd58af", modelId: "ministral-3-14b", reasoningEffort: null, thinking: null, categories: { "Intelligence Index": 6.04436817215002, "Terminal-Bench 4.0": 0, SciCode: 23.842592592592602 }, overall: 6.04436817215002, source: { kind: "artificial-analysis", url: "https://artificialanalysis.ai/models/glm-5-3", releaseDate: null, fetchedAt: 1791286695126, indexVersion: "4.3.2", modelUrl: "https://artificialanalysis.ai/models/ministral-3-14b" } }, { id: "aa:7261504e-503c-4a66-a9d3-a3272cdf9ad6", modelId: "inkling-small", reasoningEffort: null, thinking: "Reasoning configuration unspecified", categories: { "Intelligence Index": 25.6582584411942, "Terminal-Bench 4.0": 1.01010101010101, SciCode: 49.6527777777778 }, overall: 25.6582584411942, source: { kind: "artificial-analysis", url: "https://artificialanalysis.ai/models/glm-5-3", releaseDate: null, fetchedAt: 1791286695126, indexVersion: "4.3.2", modelUrl: "https://artificialanalysis.ai/models/inkling-small" } }, { id: "aa:73c96f99-0de3-4668-a4bd-b106a0fe18f2", modelId: "deepseek-v4-1-flash", reasoningEffort: "none", thinking: null, categories: { "Intelligence Index": 24.6733593924318, "Terminal-Bench 4.0": 5.55555555555556, SciCode: 35.532407407407405 }, overall: 24.6733593924318, source: { kind: "artificial-analysis", url: "https://artificialanalysis.ai/models/glm-5-3", releaseDate: null, fetchedAt: 1791286695126, indexVersion: "4.3.2", modelUrl: "https://artificialanalysis.ai/models/deepseek-v4-1-flash-non-reasoning" } }, { id: "aa:744fa3c1-42a7-4995-b138-fb6be11f463c", modelId: "gemini-3-8-flash", reasoningEffort: "medium", thinking: null, categories: { "Intelligence Index": 39.7740187061926, "Terminal-Bench 4.0": 19.6969696969697, SciCode: 55.0925925925926 }, overall: 39.7740187061926, source: { kind: "artificial-analysis", url: "https://artificialanalysis.ai/models/glm-5-3", releaseDate: null, fetchedAt: 1791286695126, indexVersion: "4.3.2", modelUrl: "https://artificialanalysis.ai/models/gemini-3-8-flash-medium" } }, { id: "aa:75e1c197-f239-4361-a9d6-66dccfead236", modelId: "deepseek-v3-0324", reasoningEffort: null, thinking: null, categories: { "Intelligence Index": 9.72000501684011, "Terminal-Bench 4.0": 0, SciCode: 39.0046296296296 }, overall: 9.72000501684011, source: { kind: "artificial-analysis", url: "https://artificialanalysis.ai/models/glm-5-3", releaseDate: null, fetchedAt: 1791286695126, indexVersion: "4.3.2", modelUrl: "https://artificialanalysis.ai/models/deepseek-v3-0324" } }, { id: "aa:765c9f31-95ec-4f14-900a-80614c3b0777", modelId: "mercury-2-5", reasoningEffort: null, thinking: "Reasoning configuration unspecified", categories: { "Intelligence Index": 12.3408453757638, "Terminal-Bench 4.0": 0, SciCode: 38.5416666666667 }, overall: 12.3408453757638, source: { kind: "artificial-analysis", url: "https://artificialanalysis.ai/models/glm-5-3", releaseDate: null, fetchedAt: 1791286695126, indexVersion: "4.3.2", modelUrl: "https://artificialanalysis.ai/models/mercury-2-5" } }, { id: "aa:76dcf6ef-39ea-4be0-b693-b88da25b4caf", modelId: "nvidia-nemotron-3-nano-30b-a3b", reasoningEffort: null, thinking: "Reasoning", categories: { "Intelligence Index": 8.8961440122188, "Terminal-Bench 4.0": 0, SciCode: 30.555555555555603 }, overall: 8.8961440122188, source: { kind: "artificial-analysis", url: "https://artificialanalysis.ai/models/glm-5-3", releaseDate: null, fetchedAt: 1791286695126, indexVersion: "4.3.2", modelUrl: "https://artificialanalysis.ai/models/nvidia-nemotron-3-nano-30b-a3b-reasoning" } }, { id: "aa:7707a46f-895f-4247-b7a8-ddab87c9a11d", modelId: "deepseek-v4-flash-vision", reasoningEffort: "max", thinking: null, categories: { "Intelligence Index": 34.8390628035969, "Terminal-Bench 4.0": 12.1212121212121, SciCode: 49.6527777777778 }, overall: 34.8390628035969, source: { kind: "artificial-analysis", url: "https://artificialanalysis.ai/models/glm-5-3", releaseDate: null, fetchedAt: 1791286695126, indexVersion: "4.3.2", modelUrl: "https://artificialanalysis.ai/models/deepseek-v4-flash-vision" } }, { id: "aa:780a4a85-17ff-4175-a8dd-ebca4823e61b", modelId: "gpt-6-sol", reasoningEffort: "medium", thinking: null, categories: { "Intelligence Index": 39.8118971749522, "Terminal-Bench 4.0": 18.6868686868687, SciCode: 53.8194444444444 }, overall: 39.8118971749522, source: { kind: "artificial-analysis", url: "https://artificialanalysis.ai/models/glm-5-3", releaseDate: null, fetchedAt: 1791286695126, indexVersion: "4.3.2", modelUrl: "https://artificialanalysis.ai/models/gpt-6-sol-medium" } }, { id: "aa:78332c88-fe60-42c8-af9d-3617e44cf1f5", modelId: "gemini-3-6-flash", reasoningEffort: "high", thinking: null, categories: { "Intelligence Index": 33.9785928920714, "Terminal-Bench 4.0": 7.07070707070707, SciCode: 53.3564814814815 }, overall: 33.9785928920714, source: { kind: "artificial-analysis", url: "https://artificialanalysis.ai/models/glm-5-3", releaseDate: null, fetchedAt: 1791286695126, indexVersion: "4.3.2", modelUrl: "https://artificialanalysis.ai/models/gemini-3-6-flash" } }, { id: "aa:794f69b5-cede-482b-b1cc-d769478497cd", modelId: "grok-4-5", reasoningEffort: "high", thinking: null, categories: { "Intelligence Index": 38.8121153240657, "Terminal-Bench 4.0": 10.6060606060606, SciCode: 54.976851851851805 }, overall: 38.8121153240657, source: { kind: "artificial-analysis", url: "https://artificialanalysis.ai/models/glm-5-3", releaseDate: null, fetchedAt: 1791286695126, indexVersion: "4.3.2", modelUrl: "https://artificialanalysis.ai/models/grok-4-5" } }, { id: "aa:7c4d1e30-6ecb-46cf-880c-41446d7b51f1", modelId: "gpt-5-6-sol", reasoningEffort: "none", thinking: null, categories: { "Intelligence Index": null, "Terminal-Bench 4.0": null, SciCode: 47.685185185185205 }, overall: null, source: { kind: "artificial-analysis", url: "https://artificialanalysis.ai/models/glm-5-3", releaseDate: null, fetchedAt: 1791286695126, indexVersion: "4.3.2", modelUrl: "https://artificialanalysis.ai/models/gpt-5-6-sol-non-reasoning" } }, { id: "aa:7d1229bc-deea-4717-ba5b-f59a35d991e3", modelId: "gpt-6-luna", reasoningEffort: "high", thinking: null, categories: { "Intelligence Index": 32.9282054150837, "Terminal-Bench 4.0": 4.545454545454549, SciCode: 50.3472222222222 }, overall: 32.9282054150837, source: { kind: "artificial-analysis", url: "https://artificialanalysis.ai/models/glm-5-3", releaseDate: null, fetchedAt: 1791286695126, indexVersion: "4.3.2", modelUrl: "https://artificialanalysis.ai/models/gpt-6-luna-high" } }, { id: "aa:7e30585f-fad7-40df-a8cb-03c1d96df38a", modelId: "qwen3-8-27b", reasoningEffort: "low", thinking: null, categories: { "Intelligence Index": 26.2047978189896, "Terminal-Bench 4.0": 2.52525252525253, SciCode: 40.046296296296305 }, overall: 26.2047978189896, source: { kind: "artificial-analysis", url: "https://artificialanalysis.ai/models/glm-5-3", releaseDate: null, fetchedAt: 1791286695126, indexVersion: "4.3.2", modelUrl: "https://artificialanalysis.ai/models/qwen3-8-27b-low" } }, { id: "aa:7eabd8ca-bf43-4d56-b3df-efd1c4eebfb0", modelId: "solar-open2-250b", reasoningEffort: null, thinking: "Reasoning configuration unspecified", categories: { "Intelligence Index": null, "Terminal-Bench 4.0": null, SciCode: 48.032407407407405 }, overall: null, source: { kind: "artificial-analysis", url: "https://artificialanalysis.ai/models/glm-5-3", releaseDate: null, fetchedAt: 1791286695126, indexVersion: "4.3.2", modelUrl: "https://artificialanalysis.ai/models/solar-open2-250b" } }, { id: "aa:7eaf926c-5f39-4e58-ae50-c38b5fc630fc", modelId: "ling-3-0-tiny", reasoningEffort: null, thinking: "Reasoning configuration unspecified", categories: { "Intelligence Index": 11.0636233769305, "Terminal-Bench 4.0": 0, SciCode: 24.1898148148148 }, overall: 11.0636233769305, source: { kind: "artificial-analysis", url: "https://artificialanalysis.ai/models/glm-5-3", releaseDate: null, fetchedAt: 1791286695126, indexVersion: "4.3.2", modelUrl: "https://artificialanalysis.ai/models/ling-3-0-tiny" } }, { id: "aa:8014c311-fa23-4a4b-8485-8a864db8a113", modelId: "celeris-1", reasoningEffort: null, thinking: null, categories: { "Intelligence Index": 6.3469533538601, "Terminal-Bench 4.0": 0, SciCode: 21.6435185185185 }, overall: 6.3469533538601, source: { kind: "artificial-analysis", url: "https://artificialanalysis.ai/models/glm-5-3", releaseDate: null, fetchedAt: 1791286695126, indexVersion: "4.3.2", modelUrl: "https://artificialanalysis.ai/models/celeris-1" } }, { id: "aa:81972fba-1219-477e-bbfb-18c656a63ff7", modelId: "gpt-5-6-terra", reasoningEffort: "high", thinking: null, categories: { "Intelligence Index": 34.2376558067555, "Terminal-Bench 4.0": 1.51515151515152, SciCode: 52.4305555555556 }, overall: 34.2376558067555, source: { kind: "artificial-analysis", url: "https://artificialanalysis.ai/models/glm-5-3", releaseDate: null, fetchedAt: 1791286695126, indexVersion: "4.3.2", modelUrl: "https://artificialanalysis.ai/models/gpt-5-6-terra-high" } }, { id: "aa:8215372b-66ff-457b-855e-e8abeafc9571", modelId: "a-x-k2", reasoningEffort: null, thinking: "Reasoning configuration unspecified", categories: { "Intelligence Index": 21.4612645385074, "Terminal-Bench 4.0": 0, SciCode: 40.9722222222222 }, overall: 21.4612645385074, source: { kind: "artificial-analysis", url: "https://artificialanalysis.ai/models/glm-5-3", releaseDate: null, fetchedAt: 1791286695126, indexVersion: "4.3.2", modelUrl: "https://artificialanalysis.ai/models/a-x-k2" } }, { id: "aa:83173329-c09a-41f1-a028-a282a5f908d7", modelId: "deepseek-v4-pro", reasoningEffort: "max", thinking: null, categories: { "Intelligence Index": 35.9967791278402, "Terminal-Bench 4.0": 14.1414141414141, SciCode: 51.0416666666667 }, overall: 35.9967791278402, source: { kind: "artificial-analysis", url: "https://artificialanalysis.ai/models/glm-5-3", releaseDate: null, fetchedAt: 1791286695126, indexVersion: "4.3.2", modelUrl: "https://artificialanalysis.ai/models/deepseek-v4-pro" } }, { id: "aa:8665ca00-c687-44c7-875c-22618cb31c4f", modelId: "qwen3-6-35b-a3b", reasoningEffort: null, thinking: "Reasoning", categories: { "Intelligence Index": 18.2289900189843, "Terminal-Bench 4.0": 0, SciCode: 36.5740740740741 }, overall: 18.2289900189843, source: { kind: "artificial-analysis", url: "https://artificialanalysis.ai/models/glm-5-3", releaseDate: null, fetchedAt: 1791286695126, indexVersion: "4.3.2", modelUrl: "https://artificialanalysis.ai/models/qwen3-6-35b-a3b" } }, { id: "aa:87110ff0-1f79-41b4-9976-eda250597317", modelId: "gpt-5-6-luna", reasoningEffort: "xhigh", thinking: null, categories: { "Intelligence Index": 34.555348822309, "Terminal-Bench 4.0": 3.53535353535354, SciCode: 50.462962962963 }, overall: 34.555348822309, source: { kind: "artificial-analysis", url: "https://artificialanalysis.ai/models/glm-5-3", releaseDate: null, fetchedAt: 1791286695126, indexVersion: "4.3.2", modelUrl: "https://artificialanalysis.ai/models/gpt-5-6-luna-xhigh" } }, { id: "aa:89a2c945-1fab-4ee4-9f45-83a9f46cb221", modelId: "deepseek-v4-flash-0420", reasoningEffort: "high", thinking: null, categories: { "Intelligence Index": 24.3839569152521, "Terminal-Bench 4.0": 3.03030303030303, SciCode: 40.162037037037 }, overall: 24.3839569152521, source: { kind: "artificial-analysis", url: "https://artificialanalysis.ai/models/glm-5-3", releaseDate: null, fetchedAt: 1791286695126, indexVersion: "4.3.2", modelUrl: "https://artificialanalysis.ai/models/deepseek-v4-flash-0420-high" } }, { id: "aa:8a999846-4c1d-4ce7-a8b7-1310a7166fd7", modelId: "gemini-3-8-flash", reasoningEffort: "high", thinking: null, categories: { "Intelligence Index": 40.9262321765904, "Terminal-Bench 4.0": 19.6969696969697, SciCode: 56.5972222222222 }, overall: 40.9262321765904, source: { kind: "artificial-analysis", url: "https://artificialanalysis.ai/models/glm-5-3", releaseDate: null, fetchedAt: 1791286695126, indexVersion: "4.3.2", modelUrl: "https://artificialanalysis.ai/models/gemini-3-8-flash" } }, { id: "aa:8afc250d-b538-45a2-812a-4605f4ffd87e", modelId: "gpt-5-6-sol", reasoningEffort: "high", thinking: null, categories: { "Intelligence Index": 42.3461010420519, "Terminal-Bench 4.0": 20.7070707070707, SciCode: 57.7546296296296 }, overall: 42.3461010420519, source: { kind: "artificial-analysis", url: "https://artificialanalysis.ai/models/glm-5-3", releaseDate: null, fetchedAt: 1791286695126, indexVersion: "4.3.2", modelUrl: "https://artificialanalysis.ai/models/gpt-5-6-sol-high" } }, { id: "aa:8c29d66d-bf98-4ea3-8572-5409353ecc66", modelId: "qwen3-6-27b", reasoningEffort: null, thinking: "Reasoning", categories: { "Intelligence Index": 21.4279902240782, "Terminal-Bench 4.0": 0, SciCode: 42.8240740740741 }, overall: 21.4279902240782, source: { kind: "artificial-analysis", url: "https://artificialanalysis.ai/models/glm-5-3", releaseDate: null, fetchedAt: 1791286695126, indexVersion: "4.3.2", modelUrl: "https://artificialanalysis.ai/models/qwen3-6-27b" } }, { id: "aa:8d0cb231-7303-452c-9923-a9620b948475", modelId: "kimi-k2-7-code", reasoningEffort: null, thinking: "Reasoning configuration unspecified", categories: { "Intelligence Index": 25.8121062401836, "Terminal-Bench 4.0": 1.01010101010101, SciCode: 47.8009259259259 }, overall: 25.8121062401836, source: { kind: "artificial-analysis", url: "https://artificialanalysis.ai/models/glm-5-3", releaseDate: null, fetchedAt: 1791286695126, indexVersion: "4.3.2", modelUrl: "https://artificialanalysis.ai/models/kimi-k2-7-code" } }, { id: "aa:8df710d3-9dae-4498-9b4e-9818238e6f31", modelId: "qwen3-8-2-4t-a95b", reasoningEffort: null, thinking: "Reasoning configuration unspecified", categories: { "Intelligence Index": 39.8861723105325, "Terminal-Bench 4.0": 11.1111111111111, SciCode: 54.050925925925895 }, overall: 39.8861723105325, source: { kind: "artificial-analysis", url: "https://artificialanalysis.ai/models/glm-5-3", releaseDate: null, fetchedAt: 1791286695126, indexVersion: "4.3.2", modelUrl: "https://artificialanalysis.ai/models/qwen3-8-2-4t-a95b" } }, { id: "aa:90c2a9cf-ad7e-4332-9be2-2fd1309833e2", modelId: "grok-4-3", reasoningEffort: "none", thinking: null, categories: { "Intelligence Index": 13.9926809505055, "Terminal-Bench 4.0": 0, SciCode: 39.3518518518519 }, overall: 13.9926809505055, source: { kind: "artificial-analysis", url: "https://artificialanalysis.ai/models/glm-5-3", releaseDate: null, fetchedAt: 1791286695126, indexVersion: "4.3.2", modelUrl: "https://artificialanalysis.ai/models/grok-4-3-non-reasoning" } }, { id: "aa:90e078f2-051b-4c63-8919-76618971cb3f", modelId: "claude-4-5-sonnet", reasoningEffort: null, thinking: "Reasoning", categories: { "Intelligence Index": 20.6661943537112, "Terminal-Bench 4.0": 0, SciCode: 45.717592592592595 }, overall: 20.6661943537112, source: { kind: "artificial-analysis", url: "https://artificialanalysis.ai/models/glm-5-3", releaseDate: null, fetchedAt: 1791286695126, indexVersion: "4.3.2", modelUrl: "https://artificialanalysis.ai/models/claude-4-5-sonnet-thinking" } }, { id: "aa:922c69c7-9037-43c6-8bcf-a1c555e7f3eb", modelId: "llama-4-maverick", reasoningEffort: null, thinking: null, categories: { "Intelligence Index": null, "Terminal-Bench 4.0": 0, SciCode: 31.712962962962997 }, overall: null, source: { kind: "artificial-analysis", url: "https://artificialanalysis.ai/models/glm-5-3", releaseDate: null, fetchedAt: 1791286695126, indexVersion: "4.3.2", modelUrl: "https://artificialanalysis.ai/models/llama-4-maverick" } }, { id: "aa:948892b5-db03-4118-a4a8-ccd51ed871ea", modelId: "grok-4-3", reasoningEffort: "high", thinking: null, categories: { "Intelligence Index": 24.8801191398002, "Terminal-Bench 4.0": 0, SciCode: 48.2638888888889 }, overall: 24.8801191398002, source: { kind: "artificial-analysis", url: "https://artificialanalysis.ai/models/glm-5-3", releaseDate: null, fetchedAt: 1791286695126, indexVersion: "4.3.2", modelUrl: "https://artificialanalysis.ai/models/grok-4-3" } }, { id: "aa:9741f3c2-cbb1-4a3f-99ee-7bd7384d9038", modelId: "ministral-3-8b", reasoningEffort: null, thinking: null, categories: { "Intelligence Index": 5.47767370454416, "Terminal-Bench 4.0": 0, SciCode: 20.717592592592602 }, overall: 5.47767370454416, source: { kind: "artificial-analysis", url: "https://artificialanalysis.ai/models/glm-5-3", releaseDate: null, fetchedAt: 1791286695126, indexVersion: "4.3.2", modelUrl: "https://artificialanalysis.ai/models/ministral-3-8b" } }, { id: "aa:975aeaef-50bd-4a65-9c73-f1015adcd4d4", modelId: "claude-sonnet-5-5", reasoningEffort: "xhigh", thinking: "Xhigh, Default Fallback", categories: { "Intelligence Index": 51.8955544183089, "Terminal-Bench 4.0": 57.07070707070711, SciCode: 57.2916666666667 }, overall: 51.8955544183089, source: { kind: "artificial-analysis", url: "https://artificialanalysis.ai/models/glm-5-3", releaseDate: null, fetchedAt: 1791286695126, indexVersion: "4.3.2", modelUrl: "https://artificialanalysis.ai/models/claude-sonnet-5-5-xhigh" } }, { id: "aa:992b7b84-5069-4c6a-9295-834252553d50", modelId: "claude-opus-4-8", reasoningEffort: "max", thinking: null, categories: { "Intelligence Index": 41.7899103794639, "Terminal-Bench 4.0": 21.7171717171717, SciCode: 54.398148148148195 }, overall: 41.7899103794639, source: { kind: "artificial-analysis", url: "https://artificialanalysis.ai/models/glm-5-3", releaseDate: null, fetchedAt: 1791286695126, indexVersion: "4.3.2", modelUrl: "https://artificialanalysis.ai/models/claude-opus-4-8" } }, { id: "aa:9999672c-b687-4026-9c15-5cef02ff53bb", modelId: "muse-spark-1-3", reasoningEffort: "max", thinking: null, categories: { "Intelligence Index": 48.0923107719685, "Terminal-Bench 4.0": 33.3333333333333, SciCode: 58.796296296296305 }, overall: 48.0923107719685, source: { kind: "artificial-analysis", url: "https://artificialanalysis.ai/models/glm-5-3", releaseDate: null, fetchedAt: 1791286695126, indexVersion: "4.3.2", modelUrl: "https://artificialanalysis.ai/models/muse-spark-1-3" } }, { id: "aa:99f376bf-cbcb-4124-bf3e-6b0a4e6e9bea", modelId: "claude-sonnet-5", reasoningEffort: "xhigh", thinking: null, categories: { "Intelligence Index": 34.384211557212, "Terminal-Bench 4.0": 7.07070707070707, SciCode: 54.050925925925895 }, overall: 34.384211557212, source: { kind: "artificial-analysis", url: "https://artificialanalysis.ai/models/glm-5-3", releaseDate: null, fetchedAt: 1791286695126, indexVersion: "4.3.2", modelUrl: "https://artificialanalysis.ai/models/claude-sonnet-5-xhigh" } }, { id: "aa:9ac3908c-9eb2-44db-8c01-3ec7da6fc2ae", modelId: "qwen3-8-flash-next", reasoningEffort: null, thinking: "Reasoning configuration unspecified", categories: { "Intelligence Index": 39.8223021864741, "Terminal-Bench 4.0": 25.2525252525253, SciCode: 50.578703703703695 }, overall: 39.8223021864741, source: { kind: "artificial-analysis", url: "https://artificialanalysis.ai/models/glm-5-3", releaseDate: null, fetchedAt: 1791286695126, indexVersion: "4.3.2", modelUrl: "https://artificialanalysis.ai/models/qwen3-8-flash-next" } }, { id: "aa:9b166bf3-42db-4f63-8338-1c4a1244ffe8", modelId: "claude-fable-5-1", reasoningEffort: "xhigh", thinking: "Xhigh, Default Fallback", categories: { "Intelligence Index": 53.2032587538944, "Terminal-Bench 4.0": 55.050505050505, SciCode: 60.8796296296296 }, overall: 53.2032587538944, source: { kind: "artificial-analysis", url: "https://artificialanalysis.ai/models/glm-5-3", releaseDate: null, fetchedAt: 1791286695126, indexVersion: "4.3.2", modelUrl: "https://artificialanalysis.ai/models/claude-fable-5-1-xhigh" } }, { id: "aa:9b97a35e-6ac7-44d9-91c6-422fa678963e", modelId: "gpt-5-6-terra", reasoningEffort: "none", thinking: null, categories: { "Intelligence Index": 20.7797013584503, "Terminal-Bench 4.0": 0.505050505050505, SciCode: 45.1388888888889 }, overall: 20.7797013584503, source: { kind: "artificial-analysis", url: "https://artificialanalysis.ai/models/glm-5-3", releaseDate: null, fetchedAt: 1791286695126, indexVersion: "4.3.2", modelUrl: "https://artificialanalysis.ai/models/gpt-5-6-terra-non-reasoning" } }, { id: "aa:9d7d72cd-d95d-45a0-b109-4ad292c9aabd", modelId: "claude-fable-5-1", reasoningEffort: "high", thinking: "High, Default Fallback", categories: { "Intelligence Index": 51.1515708852237, "Terminal-Bench 4.0": 52.020202020202, SciCode: 58.6805555555556 }, overall: 51.1515708852237, source: { kind: "artificial-analysis", url: "https://artificialanalysis.ai/models/glm-5-3", releaseDate: null, fetchedAt: 1791286695126, indexVersion: "4.3.2", modelUrl: "https://artificialanalysis.ai/models/claude-fable-5-1-high" } }, { id: "aa:9dba61f5-78ee-4190-8d1d-8e7063ffd386", modelId: "qwen3-8b-instruct", reasoningEffort: null, thinking: "Reasoning", categories: { "Intelligence Index": null, "Terminal-Bench 4.0": 0, SciCode: 27.8935185185185 }, overall: null, source: { kind: "artificial-analysis", url: "https://artificialanalysis.ai/models/glm-5-3", releaseDate: null, fetchedAt: 1791286695126, indexVersion: "4.3.2", modelUrl: "https://artificialanalysis.ai/models/qwen3-8b-instruct-reasoning" } }, { id: "aa:9e30696f-16fa-4b4f-ba53-161895a85fed", modelId: "gpt-5-6-terra", reasoningEffort: "xhigh", thinking: null, categories: { "Intelligence Index": 37.9513370742927, "Terminal-Bench 4.0": 10.1010101010101, SciCode: 52.3148148148148 }, overall: 37.9513370742927, source: { kind: "artificial-analysis", url: "https://artificialanalysis.ai/models/glm-5-3", releaseDate: null, fetchedAt: 1791286695126, indexVersion: "4.3.2", modelUrl: "https://artificialanalysis.ai/models/gpt-5-6-terra-xhigh" } }, { id: "aa:9e9fb958-87f5-4835-a761-26102ef25898", modelId: "k2-horizon-0-9b", reasoningEffort: null, thinking: "Reasoning configuration unspecified", categories: { "Intelligence Index": 3.04760621054014, "Terminal-Bench 4.0": 0, SciCode: 6.94444444444444 }, overall: 3.04760621054014, source: { kind: "artificial-analysis", url: "https://artificialanalysis.ai/models/glm-5-3", releaseDate: null, fetchedAt: 1791286695126, indexVersion: "4.3.2", modelUrl: "https://artificialanalysis.ai/models/k2-horizon-0-9b" } }, { id: "aa:9ee13921-62a4-425a-a22b-df3302198d93", modelId: "nvidia-nemotron-3-nano-4b", reasoningEffort: null, thinking: "Reasoning configuration unspecified", categories: { "Intelligence Index": 4.76910061591993, "Terminal-Bench 4.0": 0, SciCode: 16.087962962963 }, overall: 4.76910061591993, source: { kind: "artificial-analysis", url: "https://artificialanalysis.ai/models/glm-5-3", releaseDate: null, fetchedAt: 1791286695126, indexVersion: "4.3.2", modelUrl: "https://artificialanalysis.ai/models/nvidia-nemotron-3-nano-4b" } }, { id: "aa:a2e51d62-ea4e-4f15-8be0-be9dc1fb489d", modelId: "gpt-6-1-sol", reasoningEffort: "medium", thinking: null, categories: { "Intelligence Index": 47.7833271274065, "Terminal-Bench 4.0": 47.979797979798, SciCode: 53.2407407407407 }, overall: 47.7833271274065, source: { kind: "artificial-analysis", url: "https://artificialanalysis.ai/models/glm-5-3", releaseDate: null, fetchedAt: 1791286695126, indexVersion: "4.3.2", modelUrl: "https://artificialanalysis.ai/models/gpt-6-1-sol-medium" } }, { id: "aa:a3f8100d-e38f-408b-b0fa-0085dae18dc1", modelId: "gpt-6-astra", reasoningEffort: "low", thinking: null, categories: { "Intelligence Index": 45.7819243120341, "Terminal-Bench 4.0": 41.9191919191919, SciCode: 54.050925925925895 }, overall: 45.7819243120341, source: { kind: "artificial-analysis", url: "https://artificialanalysis.ai/models/glm-5-3", releaseDate: null, fetchedAt: 1791286695126, indexVersion: "4.3.2", modelUrl: "https://artificialanalysis.ai/models/gpt-6-astra-low" } }, { id: "aa:a6043b9b-628a-4a76-a021-2834e0627d05", modelId: "ling-3-1-flash", reasoningEffort: null, thinking: "Reasoning configuration unspecified", categories: { "Intelligence Index": 41.0906200397391, "Terminal-Bench 4.0": 33.3333333333333, SciCode: 54.050925925925895 }, overall: 41.0906200397391, source: { kind: "artificial-analysis", url: "https://artificialanalysis.ai/models/glm-5-3", releaseDate: null, fetchedAt: 1791286695126, indexVersion: "4.3.2", modelUrl: "https://artificialanalysis.ai/models/ling-3-1-flash" } }, { id: "aa:a6340098-d7ae-462d-b372-0a0a67fc44b4", modelId: "claude-4-5-haiku", reasoningEffort: null, thinking: "Reasoning", categories: { "Intelligence Index": 16.8822352291856, "Terminal-Bench 4.0": 0, SciCode: 42.2453703703704 }, overall: 16.8822352291856, source: { kind: "artificial-analysis", url: "https://artificialanalysis.ai/models/glm-5-3", releaseDate: null, fetchedAt: 1791286695126, indexVersion: "4.3.2", modelUrl: "https://artificialanalysis.ai/models/claude-4-5-haiku-reasoning" } }, { id: "aa:a87fce42-eea3-4e45-a96d-fe057814f371", modelId: "qwen3-7-plus", reasoningEffort: null, thinking: "Reasoning configuration unspecified", categories: { "Intelligence Index": 25.1622215821984, "Terminal-Bench 4.0": 1.01010101010101, SciCode: 46.064814814814795 }, overall: 25.1622215821984, source: { kind: "artificial-analysis", url: "https://artificialanalysis.ai/models/glm-5-3", releaseDate: null, fetchedAt: 1791286695126, indexVersion: "4.3.2", modelUrl: "https://artificialanalysis.ai/models/qwen3-7-plus" } }, { id: "aa:aa55297e-8fbf-4372-b4ab-9b068dc6396c", modelId: "gpt-5-6-luna", reasoningEffort: "high", thinking: null, categories: { "Intelligence Index": 32.1196453501091, "Terminal-Bench 4.0": 2.52525252525253, SciCode: 51.6203703703704 }, overall: 32.1196453501091, source: { kind: "artificial-analysis", url: "https://artificialanalysis.ai/models/glm-5-3", releaseDate: null, fetchedAt: 1791286695126, indexVersion: "4.3.2", modelUrl: "https://artificialanalysis.ai/models/gpt-5-6-luna-high" } }, { id: "aa:adf9a85e-abc3-4f28-937b-db6655cc5238", modelId: "llama-4-scout", reasoningEffort: null, thinking: null, categories: { "Intelligence Index": null, "Terminal-Bench 4.0": 0, SciCode: 21.296296296296298 }, overall: null, source: { kind: "artificial-analysis", url: "https://artificialanalysis.ai/models/glm-5-3", releaseDate: null, fetchedAt: 1791286695126, indexVersion: "4.3.2", modelUrl: "https://artificialanalysis.ai/models/llama-4-scout" } }, { id: "aa:adfae555-f489-4f3e-9064-c6b7fcdd0783", modelId: "granite-4-2-8b", reasoningEffort: null, thinking: "Reasoning configuration unspecified", categories: { "Intelligence Index": 11.0812712267815, "Terminal-Bench 4.0": 0, SciCode: 31.4814814814815 }, overall: 11.0812712267815, source: { kind: "artificial-analysis", url: "https://artificialanalysis.ai/models/glm-5-3", releaseDate: null, fetchedAt: 1791286695126, indexVersion: "4.3.2", modelUrl: "https://artificialanalysis.ai/models/granite-4-2-8b" } }, { id: "aa:b00ecd62-a53f-4aed-b833-3e9d6b0170ba", modelId: "qwen3-32b-instruct", reasoningEffort: null, thinking: "Reasoning", categories: { "Intelligence Index": null, "Terminal-Bench 4.0": 0, SciCode: 35.9953703703704 }, overall: null, source: { kind: "artificial-analysis", url: "https://artificialanalysis.ai/models/glm-5-3", releaseDate: null, fetchedAt: 1791286695126, indexVersion: "4.3.2", modelUrl: "https://artificialanalysis.ai/models/qwen3-32b-instruct-reasoning" } }, { id: "aa:b01dee41-c62b-48ed-8d16-984adc405e5c", modelId: "qwen3-8-27b", reasoningEffort: "xhigh", thinking: null, categories: { "Intelligence Index": 33.6962858057476, "Terminal-Bench 4.0": 5.55555555555556, SciCode: 46.6435185185185 }, overall: 33.6962858057476, source: { kind: "artificial-analysis", url: "https://artificialanalysis.ai/models/glm-5-3", releaseDate: null, fetchedAt: 1791286695126, indexVersion: "4.3.2", modelUrl: "https://artificialanalysis.ai/models/qwen3-8-27b" } }, { id: "aa:b01eefb1-c9f8-412d-8353-571031a52f23", modelId: "motif-3", reasoningEffort: null, thinking: "Reasoning configuration unspecified", categories: { "Intelligence Index": null, "Terminal-Bench 4.0": null, SciCode: 42.2453703703704 }, overall: null, source: { kind: "artificial-analysis", url: "https://artificialanalysis.ai/models/glm-5-3", releaseDate: null, fetchedAt: 1791286695126, indexVersion: "4.3.2", modelUrl: "https://artificialanalysis.ai/models/motif-3" } }, { id: "aa:b112af07-3bd5-4647-b09f-b23204361bb2", modelId: "qwen3-8-max-0902", reasoningEffort: null, thinking: "Reasoning configuration unspecified", categories: { "Intelligence Index": 45.4152084980521, "Terminal-Bench 4.0": 38.8888888888889, SciCode: 52.0833333333333 }, overall: 45.4152084980521, source: { kind: "artificial-analysis", url: "https://artificialanalysis.ai/models/glm-5-3", releaseDate: null, fetchedAt: 1791286695126, indexVersion: "4.3.2", modelUrl: "https://artificialanalysis.ai/models/qwen3-8-max" } }, { id: "aa:b13c1257-d746-4027-8fc8-4892dc14701c", modelId: "gpt-5-5", reasoningEffort: "high", thinking: null, categories: { "Intelligence Index": 36.9793737887731, "Terminal-Bench 4.0": 9.09090909090909, SciCode: 56.1342592592593 }, overall: 36.9793737887731, source: { kind: "artificial-analysis", url: "https://artificialanalysis.ai/models/glm-5-3", releaseDate: null, fetchedAt: 1791286695126, indexVersion: "4.3.2", modelUrl: "https://artificialanalysis.ai/models/gpt-5-5-high" } }, { id: "aa:b171d979-5ec1-45de-b8b9-db1ee65e77ec", modelId: "claude-sonnet-5-5", reasoningEffort: "max", thinking: "Max, Default Fallback", categories: { "Intelligence Index": 56.0001286580794, "Terminal-Bench 4.0": 63.636363636363605, SciCode: 60.9953703703704 }, overall: 56.0001286580794, source: { kind: "artificial-analysis", url: "https://artificialanalysis.ai/models/glm-5-3", releaseDate: null, fetchedAt: 1791286695126, indexVersion: "4.3.2", modelUrl: "https://artificialanalysis.ai/models/claude-sonnet-5-5" } }, { id: "aa:b2331108-72ed-415a-82d1-188633875bbc", modelId: "gemini-3-7-flash", reasoningEffort: "high", thinking: null, categories: { "Intelligence Index": 39.0594566404896, "Terminal-Bench 4.0": 13.6363636363636, SciCode: 57.175925925925895 }, overall: 39.0594566404896, source: { kind: "artificial-analysis", url: "https://artificialanalysis.ai/models/glm-5-3", releaseDate: null, fetchedAt: 1791286695126, indexVersion: "4.3.2", modelUrl: "https://artificialanalysis.ai/models/gemini-3-7-flash" } }, { id: "aa:b23e6c69-96e5-44c9-8f58-4b42e0c399d5", modelId: "hy3", reasoningEffort: null, thinking: "Reasoning configuration unspecified", categories: { "Intelligence Index": 25.2972775731571, "Terminal-Bench 4.0": 0.505050505050505, SciCode: 48.6111111111111 }, overall: 25.2972775731571, source: { kind: "artificial-analysis", url: "https://artificialanalysis.ai/models/glm-5-3", releaseDate: null, fetchedAt: 1791286695126, indexVersion: "4.3.2", modelUrl: "https://artificialanalysis.ai/models/hy3" } }, { id: "aa:b25ac058-1e33-4c31-bbc9-a20c3ad0717a", modelId: "gpt-6-1-sol", reasoningEffort: "max", thinking: null, categories: { "Intelligence Index": 51.8332597011541, "Terminal-Bench 4.0": 56.0606060606061, SciCode: 54.1666666666667 }, overall: 51.8332597011541, source: { kind: "artificial-analysis", url: "https://artificialanalysis.ai/models/glm-5-3", releaseDate: null, fetchedAt: 1791286695126, indexVersion: "4.3.2", modelUrl: "https://artificialanalysis.ai/models/gpt-6-1-sol" } }, { id: "aa:b6d2e43d-3082-43f5-9318-0f4dbcb54163", modelId: "trinity-large-thinking", reasoningEffort: null, thinking: "Reasoning configuration unspecified", categories: { "Intelligence Index": 10.8242425924218, "Terminal-Bench 4.0": 0.505050505050505, SciCode: 40.625 }, overall: 10.8242425924218, source: { kind: "artificial-analysis", url: "https://artificialanalysis.ai/models/glm-5-3", releaseDate: null, fetchedAt: 1791286695126, indexVersion: "4.3.2", modelUrl: "https://artificialanalysis.ai/models/trinity-large-thinking" } }, { id: "aa:b89c4faf-219e-4171-a1aa-e3bd2fd0a924", modelId: "solar-pro-3", reasoningEffort: "high", thinking: null, categories: { "Intelligence Index": 7.81551744502774, "Terminal-Bench 4.0": 0, SciCode: 25.462962962962997 }, overall: 7.81551744502774, source: { kind: "artificial-analysis", url: "https://artificialanalysis.ai/models/glm-5-3", releaseDate: null, fetchedAt: 1791286695126, indexVersion: "4.3.2", modelUrl: "https://artificialanalysis.ai/models/solar-pro-3" } }, { id: "aa:b8fc61f7-5e9a-49e6-8547-6ac56db24627", modelId: "claude-opus-5", reasoningEffort: "max", thinking: null, categories: { "Intelligence Index": 50.7771115797629, "Terminal-Bench 4.0": 48.989898989899, SciCode: 56.3657407407407 }, overall: 50.7771115797629, source: { kind: "artificial-analysis", url: "https://artificialanalysis.ai/models/glm-5-3", releaseDate: null, fetchedAt: 1791286695126, indexVersion: "4.3.2", modelUrl: "https://artificialanalysis.ai/models/claude-opus-5" } }, { id: "aa:ba0224cf-0351-4f56-8508-b3f1a740ae4a", modelId: "claude-sonnet-5", reasoningEffort: "high", thinking: null, categories: { "Intelligence Index": 31.6623246664651, "Terminal-Bench 4.0": 5.05050505050505, SciCode: 54.2824074074074 }, overall: 31.6623246664651, source: { kind: "artificial-analysis", url: "https://artificialanalysis.ai/models/glm-5-3", releaseDate: null, fetchedAt: 1791286695126, indexVersion: "4.3.2", modelUrl: "https://artificialanalysis.ai/models/claude-sonnet-5-high" } }, { id: "aa:ba242e40-83b7-4cd3-a0e0-b56237984914", modelId: "gpt-5-4-mini", reasoningEffort: "xhigh", thinking: null, categories: { "Intelligence Index": 24.0682169231964, "Terminal-Bench 4.0": 2.02020202020202, SciCode: 52.0833333333333 }, overall: 24.0682169231964, source: { kind: "artificial-analysis", url: "https://artificialanalysis.ai/models/glm-5-3", releaseDate: null, fetchedAt: 1791286695126, indexVersion: "4.3.2", modelUrl: "https://artificialanalysis.ai/models/gpt-5-4-mini" } }, { id: "aa:bb3d7e75-8e22-4082-b9d6-1db0803e042f", modelId: "k2-horizon-375b-a23b", reasoningEffort: null, thinking: "Reasoning configuration unspecified", categories: { "Intelligence Index": 30.5015302696723, "Terminal-Bench 4.0": 1.51515151515152, SciCode: 42.939814814814795 }, overall: 30.5015302696723, source: { kind: "artificial-analysis", url: "https://artificialanalysis.ai/models/glm-5-3", releaseDate: null, fetchedAt: 1791286695126, indexVersion: "4.3.2", modelUrl: "https://artificialanalysis.ai/models/k2-horizon-375b-a23b" } }, { id: "aa:bbc2ffea-cf6b-43be-8c41-1769347e234d", modelId: "claude-sonnet-5-5", reasoningEffort: "low", thinking: "Low, Default Fallback", categories: { "Intelligence Index": 35.8681594577587, "Terminal-Bench 4.0": 20.7070707070707, SciCode: 49.0740740740741 }, overall: 35.8681594577587, source: { kind: "artificial-analysis", url: "https://artificialanalysis.ai/models/glm-5-3", releaseDate: null, fetchedAt: 1791286695126, indexVersion: "4.3.2", modelUrl: "https://artificialanalysis.ai/models/claude-sonnet-5-5-low" } }, { id: "aa:bbd93ebe-80da-4594-bb19-61e69d0331df", modelId: "gemini-3-1-pro-preview", reasoningEffort: null, thinking: "Reasoning configuration unspecified", categories: { "Intelligence Index": 29.7185656132261, "Terminal-Bench 4.0": 4.04040404040404, SciCode: 58.6805555555556 }, overall: 29.7185656132261, source: { kind: "artificial-analysis", url: "https://artificialanalysis.ai/models/glm-5-3", releaseDate: null, fetchedAt: 1791286695126, indexVersion: "4.3.2", modelUrl: "https://artificialanalysis.ai/models/gemini-3-1-pro-preview" } }, { id: "aa:bcf8db0a-3bb6-4d82-9516-0f57370c85a6", modelId: "gpt-5-6-terra", reasoningEffort: "max", thinking: null, categories: { "Intelligence Index": 42.0829248239494, "Terminal-Bench 4.0": 35.3535353535354, SciCode: 54.976851851851805 }, overall: 42.0829248239494, source: { kind: "artificial-analysis", url: "https://artificialanalysis.ai/models/glm-5-3", releaseDate: null, fetchedAt: 1791286695126, indexVersion: "4.3.2", modelUrl: "https://artificialanalysis.ai/models/gpt-5-6-terra" } }, { id: "aa:bf220674-68bd-43cc-a1b8-ce5ed4d2f18d", modelId: "deepseek-v4-pro-0424", reasoningEffort: "max", thinking: null, categories: { "Intelligence Index": 30.4496601315524, "Terminal-Bench 4.0": 14.6464646464646, SciCode: 50.8101851851852 }, overall: 30.4496601315524, source: { kind: "artificial-analysis", url: "https://artificialanalysis.ai/models/glm-5-3", releaseDate: null, fetchedAt: 1791286695126, indexVersion: "4.3.2", modelUrl: "https://artificialanalysis.ai/models/deepseek-v4-pro-0424" } }, { id: "aa:bf9708d8-933d-44f6-affa-b696a7a650c9", modelId: "gpt-6-luna", reasoningEffort: "low", thinking: null, categories: { "Intelligence Index": 21.5261980080866, "Terminal-Bench 4.0": 0, SciCode: 46.875 }, overall: 21.5261980080866, source: { kind: "artificial-analysis", url: "https://artificialanalysis.ai/models/glm-5-3", releaseDate: null, fetchedAt: 1791286695126, indexVersion: "4.3.2", modelUrl: "https://artificialanalysis.ai/models/gpt-6-luna-low" } }, { id: "aa:c07e65e6-32fc-451e-938d-7477a1c3ffcc", modelId: "grok-4-6", reasoningEffort: "low", thinking: null, categories: { "Intelligence Index": 35.1246953482174, "Terminal-Bench 4.0": 3.03030303030303, SciCode: 49.421296296296305 }, overall: 35.1246953482174, source: { kind: "artificial-analysis", url: "https://artificialanalysis.ai/models/glm-5-3", releaseDate: null, fetchedAt: 1791286695126, indexVersion: "4.3.2", modelUrl: "https://artificialanalysis.ai/models/grok-4-6-low" } }, { id: "aa:c1c5db7c-968f-445a-a274-7b5689348bf8", modelId: "g9v3-39a5b", reasoningEffort: null, thinking: "Reasoning configuration unspecified", categories: { "Intelligence Index": null, "Terminal-Bench 4.0": null, SciCode: 36.8055555555556 }, overall: null, source: { kind: "artificial-analysis", url: "https://artificialanalysis.ai/models/glm-5-3", releaseDate: null, fetchedAt: 1791286695126, indexVersion: "4.3.2", modelUrl: "https://artificialanalysis.ai/models/g9v3-39a5b" } }, { id: "aa:c4169d75-9d24-4794-a9c3-69e1fe364de5", modelId: "gpt-5-5-instant-06-26", reasoningEffort: null, thinking: "Reasoning configuration unspecified", categories: { "Intelligence Index": 26.0135173401368, "Terminal-Bench 4.0": 12.6262626262626, SciCode: 52.546296296296305 }, overall: 26.0135173401368, source: { kind: "artificial-analysis", url: "https://artificialanalysis.ai/models/glm-5-3", releaseDate: null, fetchedAt: 1791286695126, indexVersion: "4.3.2", modelUrl: "https://artificialanalysis.ai/models/gpt-5-5-instant-06-26" } }, { id: "aa:c50ea08c-88c0-4eb7-85b8-27f2bbf6d527", modelId: "gpt-6-sol", reasoningEffort: "max", thinking: null, categories: { "Intelligence Index": 47.6305176437724, "Terminal-Bench 4.0": 43.9393939393939, SciCode: 57.63888888888889 }, overall: 47.6305176437724, source: { kind: "artificial-analysis", url: "https://artificialanalysis.ai/models/glm-5-3", releaseDate: null, fetchedAt: 1791286695126, indexVersion: "4.3.2", modelUrl: "https://artificialanalysis.ai/models/gpt-6-sol" } }, { id: "aa:c8adc5cf-fd5a-407b-af51-dc3bede3e49c", modelId: "grok-4-6", reasoningEffort: "high", thinking: null, categories: { "Intelligence Index": 44.3113073012592, "Terminal-Bench 4.0": 21.2121212121212, SciCode: 56.4814814814815 }, overall: 44.3113073012592, source: { kind: "artificial-analysis", url: "https://artificialanalysis.ai/models/glm-5-3", releaseDate: null, fetchedAt: 1791286695126, indexVersion: "4.3.2", modelUrl: "https://artificialanalysis.ai/models/grok-4-6" } }, { id: "aa:cc1e488b-8ba4-464d-875d-690166b15ad3", modelId: "glm-5-3", reasoningEffort: "low", thinking: null, categories: { "Intelligence Index": 34.2990078159643, "Terminal-Bench 4.0": 34.8484848484849, SciCode: 42.0138888888889 }, overall: 34.2990078159643, source: { kind: "artificial-analysis", url: "https://artificialanalysis.ai/models/glm-5-3", releaseDate: null, fetchedAt: 1791286695126, indexVersion: "4.3.2", modelUrl: "https://artificialanalysis.ai/models/glm-5-3-low" } }, { id: "aa:cc4a20cd-09fe-4962-a430-119c815e85fa", modelId: "gpt-5-6-terra", reasoningEffort: "low", thinking: null, categories: { "Intelligence Index": 27.496203401716, "Terminal-Bench 4.0": 1.51515151515152, SciCode: 49.8842592592593 }, overall: 27.496203401716, source: { kind: "artificial-analysis", url: "https://artificialanalysis.ai/models/glm-5-3", releaseDate: null, fetchedAt: 1791286695126, indexVersion: "4.3.2", modelUrl: "https://artificialanalysis.ai/models/gpt-5-6-terra-low" } }, { id: "aa:cd26a386-4873-46ff-b853-d239050025a2", modelId: "gemma-4-31b", reasoningEffort: null, thinking: "Reasoning", categories: { "Intelligence Index": 14.6689500745828, "Terminal-Bench 4.0": 0, SciCode: 45.4861111111111 }, overall: 14.6689500745828, source: { kind: "artificial-analysis", url: "https://artificialanalysis.ai/models/glm-5-3", releaseDate: null, fetchedAt: 1791286695126, indexVersion: "4.3.2", modelUrl: "https://artificialanalysis.ai/models/gemma-4-31b" } }, { id: "aa:cd55210d-358e-4df1-ba9c-9acb5f186cc9", modelId: "claude-fable-5", reasoningEffort: "max", thinking: "Max, Opus 4.8 Fallback", categories: { "Intelligence Index": 49.6258202733378, "Terminal-Bench 4.0": 42.4242424242424, SciCode: 60.9953703703704 }, overall: 49.6258202733378, source: { kind: "artificial-analysis", url: "https://artificialanalysis.ai/models/glm-5-3", releaseDate: null, fetchedAt: 1791286695126, indexVersion: "4.3.2", modelUrl: "https://artificialanalysis.ai/models/claude-fable-5" } }, { id: "aa:ce819310-af7c-49d3-9a02-6845111e1788", modelId: "devstral-small-2", reasoningEffort: null, thinking: null, categories: { "Intelligence Index": 7.5369358990318, "Terminal-Bench 4.0": 0, SciCode: 32.407407407407405 }, overall: 7.5369358990318, source: { kind: "artificial-analysis", url: "https://artificialanalysis.ai/models/glm-5-3", releaseDate: null, fetchedAt: 1791286695126, indexVersion: "4.3.2", modelUrl: "https://artificialanalysis.ai/models/devstral-small-2" } }, { id: "aa:d366dfa1-d940-4788-aa73-d298c45699b3", modelId: "gemini-4-argon", reasoningEffort: "high", thinking: null, categories: { "Intelligence Index": 52.5605655745982, "Terminal-Bench 4.0": 57.07070707070711, SciCode: 61.8055555555556 }, overall: 52.5605655745982, source: { kind: "artificial-analysis", url: "https://artificialanalysis.ai/models/glm-5-3", releaseDate: null, fetchedAt: 1791286695126, indexVersion: "4.3.2", modelUrl: "https://artificialanalysis.ai/models/gemini-4-argon" } }, { id: "aa:d3e20e76-9e1a-45b6-b809-ad6aa37430cf", modelId: "gpt-6-sol", reasoningEffort: "none", thinking: null, categories: { "Intelligence Index": 28.5121413410513, "Terminal-Bench 4.0": 13.1313131313131, SciCode: 47.337962962963 }, overall: 28.5121413410513, source: { kind: "artificial-analysis", url: "https://artificialanalysis.ai/models/glm-5-3", releaseDate: null, fetchedAt: 1791286695126, indexVersion: "4.3.2", modelUrl: "https://artificialanalysis.ai/models/gpt-6-sol-non-reasoning" } }, { id: "aa:d4f5b250-be37-4801-85e6-32fda4179337", modelId: "deepseek-v4-pro", reasoningEffort: "none", thinking: null, categories: { "Intelligence Index": 20.3605101726847, "Terminal-Bench 4.0": 1.51515151515152, SciCode: 39.9305555555556 }, overall: 20.3605101726847, source: { kind: "artificial-analysis", url: "https://artificialanalysis.ai/models/glm-5-3", releaseDate: null, fetchedAt: 1791286695126, indexVersion: "4.3.2", modelUrl: "https://artificialanalysis.ai/models/deepseek-v4-pro-non-reasoning" } }, { id: "aa:d4fc3f33-f2b0-4da1-88ee-f1f82bd4de31", modelId: "gpt-5-4-nano", reasoningEffort: "xhigh", thinking: null, categories: { "Intelligence Index": 20.7197352504557, "Terminal-Bench 4.0": 0.505050505050505, SciCode: 47.2222222222222 }, overall: 20.7197352504557, source: { kind: "artificial-analysis", url: "https://artificialanalysis.ai/models/glm-5-3", releaseDate: null, fetchedAt: 1791286695126, indexVersion: "4.3.2", modelUrl: "https://artificialanalysis.ai/models/gpt-5-4-nano" } }, { id: "aa:d5170215-69be-4129-849b-26d8d8825bfc", modelId: "muse-spark-1-3", reasoningEffort: "xhigh", thinking: null, categories: { "Intelligence Index": 45.0732966922226, "Terminal-Bench 4.0": 16.6666666666667, SciCode: 59.7222222222222 }, overall: 45.0732966922226, source: { kind: "artificial-analysis", url: "https://artificialanalysis.ai/models/glm-5-3", releaseDate: null, fetchedAt: 1791286695126, indexVersion: "4.3.2", modelUrl: "https://artificialanalysis.ai/models/muse-spark-1-3-xhigh" } }, { id: "aa:d61493e2-43ff-460c-9054-eaf6ba317360", modelId: "muse-spark-1-1", reasoningEffort: "xhigh", thinking: null, categories: { "Intelligence Index": 33.7298425919846, "Terminal-Bench 4.0": 6.06060606060606, SciCode: 58.796296296296305 }, overall: 33.7298425919846, source: { kind: "artificial-analysis", url: "https://artificialanalysis.ai/models/glm-5-3", releaseDate: null, fetchedAt: 1791286695126, indexVersion: "4.3.2", modelUrl: "https://artificialanalysis.ai/models/muse-spark-1-1" } }, { id: "aa:d6f43d0a-e8c4-447c-9ff7-5cf0a9d59aa3", modelId: "grok-4-6", reasoningEffort: "xhigh", thinking: null, categories: { "Intelligence Index": 44.199810436996, "Terminal-Bench 4.0": 17.171717171717198, SciCode: 53.0092592592593 }, overall: 44.199810436996, source: { kind: "artificial-analysis", url: "https://artificialanalysis.ai/models/glm-5-3", releaseDate: null, fetchedAt: 1791286695126, indexVersion: "4.3.2", modelUrl: "https://artificialanalysis.ai/models/grok-4-6-xhigh" } }, { id: "aa:d80eb0f1-f62e-4d31-99d2-7a925eb126b0", modelId: "gemma-4-e4b", reasoningEffort: null, thinking: "Reasoning", categories: { "Intelligence Index": null, "Terminal-Bench 4.0": 0, SciCode: 24.421296296296298 }, overall: null, source: { kind: "artificial-analysis", url: "https://artificialanalysis.ai/models/glm-5-3", releaseDate: null, fetchedAt: 1791286695126, indexVersion: "4.3.2", modelUrl: "https://artificialanalysis.ai/models/gemma-4-e4b" } }, { id: "aa:d8ddb241-b3e4-4c25-a6a3-72eb1b30c541", modelId: "deepseek-v4-flash-0420", reasoningEffort: "max", thinking: null, categories: { "Intelligence Index": 24.1673138235549, "Terminal-Bench 4.0": 2.52525252525253, SciCode: 45.2546296296296 }, overall: 24.1673138235549, source: { kind: "artificial-analysis", url: "https://artificialanalysis.ai/models/glm-5-3", releaseDate: null, fetchedAt: 1791286695126, indexVersion: "4.3.2", modelUrl: "https://artificialanalysis.ai/models/deepseek-v4-flash-0420" } }, { id: "aa:d93edfe8-bf35-49ad-b56e-b18116142a1c", modelId: "gpt-5-6-sol", reasoningEffort: "max", thinking: null, categories: { "Intelligence Index": 46.9727068915036, "Terminal-Bench 4.0": 39.8989898989899, SciCode: 57.0601851851852 }, overall: 46.9727068915036, source: { kind: "artificial-analysis", url: "https://artificialanalysis.ai/models/glm-5-3", releaseDate: null, fetchedAt: 1791286695126, indexVersion: "4.3.2", modelUrl: "https://artificialanalysis.ai/models/gpt-5-6-sol" } }, { id: "aa:d998db47-9b67-4727-a2bb-2e1261020ac0", modelId: "gpt-5-6-sol", reasoningEffort: "xhigh", thinking: null, categories: { "Intelligence Index": 44.008876369169, "Terminal-Bench 4.0": 24.747474747474698, SciCode: 57.0601851851852 }, overall: 44.008876369169, source: { kind: "artificial-analysis", url: "https://artificialanalysis.ai/models/glm-5-3", releaseDate: null, fetchedAt: 1791286695126, indexVersion: "4.3.2", modelUrl: "https://artificialanalysis.ai/models/gpt-5-6-sol-xhigh" } }, { id: "aa:da2642fe-9f73-4788-b5af-24edcd55b37e", modelId: "gpt-6-sol", reasoningEffort: "xhigh", thinking: null, categories: { "Intelligence Index": 44.2448955516407, "Terminal-Bench 4.0": 30.303030303030297, SciCode: 55.0925925925926 }, overall: 44.2448955516407, source: { kind: "artificial-analysis", url: "https://artificialanalysis.ai/models/glm-5-3", releaseDate: null, fetchedAt: 1791286695126, indexVersion: "4.3.2", modelUrl: "https://artificialanalysis.ai/models/gpt-6-sol-xhigh" } }, { id: "aa:dbe7c625-3100-4463-b479-a228c41f75dd", modelId: "deepseek-v4-1-flash", reasoningEffort: "max", thinking: null, categories: { "Intelligence Index": 39.456167472527, "Terminal-Bench 4.0": 26.7676767676768, SciCode: 51.851851851851805 }, overall: 39.456167472527, source: { kind: "artificial-analysis", url: "https://artificialanalysis.ai/models/glm-5-3", releaseDate: null, fetchedAt: 1791286695126, indexVersion: "4.3.2", modelUrl: "https://artificialanalysis.ai/models/deepseek-v4-1-flash" } }, { id: "aa:dc64f856-3ded-497d-9527-d41d31267ed5", modelId: "gpt-5-6-luna", reasoningEffort: "none", thinking: null, categories: { "Intelligence Index": 15.5270002110259, "Terminal-Bench 4.0": 1.01010101010101, SciCode: 40.3935185185185 }, overall: 15.5270002110259, source: { kind: "artificial-analysis", url: "https://artificialanalysis.ai/models/glm-5-3", releaseDate: null, fetchedAt: 1791286695126, indexVersion: "4.3.2", modelUrl: "https://artificialanalysis.ai/models/gpt-5-6-luna-non-reasoning" } }, { id: "aa:dd059b25-d82a-4ead-82a4-4adceaaec48b", modelId: "mistral-medium-3-5", reasoningEffort: "high", thinking: null, categories: { "Intelligence Index": 14.1889227802691, "Terminal-Bench 4.0": 0, SciCode: 40.162037037037 }, overall: 14.1889227802691, source: { kind: "artificial-analysis", url: "https://artificialanalysis.ai/models/glm-5-3", releaseDate: null, fetchedAt: 1791286695126, indexVersion: "4.3.2", modelUrl: "https://artificialanalysis.ai/models/mistral-medium-3-5" } }, { id: "aa:ddfdaf64-3f8e-40a6-a492-608ee83a1351", modelId: "gemini-3-7-flash", reasoningEffort: "low", thinking: null, categories: { "Intelligence Index": null, "Terminal-Bench 4.0": null, SciCode: 55.671296296296305 }, overall: null, source: { kind: "artificial-analysis", url: "https://artificialanalysis.ai/models/glm-5-3", releaseDate: null, fetchedAt: 1791286695126, indexVersion: "4.3.2", modelUrl: "https://artificialanalysis.ai/models/gemini-3-7-flash-low" } }, { id: "aa:df5bf99d-d228-4715-b41b-19ca86118777", modelId: "claude-opus-5-5", reasoningEffort: "xhigh", thinking: "Xhigh, Default Fallback", categories: { "Intelligence Index": 55.9873505840139, "Terminal-Bench 4.0": 59.5959595959596, SciCode: 65.0462962962963 }, overall: 55.9873505840139, source: { kind: "artificial-analysis", url: "https://artificialanalysis.ai/models/glm-5-3", releaseDate: null, fetchedAt: 1791286695126, indexVersion: "4.3.2", modelUrl: "https://artificialanalysis.ai/models/claude-opus-5-5-xhigh" } }, { id: "aa:df8d14e0-3997-4e4d-b4ad-9c047acc9c69", modelId: "claude-sonnet-4-6", reasoningEffort: "max", thinking: null, categories: { "Intelligence Index": 30.0575611117644, "Terminal-Bench 4.0": 3.03030303030303, SciCode: 50.1157407407407 }, overall: 30.0575611117644, source: { kind: "artificial-analysis", url: "https://artificialanalysis.ai/models/glm-5-3", releaseDate: null, fetchedAt: 1791286695126, indexVersion: "4.3.2", modelUrl: "https://artificialanalysis.ai/models/claude-sonnet-4-6-adaptive" } }, { id: "aa:e05a4828-0536-4876-870d-a235023f992b", modelId: "gpt-6-astra", reasoningEffort: "high", thinking: null, categories: { "Intelligence Index": 50.9191471636152, "Terminal-Bench 4.0": 54.040404040404, SciCode: 55.4398148148148 }, overall: 50.9191471636152, source: { kind: "artificial-analysis", url: "https://artificialanalysis.ai/models/glm-5-3", releaseDate: null, fetchedAt: 1791286695126, indexVersion: "4.3.2", modelUrl: "https://artificialanalysis.ai/models/gpt-6-astra-high" } }, { id: "aa:e1bfc488-5f48-4d42-abf6-7f3c53d79f9c", modelId: "lfm2-5-2-6b", reasoningEffort: null, thinking: "Reasoning configuration unspecified", categories: { "Intelligence Index": null, "Terminal-Bench 4.0": null, SciCode: 14.3518518518519 }, overall: null, source: { kind: "artificial-analysis", url: "https://artificialanalysis.ai/models/glm-5-3", releaseDate: null, fetchedAt: 1791286695126, indexVersion: "4.3.2", modelUrl: "https://artificialanalysis.ai/models/lfm2-5-2-6b" } }, { id: "aa:e33dc369-ae81-40e0-8c4e-28b002d02197", modelId: "ling-3-0-flash", reasoningEffort: null, thinking: "Reasoning configuration unspecified", categories: { "Intelligence Index": 20.1332521865481, "Terminal-Bench 4.0": 0, SciCode: 42.0138888888889 }, overall: 20.1332521865481, source: { kind: "artificial-analysis", url: "https://artificialanalysis.ai/models/glm-5-3", releaseDate: null, fetchedAt: 1791286695126, indexVersion: "4.3.2", modelUrl: "https://artificialanalysis.ai/models/ling-3-0-flash" } }, { id: "aa:e76e0fe5-93ca-4272-9359-2eb1740467d1", modelId: "gpt-6-1-sol", reasoningEffort: "low", thinking: null, categories: { "Intelligence Index": 42.0835618555848, "Terminal-Bench 4.0": 30.808080808080803, SciCode: 53.2407407407407 }, overall: 42.0835618555848, source: { kind: "artificial-analysis", url: "https://artificialanalysis.ai/models/glm-5-3", releaseDate: null, fetchedAt: 1791286695126, indexVersion: "4.3.2", modelUrl: "https://artificialanalysis.ai/models/gpt-6-1-sol-low" } }, { id: "aa:e97a4ef5-e817-480e-9595-12f81dc4974f", modelId: "gpt-6-astra", reasoningEffort: "medium", thinking: null, categories: { "Intelligence Index": 49.5704363034369, "Terminal-Bench 4.0": 49.494949494949495, SciCode: 54.1666666666667 }, overall: 49.5704363034369, source: { kind: "artificial-analysis", url: "https://artificialanalysis.ai/models/glm-5-3", releaseDate: null, fetchedAt: 1791286695126, indexVersion: "4.3.2", modelUrl: "https://artificialanalysis.ai/models/gpt-6-astra-medium" } }, { id: "aa:ea9e0da6-169f-43c6-92f5-730a10d6ff8d", modelId: "claude-opus-5-5", reasoningEffort: "medium", thinking: "Medium, Default Fallback", categories: { "Intelligence Index": 51.2434931792768, "Terminal-Bench 4.0": 52.5252525252525, SciCode: 59.2592592592593 }, overall: 51.2434931792768, source: { kind: "artificial-analysis", url: "https://artificialanalysis.ai/models/glm-5-3", releaseDate: null, fetchedAt: 1791286695126, indexVersion: "4.3.2", modelUrl: "https://artificialanalysis.ai/models/claude-opus-5-5-medium" } }, { id: "aa:eb0d4272-7204-42b9-b875-8866fed58548", modelId: "gemini-3-7-flash", reasoningEffort: "medium", thinking: null, categories: { "Intelligence Index": null, "Terminal-Bench 4.0": null, SciCode: 59.837962962963 }, overall: null, source: { kind: "artificial-analysis", url: "https://artificialanalysis.ai/models/glm-5-3", releaseDate: null, fetchedAt: 1791286695126, indexVersion: "4.3.2", modelUrl: "https://artificialanalysis.ai/models/gemini-3-7-flash-medium" } }, { id: "aa:eb4ba465-3fcd-4065-9fe2-e8225e7b2c6c", modelId: "ring-2-6-1t", reasoningEffort: "xhigh", thinking: null, categories: { "Intelligence Index": 16.6172363768618, "Terminal-Bench 4.0": 0.505050505050505, SciCode: 45.0231481481481 }, overall: 16.6172363768618, source: { kind: "artificial-analysis", url: "https://artificialanalysis.ai/models/glm-5-3", releaseDate: null, fetchedAt: 1791286695126, indexVersion: "4.3.2", modelUrl: "https://artificialanalysis.ai/models/ring-2-6-1t" } }, { id: "aa:effcd151-7c31-4437-af3d-e88daeae9385", modelId: "claude-sonnet-5", reasoningEffort: "medium", thinking: null, categories: { "Intelligence Index": 28.0531468379456, "Terminal-Bench 4.0": 2.02020202020202, SciCode: 51.6203703703704 }, overall: 28.0531468379456, source: { kind: "artificial-analysis", url: "https://artificialanalysis.ai/models/glm-5-3", releaseDate: null, fetchedAt: 1791286695126, indexVersion: "4.3.2", modelUrl: "https://artificialanalysis.ai/models/claude-sonnet-5-medium" } }, { id: "aa:f0083258-8646-45b8-8082-7aaf6c2ea82a", modelId: "gpt-oss-120b", reasoningEffort: "high", thinking: null, categories: { "Intelligence Index": 11.6028431512592, "Terminal-Bench 4.0": 0, SciCode: 34.0277777777778 }, overall: 11.6028431512592, source: { kind: "artificial-analysis", url: "https://artificialanalysis.ai/models/glm-5-3", releaseDate: null, fetchedAt: 1791286695126, indexVersion: "4.3.2", modelUrl: "https://artificialanalysis.ai/models/gpt-oss-120b" } }, { id: "aa:f314eade-2232-44bf-a3ab-9b326bc67de6", modelId: "claude-opus-5-5", reasoningEffort: "high", thinking: "High, Default Fallback", categories: { "Intelligence Index": 53.5831959822067, "Terminal-Bench 4.0": 56.565656565656596, SciCode: 60.4166666666667 }, overall: 53.5831959822067, source: { kind: "artificial-analysis", url: "https://artificialanalysis.ai/models/glm-5-3", releaseDate: null, fetchedAt: 1791286695126, indexVersion: "4.3.2", modelUrl: "https://artificialanalysis.ai/models/claude-opus-5-5-high" } }, { id: "aa:f6ccbe1d-bd7e-484b-9795-18cc9f91552d", modelId: "qwen3-235b-a22b-instruct-2507-reasoning", reasoningEffort: null, thinking: "Reasoning configuration unspecified", categories: { "Intelligence Index": 12.7108511527974, "Terminal-Bench 4.0": 0, SciCode: 41.435185185185205 }, overall: 12.7108511527974, source: { kind: "artificial-analysis", url: "https://artificialanalysis.ai/models/glm-5-3", releaseDate: null, fetchedAt: 1791286695126, indexVersion: "4.3.2", modelUrl: "https://artificialanalysis.ai/models/qwen3-235b-a22b-instruct-2507-reasoning" } }, { id: "aa:f6db039b-0f3b-485c-9d7f-982988e44f26", modelId: "gemini-3-8-flash", reasoningEffort: "low", thinking: null, categories: { "Intelligence Index": 33.4548106699132, "Terminal-Bench 4.0": 10.1010101010101, SciCode: 54.976851851851805 }, overall: 33.4548106699132, source: { kind: "artificial-analysis", url: "https://artificialanalysis.ai/models/glm-5-3", releaseDate: null, fetchedAt: 1791286695126, indexVersion: "4.3.2", modelUrl: "https://artificialanalysis.ai/models/gemini-3-8-flash-low" } }, { id: "aa:f7a4ea75-e548-4069-80d4-9be8bc7c009b", modelId: "glm-5-2", reasoningEffort: "max", thinking: null, categories: { "Intelligence Index": 33.7054572377545, "Terminal-Bench 4.0": 1.01010101010101, SciCode: 51.1574074074074 }, overall: 33.7054572377545, source: { kind: "artificial-analysis", url: "https://artificialanalysis.ai/models/glm-5-3", releaseDate: null, fetchedAt: 1791286695126, indexVersion: "4.3.2", modelUrl: "https://artificialanalysis.ai/models/glm-5-2" } }, { id: "aa:f7d2fc3e-1f7b-405f-818c-07952a4af78f", modelId: "kimi-k3", reasoningEffort: "max", thinking: null, categories: { "Intelligence Index": 43.5938229518782, "Terminal-Bench 4.0": 12.6262626262626, SciCode: 59.4907407407407 }, overall: 43.5938229518782, source: { kind: "artificial-analysis", url: "https://artificialanalysis.ai/models/glm-5-3", releaseDate: null, fetchedAt: 1791286695126, indexVersion: "4.3.2", modelUrl: "https://artificialanalysis.ai/models/kimi-k3" } }, { id: "aa:f9739750-6d42-450f-ba1e-2f76c869b4fe", modelId: "quasar-438b", reasoningEffort: "max", thinking: "Max, Based on GLM-5.2", categories: { "Intelligence Index": 26.7372536607816, "Terminal-Bench 4.0": 1.01010101010101, SciCode: 48.1481481481481 }, overall: 26.7372536607816, source: { kind: "artificial-analysis", url: "https://artificialanalysis.ai/models/glm-5-3", releaseDate: null, fetchedAt: 1791286695126, indexVersion: "4.3.2", modelUrl: "https://artificialanalysis.ai/models/quasar-438b" } }, { id: "aa:fc92f822-04b7-420d-9c07-a21af5e9aac7", modelId: "qwen3-coder-next", reasoningEffort: null, thinking: null, categories: { "Intelligence Index": 9.23682203219174, "Terminal-Bench 4.0": 0, SciCode: 36.2268518518519 }, overall: 9.23682203219174, source: { kind: "artificial-analysis", url: "https://artificialanalysis.ai/models/glm-5-3", releaseDate: null, fetchedAt: 1791286695126, indexVersion: "4.3.2", modelUrl: "https://artificialanalysis.ai/models/qwen3-coder-next" } }, { id: "aa:fe4c0848-e284-4e52-a79d-cdc28392f1a9", modelId: "deepseek-v4-flash", reasoningEffort: "max", thinking: null, categories: { "Intelligence Index": 34.3305129347816, "Terminal-Bench 4.0": 12.1212121212121, SciCode: 50.3472222222222 }, overall: 34.3305129347816, source: { kind: "artificial-analysis", url: "https://artificialanalysis.ai/models/glm-5-3", releaseDate: null, fetchedAt: 1791286695126, indexVersion: "4.3.2", modelUrl: "https://artificialanalysis.ai/models/deepseek-v4-flash" } }, { id: "aa:ff51be8f-e362-4a7e-9043-687ba15de207", modelId: "claude-opus-5", reasoningEffort: "medium", thinking: null, categories: { "Intelligence Index": 44.8253265420613, "Terminal-Bench 4.0": 34.343434343434296, SciCode: 51.5046296296296 }, overall: 44.8253265420613, source: { kind: "artificial-analysis", url: "https://artificialanalysis.ai/models/glm-5-3", releaseDate: null, fetchedAt: 1791286695126, indexVersion: "4.3.2", modelUrl: "https://artificialanalysis.ai/models/claude-opus-5-medium" } }], sourceErrors: {} };
+var bundled_default = { version: 2, fetchedAt: 1791287509758, modelsFetchedAt: null, models: [], providers: [], benchmarks: [{ id: "claude-opus-4-5-20251101-thinking-64k-high-effort", modelId: "claude-opus-4-5-20251101", reasoningEffort: "high", thinking: "64k", categories: { Reasoning: 80.0865, Coding: 79.654, "Agentic Coding": 39.697, Mathematics: 90.38900000000001, "Data Analysis": 74.44166666666666, Language: 81.26100000000001, IF: 62.54599999999999 }, overall: 72.58216666666667, source: { url: "https://raw.githubusercontent.com/LiveBench/livebench.github.io/main/public/table_2026_06_25.csv", releaseDate: "2026-06-25", fetchedAt: 1791287509758, kind: "livebench" } }, { id: "claude-opus-4-6-thinking-auto-high-effort", modelId: "claude-opus-4-6", reasoningEffort: "high", thinking: "auto", categories: { Reasoning: 88.673, Coding: 78.1845, "Agentic Coding": 48.989666666666665, Mathematics: 89.31700000000001, "Data Analysis": 69.893, Language: 83.26966666666667, IF: 63.3125 }, overall: 74.51990476190477, source: { url: "https://raw.githubusercontent.com/LiveBench/livebench.github.io/main/public/table_2026_06_25.csv", releaseDate: "2026-06-25", fetchedAt: 1791287509758, kind: "livebench" } }, { id: "claude-opus-4-7-xhigh-effort", modelId: "claude-opus-4-7", reasoningEffort: "xhigh", thinking: null, categories: { Reasoning: 87.19225, Coding: 82.088, "Agentic Coding": 50.65633333333333, Mathematics: 92.85374999999999, "Data Analysis": 78.26366666666667, Language: 77.914, IF: 66.7375 }, overall: 76.52935714285714, source: { url: "https://raw.githubusercontent.com/LiveBench/livebench.github.io/main/public/table_2026_06_25.csv", releaseDate: "2026-06-25", fetchedAt: 1791287509758, kind: "livebench" } }, { id: "claude-opus-4-8-xhigh-effort", modelId: "claude-opus-4-8", reasoningEffort: "xhigh", thinking: null, categories: { Reasoning: 89.7115, Coding: 79.2715, "Agentic Coding": 56.06066666666667, Mathematics: 95.31649999999999, "Data Analysis": 78.344, Language: 81.41733333333333, IF: 72.371 }, overall: 78.9275, source: { url: "https://raw.githubusercontent.com/LiveBench/livebench.github.io/main/public/table_2026_06_25.csv", releaseDate: "2026-06-25", fetchedAt: 1791287509758, kind: "livebench" } }, { id: "claude-sonnet-4-6-thinking-auto-medium-effort", modelId: "claude-sonnet-4-6", reasoningEffort: "medium", thinking: "auto", categories: { Reasoning: 84.76925, Coding: 79.2715, "Agentic Coding": 42.626, Mathematics: 86.994, "Data Analysis": 77.946, Language: 76.10266666666666, IF: 63.22075 }, overall: 72.99002380952382, source: { url: "https://raw.githubusercontent.com/LiveBench/livebench.github.io/main/public/table_2026_06_25.csv", releaseDate: "2026-06-25", fetchedAt: 1791287509758, kind: "livebench" } }, { id: "claude-sonnet-5-xhigh-effort", modelId: "claude-sonnet-5", reasoningEffort: "xhigh", thinking: null, categories: { Reasoning: 88.69225, Coding: 80.68, "Agentic Coding": 51.06066666666667, Mathematics: 92.94225, "Data Analysis": 71.74066666666666, Language: 74.97033333333333, IF: 63.85850000000001 }, overall: 74.84923809523809, source: { url: "https://raw.githubusercontent.com/LiveBench/livebench.github.io/main/public/table_2026_06_25.csv", releaseDate: "2026-06-25", fetchedAt: 1791287509758, kind: "livebench" } }, { id: "deepseek-v4-flash", modelId: "deepseek-v4-flash", reasoningEffort: null, thinking: null, categories: { Reasoning: 70.58175, Coding: 69.22800000000001, "Agentic Coding": 37.626, Mathematics: 79.64750000000001, "Data Analysis": 68.02300000000001, Language: 70.12400000000001, IF: 63.137499999999996 }, overall: 65.48110714285716, source: { url: "https://raw.githubusercontent.com/LiveBench/livebench.github.io/main/public/table_2026_06_25.csv", releaseDate: "2026-06-25", fetchedAt: 1791287509758, kind: "livebench" } }, { id: "deepseek-v4-pro", modelId: "deepseek-v4-pro", reasoningEffort: null, thinking: null, categories: { Reasoning: 82.69225, Coding: 69.994, "Agentic Coding": 42.626, Mathematics: 90.6755, "Data Analysis": 74.53766666666667, Language: 78.13033333333333, IF: 62.35 }, overall: 71.57225000000001, source: { url: "https://raw.githubusercontent.com/LiveBench/livebench.github.io/main/public/table_2026_06_25.csv", releaseDate: "2026-06-25", fetchedAt: 1791287509758, kind: "livebench" } }, { id: "gemini-3.1-pro-preview-high", modelId: "gemini-3.1-pro-preview", reasoningEffort: "high", thinking: null, categories: { Reasoning: 84.00475, Coding: 76.4545, "Agentic Coding": 45.403999999999996, Mathematics: 91.04499999999999, "Data Analysis": 78.54133333333334, Language: 85.37599999999999, IF: 79.1 }, overall: 77.13222619047619, source: { url: "https://raw.githubusercontent.com/LiveBench/livebench.github.io/main/public/table_2026_06_25.csv", releaseDate: "2026-06-25", fetchedAt: 1791287509758, kind: "livebench" } }, { id: "gemini-3.5-flash-high", modelId: "gemini-3.5-flash", reasoningEffort: "high", thinking: null, categories: { Reasoning: 82.00475, Coding: 78.1845, "Agentic Coding": 48.989666666666665, Mathematics: 88.24375, "Data Analysis": 64.85733333333333, Language: 84.58433333333333, IF: 75.6 }, overall: 74.6377619047619, source: { url: "https://raw.githubusercontent.com/LiveBench/livebench.github.io/main/public/table_2026_06_25.csv", releaseDate: "2026-06-25", fetchedAt: 1791287509758, kind: "livebench" } }, { id: "glm-5.2", modelId: "glm-5.2", reasoningEffort: null, thinking: null, categories: { Reasoning: 78.625, Coding: 79.654, "Agentic Coding": 51.919333333333334, Mathematics: 89.78125, "Data Analysis": 73.73966666666666, Language: 76.24166666666666, IF: 62.29175000000001 }, overall: 73.17895238095238, source: { url: "https://raw.githubusercontent.com/LiveBench/livebench.github.io/main/public/table_2026_06_25.csv", releaseDate: "2026-06-25", fetchedAt: 1791287509758, kind: "livebench" } }, { id: "gpt-5.2-2025-12-11-high", modelId: "gpt-5.2-2025-12-11", reasoningEffort: "high", thinking: null, categories: { Reasoning: 83.2115, Coding: 76.0715, "Agentic Coding": 50.25266666666667, Mathematics: 93.166, "Data Analysis": 78.16333333333334, Language: 79.809, IF: 61.77074999999999 }, overall: 74.6349642857143, source: { url: "https://raw.githubusercontent.com/LiveBench/livebench.github.io/main/public/table_2026_06_25.csv", releaseDate: "2026-06-25", fetchedAt: 1791287509758, kind: "livebench" } }, { id: "gpt-5.2-codex", modelId: "gpt-5.2-codex", reasoningEffort: null, thinking: null, categories: { Reasoning: 77.7115, Coding: 83.61949999999999, "Agentic Coding": 49.394000000000005, Mathematics: 88.77375, "Data Analysis": 78.204, Language: 73.67833333333333, IF: 66.44574999999999 }, overall: 73.9752619047619, source: { url: "https://raw.githubusercontent.com/LiveBench/livebench.github.io/main/public/table_2026_06_25.csv", releaseDate: "2026-06-25", fetchedAt: 1791287509758, kind: "livebench" } }, { id: "gpt-5.4-mini-xhigh", modelId: "gpt-5.4-mini", reasoningEffort: "xhigh", thinking: null, categories: { Reasoning: 71.32375, Coding: 71.624, "Agentic Coding": 41.666666666666664, Mathematics: 78.462, "Data Analysis": 70.78566666666667, Language: 70.95166666666667, IF: 59.804 }, overall: 66.37396428571428, source: { url: "https://raw.githubusercontent.com/LiveBench/livebench.github.io/main/public/table_2026_06_25.csv", releaseDate: "2026-06-25", fetchedAt: 1791287509758, kind: "livebench" } }, { id: "gpt-5.4-nano-xhigh", modelId: "gpt-5.4-nano", reasoningEffort: "xhigh", thinking: null, categories: { Reasoning: 81.09700000000001, Coding: 70.83850000000001, "Agentic Coding": 46.76766666666666, Mathematics: 90.977, "Data Analysis": 67.64266666666667, Language: 62.507000000000005, IF: 67.20475 }, overall: 69.57636904761905, source: { url: "https://raw.githubusercontent.com/LiveBench/livebench.github.io/main/public/table_2026_06_25.csv", releaseDate: "2026-06-25", fetchedAt: 1791287509758, kind: "livebench" } }, { id: "gpt-5.4-xhigh", modelId: "gpt-5.4", reasoningEffort: "xhigh", thinking: null, categories: { Reasoning: 88.1155, Coding: 77.5415, "Agentic Coding": 53.83833333333333, Mathematics: 94.148, "Data Analysis": 79.31333333333333, Language: 82.63366666666667, IF: 70.21674999999999 }, overall: 77.97244047619049, source: { url: "https://raw.githubusercontent.com/LiveBench/livebench.github.io/main/public/table_2026_06_25.csv", releaseDate: "2026-06-25", fetchedAt: 1791287509758, kind: "livebench" } }, { id: "gpt-5.5", modelId: "gpt-5.5", reasoningEffort: null, thinking: null, categories: { Reasoning: 87.274, Coding: 78.6285, "Agentic Coding": 41.111, Mathematics: 69.7695, "Data Analysis": 76.98700000000001, Language: 85.57033333333334, IF: 65.73750000000001 }, overall: 72.1539761904762, source: { url: "https://raw.githubusercontent.com/LiveBench/livebench.github.io/main/public/table_2026_06_25.csv", releaseDate: "2026-06-25", fetchedAt: 1791287509758, kind: "livebench" } }, { id: "gpt-5.5-high", modelId: "gpt-5.5", reasoningEffort: "high", thinking: null, categories: { Reasoning: 89.673, Coding: 80.037, "Agentic Coding": 46.76766666666666, Mathematics: 95.19, "Data Analysis": 80.443, Language: 87.75999999999999, IF: 71.375 }, overall: 78.74938095238096, source: { url: "https://raw.githubusercontent.com/LiveBench/livebench.github.io/main/public/table_2026_06_25.csv", releaseDate: "2026-06-25", fetchedAt: 1791287509758, kind: "livebench" } }, { id: "gpt-5.5-xhigh", modelId: "gpt-5.5", reasoningEffort: "xhigh", thinking: null, categories: { Reasoning: 89.65375, Coding: 82.14949999999999, "Agentic Coding": 52.07066666666666, Mathematics: 95.85725, "Data Analysis": 81.57566666666666, Language: 87.363, IF: 70.72925000000001 }, overall: 79.91415476190477, source: { url: "https://raw.githubusercontent.com/LiveBench/livebench.github.io/main/public/table_2026_06_25.csv", releaseDate: "2026-06-25", fetchedAt: 1791287509758, kind: "livebench" } }, { id: "grok-4.3", modelId: "grok-4.3", reasoningEffort: null, thinking: null, categories: { Reasoning: 70.822, Coding: 69.9325, "Agentic Coding": 18.535333333333334, Mathematics: 84.339, "Data Analysis": 55.77266666666666, Language: 73.58, IF: 62.75 }, overall: 62.24735714285714, source: { url: "https://raw.githubusercontent.com/LiveBench/livebench.github.io/main/public/table_2026_06_25.csv", releaseDate: "2026-06-25", fetchedAt: 1791287509758, kind: "livebench" } }, { id: "grok-build-0.1", modelId: "grok-build-0.1", reasoningEffort: null, thinking: null, categories: { Reasoning: 76.37025, Coding: 65.38550000000001, "Agentic Coding": 45.808, Mathematics: 78.42875000000001, "Data Analysis": 70.794, Language: 72.46, IF: 65.22075000000001 }, overall: 67.78103571428571, source: { url: "https://raw.githubusercontent.com/LiveBench/livebench.github.io/main/public/table_2026_06_25.csv", releaseDate: "2026-06-25", fetchedAt: 1791287509758, kind: "livebench" } }, { id: "kimi-k2.6-thinking", modelId: "kimi-k2.6-thinking", reasoningEffort: null, thinking: null, categories: { Reasoning: 79.375, Coding: 78.56700000000001, "Agentic Coding": 46.919333333333334, Mathematics: 84.27625, "Data Analysis": 65.13433333333334, Language: 75.14133333333334, IF: 64.35825 }, overall: 70.53878571428572, source: { url: "https://raw.githubusercontent.com/LiveBench/livebench.github.io/main/public/table_2026_06_25.csv", releaseDate: "2026-06-25", fetchedAt: 1791287509758, kind: "livebench" } }, { id: "kimi-k2.7-code", modelId: "kimi-k2.7-code", reasoningEffort: null, thinking: null, categories: { Reasoning: 82.80775, Coding: 73.959, "Agentic Coding": 45.65633333333333, Mathematics: 79.60425000000001, "Data Analysis": 62.65733333333333, Language: 77.90566666666666, IF: 56.29175 }, overall: 68.41172619047619, source: { url: "https://raw.githubusercontent.com/LiveBench/livebench.github.io/main/public/table_2026_06_25.csv", releaseDate: "2026-06-25", fetchedAt: 1791287509758, kind: "livebench" } }, { id: "minimax-m3", modelId: "minimax-m3", reasoningEffort: null, thinking: null, categories: { Reasoning: 74.48075, Coding: 68.2025, "Agentic Coding": 40.65633333333333, Mathematics: 76.94749999999999, "Data Analysis": 76.16633333333334, Language: 76.83566666666667, IF: 57.50825 }, overall: 67.25676190476189, source: { url: "https://raw.githubusercontent.com/LiveBench/livebench.github.io/main/public/table_2026_06_25.csv", releaseDate: "2026-06-25", fetchedAt: 1791287509758, kind: "livebench" } }, { id: "qwen3.6-27b", modelId: "qwen3.6-27b", reasoningEffort: null, thinking: null, categories: { Reasoning: 70.28375, Coding: 71.785, "Agentic Coding": 39.29266666666667, Mathematics: 79.8685, "Data Analysis": 70.42666666666666, Language: 63.30433333333334, IF: 53.229 }, overall: 64.02713095238094, source: { url: "https://raw.githubusercontent.com/LiveBench/livebench.github.io/main/public/table_2026_06_25.csv", releaseDate: "2026-06-25", fetchedAt: 1791287509758, kind: "livebench" } }, { id: "qwen3.6-plus", modelId: "qwen3.6-plus", reasoningEffort: null, thinking: null, categories: { Reasoning: 75.827, Coding: 78.1845, "Agentic Coding": 41.36366666666667, Mathematics: 83.72475, "Data Analysis": 69.91166666666668, Language: 74.98933333333333, IF: 58.342 }, overall: 68.90613095238095, source: { url: "https://raw.githubusercontent.com/LiveBench/livebench.github.io/main/public/table_2026_06_25.csv", releaseDate: "2026-06-25", fetchedAt: 1791287509758, kind: "livebench" } }, { id: "qwen3.7-max", modelId: "qwen3.7", reasoningEffort: "max", thinking: null, categories: { Reasoning: 83.3365, Coding: 74.219, "Agentic Coding": 43.586000000000006, Mathematics: 85.24825, "Data Analysis": 71.786, Language: 79.73899999999999, IF: 74.0415 }, overall: 73.13660714285713, source: { url: "https://raw.githubusercontent.com/LiveBench/livebench.github.io/main/public/table_2026_06_25.csv", releaseDate: "2026-06-25", fetchedAt: 1791287509758, kind: "livebench" } }, { id: "claude-fable-5-xhigh-effort", modelId: "claude-fable-5", reasoningEffort: "xhigh", thinking: null, categories: { Reasoning: 87.7115, Coding: 82.5325, "Agentic Coding": 50.65633333333333, Mathematics: 95.69300000000001, "Data Analysis": 78.693, Language: 89.45766666666667, IF: 71.99575 }, overall: 79.53425000000001, source: { url: "https://raw.githubusercontent.com/LiveBench/livebench.github.io/main/public/table_2026_06_25.csv", releaseDate: "2026-06-25", fetchedAt: 1791287509758, kind: "livebench" } }, { id: "aa:cd684ea4-b475-4269-b001-d469d06d8a7a", modelId: "glm-5-3", reasoningEffort: "max", thinking: null, categories: { "Intelligence Index": 44.777392385614, "Terminal-Bench 4.0": 41.9191919191919, SciCode: 59.0277777777778 }, overall: 44.777392385614, source: { kind: "artificial-analysis", url: "https://artificialanalysis.ai/models/glm-5-3", releaseDate: null, fetchedAt: 1791286695126, indexVersion: "4.3.2", modelUrl: "https://artificialanalysis.ai/models/glm-5-3" }, speed: { outputTps: 83.84, latencyS: 2.498 } }, { id: "aa:0097ebf5-124f-42f6-9463-33b00e711f03", modelId: "gemini-3-5-flash", reasoningEffort: "high", thinking: null, categories: { "Intelligence Index": 32.5983283695905, "Terminal-Bench 4.0": 6.56565656565657, SciCode: 53.9351851851852 }, overall: 32.5983283695905, source: { kind: "artificial-analysis", url: "https://artificialanalysis.ai/models/glm-5-3", releaseDate: null, fetchedAt: 1791286695126, indexVersion: "4.3.2", modelUrl: "https://artificialanalysis.ai/models/gemini-3-5-flash" } }, { id: "aa:00f1248e-78e3-4230-8dc8-5e13ba8645e2", modelId: "mimo-v2-5-pro", reasoningEffort: null, thinking: "Reasoning", categories: { "Intelligence Index": 25.9868888896511, "Terminal-Bench 4.0": 0, SciCode: 50.578703703703695 }, overall: 25.9868888896511, source: { kind: "artificial-analysis", url: "https://artificialanalysis.ai/models/glm-5-3", releaseDate: null, fetchedAt: 1791286695126, indexVersion: "4.3.2", modelUrl: "https://artificialanalysis.ai/models/mimo-v2-5-pro" } }, { id: "aa:01459872-433a-4ab2-8e99-7083162172eb", modelId: "gpt-6-sol", reasoningEffort: "low", thinking: null, categories: { "Intelligence Index": 34.1548755585733, "Terminal-Bench 4.0": 9.09090909090909, SciCode: 50.2314814814815 }, overall: 34.1548755585733, source: { kind: "artificial-analysis", url: "https://artificialanalysis.ai/models/glm-5-3", releaseDate: null, fetchedAt: 1791286695126, indexVersion: "4.3.2", modelUrl: "https://artificialanalysis.ai/models/gpt-6-sol-low" } }, { id: "aa:016d330a-2141-4afa-b2fc-62b314423dc1", modelId: "mercury-2", reasoningEffort: "high", thinking: null, categories: { "Intelligence Index": null, "Terminal-Bench 4.0": 0, SciCode: 37.7314814814815 }, overall: null, source: { kind: "artificial-analysis", url: "https://artificialanalysis.ai/models/glm-5-3", releaseDate: null, fetchedAt: 1791286695126, indexVersion: "4.3.2", modelUrl: "https://artificialanalysis.ai/models/mercury-2" } }, { id: "aa:042e8a37-fcd0-40f4-8f41-99215fb68eda", modelId: "claude-sonnet-5-5", reasoningEffort: "medium", thinking: "Medium, Default Fallback", categories: { "Intelligence Index": 40.838652287929, "Terminal-Bench 4.0": 29.7979797979798, SciCode: 52.8935185185185 }, overall: 40.838652287929, source: { kind: "artificial-analysis", url: "https://artificialanalysis.ai/models/glm-5-3", releaseDate: null, fetchedAt: 1791286695126, indexVersion: "4.3.2", modelUrl: "https://artificialanalysis.ai/models/claude-sonnet-5-5-medium" } }, { id: "aa:04ee6719-0327-463b-a1a1-70a6a78254f9", modelId: "muse-spark-1-2", reasoningEffort: "xhigh", thinking: null, categories: { "Intelligence Index": 39.5758607970943, "Terminal-Bench 4.0": 7.07070707070707, SciCode: 57.4074074074074 }, overall: 39.5758607970943, source: { kind: "artificial-analysis", url: "https://artificialanalysis.ai/models/glm-5-3", releaseDate: null, fetchedAt: 1791286695126, indexVersion: "4.3.2", modelUrl: "https://artificialanalysis.ai/models/muse-spark-1-2" } }, { id: "aa:050c61cd-cddc-463a-a30a-a82aaa37be59", modelId: "gpt-5-6-luna", reasoningEffort: "low", thinking: null, categories: { "Intelligence Index": 21.0124783424265, "Terminal-Bench 4.0": 0, SciCode: 46.064814814814795 }, overall: 21.0124783424265, source: { kind: "artificial-analysis", url: "https://artificialanalysis.ai/models/glm-5-3", releaseDate: null, fetchedAt: 1791286695126, indexVersion: "4.3.2", modelUrl: "https://artificialanalysis.ai/models/gpt-5-6-luna-low" } }, { id: "aa:05776db7-f5c0-40f7-b824-079160f8cfa8", modelId: "claude-fable-5-1", reasoningEffort: "low", thinking: "Low, Default Fallback", categories: { "Intelligence Index": 46.8163422014862, "Terminal-Bench 4.0": 40.4040404040404, SciCode: 56.712962962963 }, overall: 46.8163422014862, source: { kind: "artificial-analysis", url: "https://artificialanalysis.ai/models/glm-5-3", releaseDate: null, fetchedAt: 1791286695126, indexVersion: "4.3.2", modelUrl: "https://artificialanalysis.ai/models/claude-fable-5-1-low" } }, { id: "aa:05a32e26-e609-4377-951b-8fa23d329926", modelId: "mistral-medium-3-1", reasoningEffort: null, thinking: null, categories: { "Intelligence Index": 9.18437902519296, "Terminal-Bench 4.0": 0, SciCode: 32.407407407407405 }, overall: 9.18437902519296, source: { kind: "artificial-analysis", url: "https://artificialanalysis.ai/models/glm-5-3", releaseDate: null, fetchedAt: 1791286695126, indexVersion: "4.3.2", modelUrl: "https://artificialanalysis.ai/models/mistral-medium-3-1" } }, { id: "aa:076f2674-bc4b-4925-be59-50832eb8c090", modelId: "o3-mini", reasoningEffort: "high", thinking: null, categories: { "Intelligence Index": 10.9643866525084, "Terminal-Bench 4.0": 0, SciCode: 42.8240740740741 }, overall: 10.9643866525084, source: { kind: "artificial-analysis", url: "https://artificialanalysis.ai/models/glm-5-3", releaseDate: null, fetchedAt: 1791286695126, indexVersion: "4.3.2", modelUrl: "https://artificialanalysis.ai/models/o3-mini-high" } }, { id: "aa:08242385-ee91-4de6-be7f-271a6d9780ce", modelId: "apodex-1-1", reasoningEffort: null, thinking: "Reasoning configuration unspecified", categories: { "Intelligence Index": 26.4103686249117, "Terminal-Bench 4.0": 0, SciCode: 45.4861111111111 }, overall: 26.4103686249117, source: { kind: "artificial-analysis", url: "https://artificialanalysis.ai/models/glm-5-3", releaseDate: null, fetchedAt: 1791286695126, indexVersion: "4.3.2", modelUrl: "https://artificialanalysis.ai/models/apodex-1-1" } }, { id: "aa:0904b596-8932-43bd-9b21-324f128e1723", modelId: "gpt-5-6-sol", reasoningEffort: "low", thinking: null, categories: { "Intelligence Index": 33.4731387646002, "Terminal-Bench 4.0": 1.01010101010101, SciCode: 56.3657407407407 }, overall: 33.4731387646002, source: { kind: "artificial-analysis", url: "https://artificialanalysis.ai/models/glm-5-3", releaseDate: null, fetchedAt: 1791286695126, indexVersion: "4.3.2", modelUrl: "https://artificialanalysis.ai/models/gpt-5-6-sol-low" } }, { id: "aa:092a3b0e-c5c8-45dc-bf1b-53673c8ff352", modelId: "gpt-6-1-sol", reasoningEffort: "xhigh", thinking: null, categories: { "Intelligence Index": 51.0377679093761, "Terminal-Bench 4.0": 54.040404040404, SciCode: 55.671296296296305 }, overall: 51.0377679093761, source: { kind: "artificial-analysis", url: "https://artificialanalysis.ai/models/glm-5-3", releaseDate: null, fetchedAt: 1791286695126, indexVersion: "4.3.2", modelUrl: "https://artificialanalysis.ai/models/gpt-6-1-sol-xhigh" } }, { id: "aa:093b9df2-ebee-4309-943f-5a7e88360adf", modelId: "gemini-3-5-flash-lite", reasoningEffort: "high", thinking: null, categories: { "Intelligence Index": 22.1685424839812, "Terminal-Bench 4.0": 1.01010101010101, SciCode: 41.3194444444444 }, overall: 22.1685424839812, source: { kind: "artificial-analysis", url: "https://artificialanalysis.ai/models/glm-5-3", releaseDate: null, fetchedAt: 1791286695126, indexVersion: "4.3.2", modelUrl: "https://artificialanalysis.ai/models/gemini-3-5-flash-lite" } }, { id: "aa:094ea3e3-ce41-419e-8bd1-723389663158", modelId: "step-5-preview", reasoningEffort: null, thinking: "Reasoning configuration unspecified", categories: { "Intelligence Index": 43.7343049141614, "Terminal-Bench 4.0": 33.3333333333333, SciCode: 58.912037037037 }, overall: 43.7343049141614, source: { kind: "artificial-analysis", url: "https://artificialanalysis.ai/models/glm-5-3", releaseDate: null, fetchedAt: 1791286695126, indexVersion: "4.3.2", modelUrl: "https://artificialanalysis.ai/models/step-5" }, speed: { outputTps: 87.22, latencyS: 1.379 } }, { id: "aa:09f43999-b67b-4c1b-b050-44df41ed7e62", modelId: "devstral-2", reasoningEffort: null, thinking: null, categories: { "Intelligence Index": 8.61676079574885, "Terminal-Bench 4.0": 0, SciCode: 32.7546296296296 }, overall: 8.61676079574885, source: { kind: "artificial-analysis", url: "https://artificialanalysis.ai/models/glm-5-3", releaseDate: null, fetchedAt: 1791286695126, indexVersion: "4.3.2", modelUrl: "https://artificialanalysis.ai/models/devstral-2" } }, { id: "aa:0a7dda4d-cc9c-4a90-abc1-abb5772c901b", modelId: "deepseek-v3-1-terminus", reasoningEffort: null, thinking: "Reasoning", categories: { "Intelligence Index": 14.7640236054576, "Terminal-Bench 4.0": 0, SciCode: 37.962962962963 }, overall: 14.7640236054576, source: { kind: "artificial-analysis", url: "https://artificialanalysis.ai/models/glm-5-3", releaseDate: null, fetchedAt: 1791286695126, indexVersion: "4.3.2", modelUrl: "https://artificialanalysis.ai/models/deepseek-v3-1-terminus-reasoning" } }, { id: "aa:0c64b008-20c3-408d-bd68-15136df8cd2c", modelId: "granite-4-2-3b", reasoningEffort: null, thinking: "Reasoning configuration unspecified", categories: { "Intelligence Index": 9.05588232376756, "Terminal-Bench 4.0": 0, SciCode: 25.3472222222222 }, overall: 9.05588232376756, source: { kind: "artificial-analysis", url: "https://artificialanalysis.ai/models/glm-5-3", releaseDate: null, fetchedAt: 1791286695126, indexVersion: "4.3.2", modelUrl: "https://artificialanalysis.ai/models/granite-4-2-3b" } }, { id: "aa:0de09623-2b1a-4c8d-86ef-7f5245d4e24b", modelId: "inkling", reasoningEffort: "xhigh", thinking: null, categories: { "Intelligence Index": 24.9847810999384, "Terminal-Bench 4.0": 1.01010101010101, SciCode: 46.9907407407407 }, overall: 24.9847810999384, source: { kind: "artificial-analysis", url: "https://artificialanalysis.ai/models/glm-5-3", releaseDate: null, fetchedAt: 1791286695126, indexVersion: "4.3.2", modelUrl: "https://artificialanalysis.ai/models/inkling" }, speed: { outputTps: 241.19, latencyS: 2.216 } }, { id: "aa:0de67206-4d36-4d10-b8f6-cf37fa747a03", modelId: "kimi-k2-6", reasoningEffort: null, thinking: "Reasoning", categories: { "Intelligence Index": 26.9791999742844, "Terminal-Bench 4.0": 0.505050505050505, SciCode: 51.5046296296296 }, overall: 26.9791999742844, source: { kind: "artificial-analysis", url: "https://artificialanalysis.ai/models/glm-5-3", releaseDate: null, fetchedAt: 1791286695126, indexVersion: "4.3.2", modelUrl: "https://artificialanalysis.ai/models/kimi-k2-6" } }, { id: "aa:0e34f05c-387e-4968-be15-ccec4a55d8c1", modelId: "deepseek-r1-0120", reasoningEffort: null, thinking: "Reasoning configuration unspecified", categories: { "Intelligence Index": 11.4109820044475, "Terminal-Bench 4.0": 0, SciCode: 38.310185185185205 }, overall: 11.4109820044475, source: { kind: "artificial-analysis", url: "https://artificialanalysis.ai/models/glm-5-3", releaseDate: null, fetchedAt: 1791286695126, indexVersion: "4.3.2", modelUrl: "https://artificialanalysis.ai/models/deepseek-r1-0120" } }, { id: "aa:0e66bae9-41f1-42fc-9276-ce8cb6f72919", modelId: "qwen3-5-397b-a17b", reasoningEffort: null, thinking: "Reasoning", categories: { "Intelligence Index": 18.4204249294815, "Terminal-Bench 4.0": 0, SciCode: 44.7916666666667 }, overall: 18.4204249294815, source: { kind: "artificial-analysis", url: "https://artificialanalysis.ai/models/glm-5-3", releaseDate: null, fetchedAt: 1791286695126, indexVersion: "4.3.2", modelUrl: "https://artificialanalysis.ai/models/qwen3-5-397b-a17b" } }, { id: "aa:1071dea1-43e7-4fe9-b936-3034bb622b2e", modelId: "granite-4-2-30b", reasoningEffort: null, thinking: "Reasoning configuration unspecified", categories: { "Intelligence Index": null, "Terminal-Bench 4.0": null, SciCode: 37.8472222222222 }, overall: null, source: { kind: "artificial-analysis", url: "https://artificialanalysis.ai/models/glm-5-3", releaseDate: null, fetchedAt: 1791286695126, indexVersion: "4.3.2", modelUrl: "https://artificialanalysis.ai/models/granite-4-2-30b" } }, { id: "aa:122a1fa1-976a-4089-87a2-5a0a13e2a52c", modelId: "k2-horizon-7b", reasoningEffort: null, thinking: "Reasoning configuration unspecified", categories: { "Intelligence Index": 20.5958819421354, "Terminal-Bench 4.0": 1.01010101010101, SciCode: 27.5462962962963 }, overall: 20.5958819421354, source: { kind: "artificial-analysis", url: "https://artificialanalysis.ai/models/glm-5-3", releaseDate: null, fetchedAt: 1791286695126, indexVersion: "4.3.2", modelUrl: "https://artificialanalysis.ai/models/k2-horizon-7b" } }, { id: "aa:127de816-57d3-4037-8484-480a613cd413", modelId: "mimo-v2-6-flash", reasoningEffort: null, thinking: "Reasoning configuration unspecified", categories: { "Intelligence Index": 37.8843590141754, "Terminal-Bench 4.0": 22.727272727272698, SciCode: 51.273148148148195 }, overall: 37.8843590141754, source: { kind: "artificial-analysis", url: "https://artificialanalysis.ai/models/glm-5-3", releaseDate: null, fetchedAt: 1791286695126, indexVersion: "4.3.2", modelUrl: "https://artificialanalysis.ai/models/mimo-v2-6-flash" } }, { id: "aa:1305c921-7aaa-4d6d-99b5-99b3acf15e19", modelId: "claude-opus-5", reasoningEffort: "xhigh", thinking: null, categories: { "Intelligence Index": 49.6773552926939, "Terminal-Bench 4.0": 46.4646464646465, SciCode: 55.671296296296305 }, overall: 49.6773552926939, source: { kind: "artificial-analysis", url: "https://artificialanalysis.ai/models/glm-5-3", releaseDate: null, fetchedAt: 1791286695126, indexVersion: "4.3.2", modelUrl: "https://artificialanalysis.ai/models/claude-opus-5-xhigh" } }, { id: "aa:142b93bf-09c4-42dc-9c3a-50b1a222cbd4", modelId: "claude-sonnet-5", reasoningEffort: "low", thinking: null, categories: { "Intelligence Index": 24.2638393579597, "Terminal-Bench 4.0": 2.52525252525253, SciCode: 50.1157407407407 }, overall: 24.2638393579597, source: { kind: "artificial-analysis", url: "https://artificialanalysis.ai/models/glm-5-3", releaseDate: null, fetchedAt: 1791286695126, indexVersion: "4.3.2", modelUrl: "https://artificialanalysis.ai/models/claude-sonnet-5-low" } }, { id: "aa:18721247-4e56-4cf7-9a9d-c71cc60c0961", modelId: "k-exaone-2-0-0803", reasoningEffort: null, thinking: "Reasoning configuration unspecified", categories: { "Intelligence Index": null, "Terminal-Bench 4.0": null, SciCode: 42.0138888888889 }, overall: null, source: { kind: "artificial-analysis", url: "https://artificialanalysis.ai/models/glm-5-3", releaseDate: null, fetchedAt: 1791286695126, indexVersion: "4.3.2", modelUrl: "https://artificialanalysis.ai/models/k-exaone-2-0-0803" } }, { id: "aa:19496b81-9f41-4214-a77a-1df803b3c5ae", modelId: "glm-5-3-flash", reasoningEffort: "max", thinking: null, categories: { "Intelligence Index": 41.807466113455, "Terminal-Bench 4.0": 32.8282828282828, SciCode: 51.6203703703704 }, overall: 41.807466113455, source: { kind: "artificial-analysis", url: "https://artificialanalysis.ai/models/glm-5-3", releaseDate: null, fetchedAt: 1791286695126, indexVersion: "4.3.2", modelUrl: "https://artificialanalysis.ai/models/glm-5-3-flash" }, speed: { outputTps: 84.09, latencyS: 2.113 } }, { id: "aa:19813eb2-460a-475c-af65-810bb8660fec", modelId: "gpt-6-luna", reasoningEffort: "xhigh", thinking: null, categories: { "Intelligence Index": 34.5587320217785, "Terminal-Bench 4.0": 8.08080808080808, SciCode: 51.73611111111111 }, overall: 34.5587320217785, source: { kind: "artificial-analysis", url: "https://artificialanalysis.ai/models/glm-5-3", releaseDate: null, fetchedAt: 1791286695126, indexVersion: "4.3.2", modelUrl: "https://artificialanalysis.ai/models/gpt-6-luna-xhigh" } }, { id: "aa:1b64aa81-c223-4b8f-909b-82185a234765", modelId: "solar-pro4", reasoningEffort: null, thinking: "Reasoning configuration unspecified", categories: { "Intelligence Index": null, "Terminal-Bench 4.0": 0.505050505050505, SciCode: 44.560185185185205 }, overall: null, source: { kind: "artificial-analysis", url: "https://artificialanalysis.ai/models/glm-5-3", releaseDate: null, fetchedAt: 1791286695126, indexVersion: "4.3.2", modelUrl: "https://artificialanalysis.ai/models/solar-pro4" } }, { id: "aa:1e9907e0-ffac-4595-b006-962e4f1da7cf", modelId: "north-mini-code", reasoningEffort: null, thinking: "Reasoning configuration unspecified", categories: { "Intelligence Index": 9.91462776590372, "Terminal-Bench 4.0": 0.505050505050505, SciCode: 38.7731481481481 }, overall: 9.91462776590372, source: { kind: "artificial-analysis", url: "https://artificialanalysis.ai/models/glm-5-3", releaseDate: null, fetchedAt: 1791286695126, indexVersion: "4.3.2", modelUrl: "https://artificialanalysis.ai/models/north-mini-code" } }, { id: "aa:1f054429-397e-4fdb-9e71-67bc92c1735e", modelId: "gpt-5-5", reasoningEffort: "xhigh", thinking: null, categories: { "Intelligence Index": 38.3556437590607, "Terminal-Bench 4.0": 14.6464646464646, SciCode: 55.787037037037 }, overall: 38.3556437590607, source: { kind: "artificial-analysis", url: "https://artificialanalysis.ai/models/glm-5-3", releaseDate: null, fetchedAt: 1791286695126, indexVersion: "4.3.2", modelUrl: "https://artificialanalysis.ai/models/gpt-5-5" } }, { id: "aa:1f541ef3-913f-4eb2-9d07-0e93c7a9a5e3", modelId: "gpt-6-astra", reasoningEffort: "xhigh", thinking: null, categories: { "Intelligence Index": 52.3863277108782, "Terminal-Bench 4.0": 59.5959595959596, SciCode: 55.671296296296305 }, overall: 52.3863277108782, source: { kind: "artificial-analysis", url: "https://artificialanalysis.ai/models/glm-5-3", releaseDate: null, fetchedAt: 1791286695126, indexVersion: "4.3.2", modelUrl: "https://artificialanalysis.ai/models/gpt-6-astra-xhigh" } }, { id: "aa:208c16f0-8c5b-4524-ac8a-ac74c02e80a9", modelId: "grok-4-7", reasoningEffort: "low", thinking: null, categories: { "Intelligence Index": 42.2166560223448, "Terminal-Bench 4.0": 16.161616161616198, SciCode: 54.86111111111111 }, overall: 42.2166560223448, source: { kind: "artificial-analysis", url: "https://artificialanalysis.ai/models/glm-5-3", releaseDate: null, fetchedAt: 1791286695126, indexVersion: "4.3.2", modelUrl: "https://artificialanalysis.ai/models/grok-4-7-low" } }, { id: "aa:20928ba9-3a3f-415f-9519-b84ff64ecf34", modelId: "claude-opus-5", reasoningEffort: "low", thinking: null, categories: { "Intelligence Index": 39.3543357992936, "Terminal-Bench 4.0": 26.2626262626263, SciCode: 49.189814814814795 }, overall: 39.3543357992936, source: { kind: "artificial-analysis", url: "https://artificialanalysis.ai/models/glm-5-3", releaseDate: null, fetchedAt: 1791286695126, indexVersion: "4.3.2", modelUrl: "https://artificialanalysis.ai/models/claude-opus-5-low" } }, { id: "aa:2236df45-0699-40d1-b5cc-69ee345d2257", modelId: "qwen3-5-122b-a10b", reasoningEffort: null, thinking: "Reasoning", categories: { "Intelligence Index": 15.5694009312969, "Terminal-Bench 4.0": 0, SciCode: 39.6990740740741 }, overall: 15.5694009312969, source: { kind: "artificial-analysis", url: "https://artificialanalysis.ai/models/glm-5-3", releaseDate: null, fetchedAt: 1791286695126, indexVersion: "4.3.2", modelUrl: "https://artificialanalysis.ai/models/qwen3-5-122b-a10b" } }, { id: "aa:22d09131-343b-4adf-8760-533e20a2155f", modelId: "mimo-v2-5-0424", reasoningEffort: null, thinking: "Reasoning configuration unspecified", categories: { "Intelligence Index": null, "Terminal-Bench 4.0": 0, SciCode: 43.8657407407407 }, overall: null, source: { kind: "artificial-analysis", url: "https://artificialanalysis.ai/models/glm-5-3", releaseDate: null, fetchedAt: 1791286695126, indexVersion: "4.3.2", modelUrl: "https://artificialanalysis.ai/models/mimo-v2-5-0424" } }, { id: "aa:23c86e4a-c769-43c0-a056-79e3cd15834f", modelId: "claude-sonnet-5", reasoningEffort: "max", thinking: null, categories: { "Intelligence Index": 38.1638712882576, "Terminal-Bench 4.0": 14.1414141414141, SciCode: 54.2824074074074 }, overall: 38.1638712882576, source: { kind: "artificial-analysis", url: "https://artificialanalysis.ai/models/glm-5-3", releaseDate: null, fetchedAt: 1791286695126, indexVersion: "4.3.2", modelUrl: "https://artificialanalysis.ai/models/claude-sonnet-5" } }, { id: "aa:24ac5b00-5f03-4c47-8e37-522d1195383e", modelId: "mistral-small-3-1", reasoningEffort: null, thinking: null, categories: { "Intelligence Index": 7.11735622656558, "Terminal-Bench 4.0": 0, SciCode: 27.7777777777778 }, overall: 7.11735622656558, source: { kind: "artificial-analysis", url: "https://artificialanalysis.ai/models/glm-5-3", releaseDate: null, fetchedAt: 1791286695126, indexVersion: "4.3.2", modelUrl: "https://artificialanalysis.ai/models/mistral-small-3-1" } }, { id: "aa:24d8fdfe-6241-424e-b7b7-1b6efb06e4fb", modelId: "mimo-v2-6-pro", reasoningEffort: null, thinking: "Reasoning configuration unspecified", categories: { "Intelligence Index": 46.3242065310383, "Terminal-Bench 4.0": 34.8484848484849, SciCode: 60.8796296296296 }, overall: 46.3242065310383, source: { kind: "artificial-analysis", url: "https://artificialanalysis.ai/models/glm-5-3", releaseDate: null, fetchedAt: 1791286695126, indexVersion: "4.3.2", modelUrl: "https://artificialanalysis.ai/models/mimo-v2-6-pro" }, speed: { outputTps: 43.71, latencyS: 2.466 } }, { id: "aa:26614164-6840-4e17-a65a-2deb2fe7e87b", modelId: "grok-4-6", reasoningEffort: "medium", thinking: null, categories: { "Intelligence Index": 42.836322654063, "Terminal-Bench 4.0": 13.1313131313131, SciCode: 55.9027777777778 }, overall: 42.836322654063, source: { kind: "artificial-analysis", url: "https://artificialanalysis.ai/models/glm-5-3", releaseDate: null, fetchedAt: 1791286695126, indexVersion: "4.3.2", modelUrl: "https://artificialanalysis.ai/models/grok-4-6-medium" } }, { id: "aa:268525e2-f873-4178-bc07-e6a0ee1f002d", modelId: "claude-sonnet-5-5", reasoningEffort: "high", thinking: "High, Default Fallback", categories: { "Intelligence Index": 46.7533528066958, "Terminal-Bench 4.0": 43.9393939393939, SciCode: 53.703703703703695 }, overall: 46.7533528066958, source: { kind: "artificial-analysis", url: "https://artificialanalysis.ai/models/glm-5-3", releaseDate: null, fetchedAt: 1791286695126, indexVersion: "4.3.2", modelUrl: "https://artificialanalysis.ai/models/claude-sonnet-5-5-high" } }, { id: "aa:26e0f83a-ca98-4f34-94ac-7c5e251ee410", modelId: "gpt-5-6-terra", reasoningEffort: "medium", thinking: null, categories: { "Intelligence Index": 30.0938023419377, "Terminal-Bench 4.0": 1.01010101010101, SciCode: 50.462962962963 }, overall: 30.0938023419377, source: { kind: "artificial-analysis", url: "https://artificialanalysis.ai/models/glm-5-3", releaseDate: null, fetchedAt: 1791286695126, indexVersion: "4.3.2", modelUrl: "https://artificialanalysis.ai/models/gpt-5-6-terra-medium" } }, { id: "aa:27202e5f-c82d-4710-92e9-4317877d4883", modelId: "gemini-2-5-pro", reasoningEffort: null, thinking: "Reasoning configuration unspecified", categories: { "Intelligence Index": 16.0778962941864, "Terminal-Bench 4.0": 0, SciCode: 46.296296296296305 }, overall: 16.0778962941864, source: { kind: "artificial-analysis", url: "https://artificialanalysis.ai/models/glm-5-3", releaseDate: null, fetchedAt: 1791286695126, indexVersion: "4.3.2", modelUrl: "https://artificialanalysis.ai/models/gemini-2-5-pro" } }, { id: "aa:272f5f03-aea9-4675-a244-2b753b618cdf", modelId: "grok-4-7", reasoningEffort: "high", thinking: null, categories: { "Intelligence Index": 46.3321770885625, "Terminal-Bench 4.0": 24.747474747474698, SciCode: 57.7546296296296 }, overall: 46.3321770885625, source: { kind: "artificial-analysis", url: "https://artificialanalysis.ai/models/glm-5-3", releaseDate: null, fetchedAt: 1791286695126, indexVersion: "4.3.2", modelUrl: "https://artificialanalysis.ai/models/grok-4-7-high" } }, { id: "aa:277f939a-985b-4b37-859d-b3eabc7c0b26", modelId: "minimax-m3", reasoningEffort: null, thinking: "Reasoning configuration unspecified", categories: { "Intelligence Index": 29.2202932236316, "Terminal-Bench 4.0": 2.02020202020202, SciCode: 47.1064814814815 }, overall: 29.2202932236316, source: { kind: "artificial-analysis", url: "https://artificialanalysis.ai/models/glm-5-3", releaseDate: null, fetchedAt: 1791286695126, indexVersion: "4.3.2", modelUrl: "https://artificialanalysis.ai/models/minimax-m3" }, speed: { outputTps: 134.47, latencyS: 0.854 } }, { id: "aa:29855680-7469-43eb-8b88-cd3fb1d99da3", modelId: "gpt-5-mini", reasoningEffort: "high", thinking: null, categories: { "Intelligence Index": 16.7730881042515, "Terminal-Bench 4.0": 0, SciCode: 39.0046296296296 }, overall: 16.7730881042515, source: { kind: "artificial-analysis", url: "https://artificialanalysis.ai/models/glm-5-3", releaseDate: null, fetchedAt: 1791286695126, indexVersion: "4.3.2", modelUrl: "https://artificialanalysis.ai/models/gpt-5-mini" } }, { id: "aa:29976311-665a-4b2f-ac72-557c33e0758e", modelId: "nemotron-3-5-lightning", reasoningEffort: null, thinking: "Reasoning configuration unspecified", categories: { "Intelligence Index": 12.8572306217144, "Terminal-Bench 4.0": 0.505050505050505, SciCode: 32.060185185185205 }, overall: 12.8572306217144, source: { kind: "artificial-analysis", url: "https://artificialanalysis.ai/models/glm-5-3", releaseDate: null, fetchedAt: 1791286695126, indexVersion: "4.3.2", modelUrl: "https://artificialanalysis.ai/models/nemotron-3-5-lightning" } }, { id: "aa:2bfdd17a-e027-4068-a54e-b0e90a6df118", modelId: "gemma-3-27b-instruct", reasoningEffort: null, thinking: null, categories: { "Intelligence Index": 4.85297805617922, "Terminal-Bench 4.0": 0, SciCode: 23.2638888888889 }, overall: 4.85297805617922, source: { kind: "artificial-analysis", url: "https://artificialanalysis.ai/models/glm-5-3", releaseDate: null, fetchedAt: 1791286695126, indexVersion: "4.3.2", modelUrl: "https://artificialanalysis.ai/models/gemma-3-27b" } }, { id: "aa:2d28a13a-096e-475a-beb8-26bbd1c7d51c", modelId: "qwen3-5-9b", reasoningEffort: null, thinking: "Reasoning", categories: { "Intelligence Index": 11.1961650827156, "Terminal-Bench 4.0": 0.505050505050505, SciCode: 29.5138888888889 }, overall: 11.1961650827156, source: { kind: "artificial-analysis", url: "https://artificialanalysis.ai/models/glm-5-3", releaseDate: null, fetchedAt: 1791286695126, indexVersion: "4.3.2", modelUrl: "https://artificialanalysis.ai/models/qwen3-5-9b" } }, { id: "aa:2e6400f5-85ca-4ebc-ba8f-c2811a631138", modelId: "gemma-3-12b-instruct", reasoningEffort: null, thinking: null, categories: { "Intelligence Index": 3.7508042118297, "Terminal-Bench 4.0": 0, SciCode: 16.4351851851852 }, overall: 3.7508042118297, source: { kind: "artificial-analysis", url: "https://artificialanalysis.ai/models/glm-5-3", releaseDate: null, fetchedAt: 1791286695126, indexVersion: "4.3.2", modelUrl: "https://artificialanalysis.ai/models/gemma-3-12b" } }, { id: "aa:2e9ff877-fd2c-4ce7-b631-7ca1bdb6d13e", modelId: "command-a-plus", reasoningEffort: null, thinking: "Reasoning configuration unspecified", categories: { "Intelligence Index": 13.1335002685349, "Terminal-Bench 4.0": 0.505050505050505, SciCode: 38.5416666666667 }, overall: 13.1335002685349, source: { kind: "artificial-analysis", url: "https://artificialanalysis.ai/models/glm-5-3", releaseDate: null, fetchedAt: 1791286695126, indexVersion: "4.3.2", modelUrl: "https://artificialanalysis.ai/models/command-a-plus" } }, { id: "aa:2f339a97-9a0d-499a-9cb5-e0db665bfa25", modelId: "gpt-6-astra", reasoningEffort: "max", thinking: null, categories: { "Intelligence Index": 52.673669395513, "Terminal-Bench 4.0": 59.09090909090911, SciCode: 56.4814814814815 }, overall: 52.673669395513, source: { kind: "artificial-analysis", url: "https://artificialanalysis.ai/models/glm-5-3", releaseDate: null, fetchedAt: 1791286695126, indexVersion: "4.3.2", modelUrl: "https://artificialanalysis.ai/models/gpt-6-astra" }, speed: { outputTps: 71.7, latencyS: 207.181 } }, { id: "aa:2f3c4dc9-a450-4303-8697-0237257cf08f", modelId: "claude-opus-5-5", reasoningEffort: "max", thinking: "Max, Default Fallback", categories: { "Intelligence Index": 57.6223698102963, "Terminal-Bench 4.0": 59.5959595959596, SciCode: 66.8981481481482 }, overall: 57.6223698102963, source: { kind: "artificial-analysis", url: "https://artificialanalysis.ai/models/glm-5-3", releaseDate: null, fetchedAt: 1791286695126, indexVersion: "4.3.2", modelUrl: "https://artificialanalysis.ai/models/claude-opus-5-5" }, speed: { outputTps: 96.42, latencyS: 661.584 } }, { id: "aa:31da3a71-0773-47d9-8560-9f19f069926b", modelId: "k2-horizon-3-7b", reasoningEffort: null, thinking: "Reasoning configuration unspecified", categories: { "Intelligence Index": 15.6103951330976, "Terminal-Bench 4.0": 0, SciCode: 21.990740740740698 }, overall: 15.6103951330976, source: { kind: "artificial-analysis", url: "https://artificialanalysis.ai/models/glm-5-3", releaseDate: null, fetchedAt: 1791286695126, indexVersion: "4.3.2", modelUrl: "https://artificialanalysis.ai/models/k2-horizon-3-7b" } }, { id: "aa:340fb211-4fad-41d3-87d5-ed0d0cd34088", modelId: "hypernova-60b", reasoningEffort: "high", thinking: "High, Based on gpt-oss-120b", categories: { "Intelligence Index": null, "Terminal-Bench 4.0": 0, SciCode: null }, overall: null, source: { kind: "artificial-analysis", url: "https://artificialanalysis.ai/models/glm-5-3", releaseDate: null, fetchedAt: 1791286695126, indexVersion: "4.3.2", modelUrl: "https://artificialanalysis.ai/models/hypernova-60b" } }, { id: "aa:353c92f3-2148-4c2d-9231-aa7e1322a1fd", modelId: "qwen3-8-27b", reasoningEffort: "none", thinking: null, categories: { "Intelligence Index": 20.1502427055595, "Terminal-Bench 4.0": 0, SciCode: 36.2268518518519 }, overall: 20.1502427055595, source: { kind: "artificial-analysis", url: "https://artificialanalysis.ai/models/glm-5-3", releaseDate: null, fetchedAt: 1791286695126, indexVersion: "4.3.2", modelUrl: "https://artificialanalysis.ai/models/qwen3-8-27b-non-reasoning" } }, { id: "aa:36667da0-9222-4967-adbb-f7efa15ad213", modelId: "gpt-6-luna", reasoningEffort: "medium", thinking: null, categories: { "Intelligence Index": 29.9251773515762, "Terminal-Bench 4.0": 2.52525252525253, SciCode: 50.925925925925895 }, overall: 29.9251773515762, source: { kind: "artificial-analysis", url: "https://artificialanalysis.ai/models/glm-5-3", releaseDate: null, fetchedAt: 1791286695126, indexVersion: "4.3.2", modelUrl: "https://artificialanalysis.ai/models/gpt-6-luna-medium" } }, { id: "aa:36f73aaf-d38a-4b56-a2b3-d04d17186910", modelId: "gpt-oss-20b", reasoningEffort: "high", thinking: null, categories: { "Intelligence Index": 8.9675171856126, "Terminal-Bench 4.0": 0, SciCode: 38.8888888888889 }, overall: 8.9675171856126, source: { kind: "artificial-analysis", url: "https://artificialanalysis.ai/models/glm-5-3", releaseDate: null, fetchedAt: 1791286695126, indexVersion: "4.3.2", modelUrl: "https://artificialanalysis.ai/models/gpt-oss-20b" } }, { id: "aa:3b5ba264-ad25-429b-a460-4d8698205f0d", modelId: "nex-n2-pro", reasoningEffort: null, thinking: "Based on Qwen3.5-397B-A17B", categories: { "Intelligence Index": null, "Terminal-Bench 4.0": null, SciCode: 43.287037037037 }, overall: null, source: { kind: "artificial-analysis", url: "https://artificialanalysis.ai/models/glm-5-3", releaseDate: null, fetchedAt: 1791286695126, indexVersion: "4.3.2", modelUrl: "https://artificialanalysis.ai/models/nex-n2-pro" } }, { id: "aa:3b7de71c-e034-4591-8ca6-6b6be2fa471f", modelId: "claude-fable-5-1", reasoningEffort: "medium", thinking: "Medium, Default Fallback", categories: { "Intelligence Index": 48.9206162609523, "Terminal-Bench 4.0": 44.949494949495, SciCode: 56.3657407407407 }, overall: 48.9206162609523, source: { kind: "artificial-analysis", url: "https://artificialanalysis.ai/models/glm-5-3", releaseDate: null, fetchedAt: 1791286695126, indexVersion: "4.3.2", modelUrl: "https://artificialanalysis.ai/models/claude-fable-5-1-medium" } }, { id: "aa:3b84fee3-b70a-41bc-819e-5fbdef9a0042", modelId: "gpt-6-1-sol", reasoningEffort: "high", thinking: null, categories: { "Intelligence Index": 50.2377777519769, "Terminal-Bench 4.0": 51.5151515151515, SciCode: 55.787037037037 }, overall: 50.2377777519769, source: { kind: "artificial-analysis", url: "https://artificialanalysis.ai/models/glm-5-3", releaseDate: null, fetchedAt: 1791286695126, indexVersion: "4.3.2", modelUrl: "https://artificialanalysis.ai/models/gpt-6-1-sol-high" } }, { id: "aa:3e87c73e-a257-495e-9730-367a66229811", modelId: "claude-fable-5-1", reasoningEffort: "max", thinking: "Max, Default Fallback", categories: { "Intelligence Index": 53.3549259623252, "Terminal-Bench 4.0": 52.020202020202, SciCode: 63.078703703703695 }, overall: 53.3549259623252, source: { kind: "artificial-analysis", url: "https://artificialanalysis.ai/models/glm-5-3", releaseDate: null, fetchedAt: 1791286695126, indexVersion: "4.3.2", modelUrl: "https://artificialanalysis.ai/models/claude-fable-5-1" }, speed: { outputTps: 73.56, latencyS: 164.738 } }, { id: "aa:3fd96175-4ef1-434c-8795-f873aec2abc1", modelId: "mistral-small-4", reasoningEffort: null, thinking: "Reasoning", categories: { "Intelligence Index": 11.2675794141469, "Terminal-Bench 4.0": 0, SciCode: 38.7731481481481 }, overall: 11.2675794141469, source: { kind: "artificial-analysis", url: "https://artificialanalysis.ai/models/glm-5-3", releaseDate: null, fetchedAt: 1791286695126, indexVersion: "4.3.2", modelUrl: "https://artificialanalysis.ai/models/mistral-small-4" } }, { id: "aa:426d24c8-49ae-482a-b4a8-20f1c53f21c1", modelId: "gpt-5-6-luna", reasoningEffort: "max", thinking: null, categories: { "Intelligence Index": 37.3244239690841, "Terminal-Bench 4.0": 11.6161616161616, SciCode: 53.587962962963 }, overall: 37.3244239690841, source: { kind: "artificial-analysis", url: "https://artificialanalysis.ai/models/glm-5-3", releaseDate: null, fetchedAt: 1791286695126, indexVersion: "4.3.2", modelUrl: "https://artificialanalysis.ai/models/gpt-5-6-luna" } }, { id: "aa:433d5c5d-3092-4026-9727-1587ca07915d", modelId: "ling-3-0-flash-vl", reasoningEffort: null, thinking: "Reasoning configuration unspecified", categories: { "Intelligence Index": 24.5693054077875, "Terminal-Bench 4.0": 0, SciCode: 44.212962962963 }, overall: 24.5693054077875, source: { kind: "artificial-analysis", url: "https://artificialanalysis.ai/models/glm-5-3", releaseDate: null, fetchedAt: 1791286695126, indexVersion: "4.3.2", modelUrl: "https://artificialanalysis.ai/models/ling-3-0-flash-vl" } }, { id: "aa:43da3718-3d6e-40dd-901a-05664179ff7f", modelId: "mistral-small-3-2", reasoningEffort: null, thinking: null, categories: { "Intelligence Index": null, "Terminal-Bench 4.0": 0, SciCode: 28.587962962962997 }, overall: null, source: { kind: "artificial-analysis", url: "https://artificialanalysis.ai/models/glm-5-3", releaseDate: null, fetchedAt: 1791286695126, indexVersion: "4.3.2", modelUrl: "https://artificialanalysis.ai/models/mistral-small-3-2" } }, { id: "aa:43fc5506-c5ed-4dee-9b85-962bf7ae3986", modelId: "deepseek-v3", reasoningEffort: null, thinking: null, categories: { "Intelligence Index": 8.48686760841828, "Terminal-Bench 4.0": 0, SciCode: 35.7638888888889 }, overall: 8.48686760841828, source: { kind: "artificial-analysis", url: "https://artificialanalysis.ai/models/glm-5-3", releaseDate: null, fetchedAt: 1791286695126, indexVersion: "4.3.2", modelUrl: "https://artificialanalysis.ai/models/deepseek-v3" } }, { id: "aa:4416ca93-fde6-4b7b-abbc-3a6be109cc3d", modelId: "claude-opus-5-5", reasoningEffort: "low", thinking: "Low, Default Fallback", categories: { "Intelligence Index": 42.3077781466168, "Terminal-Bench 4.0": 31.313131313131297, SciCode: 58.5648148148148 }, overall: 42.3077781466168, source: { kind: "artificial-analysis", url: "https://artificialanalysis.ai/models/glm-5-3", releaseDate: null, fetchedAt: 1791286695126, indexVersion: "4.3.2", modelUrl: "https://artificialanalysis.ai/models/claude-opus-5-5-low" } }, { id: "aa:4559e9f0-8aad-4681-89fb-68cb915e0f16", modelId: "qwen3-14b-instruct", reasoningEffort: null, thinking: "Reasoning", categories: { "Intelligence Index": null, "Terminal-Bench 4.0": 0, SciCode: 30.6712962962963 }, overall: null, source: { kind: "artificial-analysis", url: "https://artificialanalysis.ai/models/glm-5-3", releaseDate: null, fetchedAt: 1791286695126, indexVersion: "4.3.2", modelUrl: "https://artificialanalysis.ai/models/qwen3-14b-instruct-reasoning" } }, { id: "aa:46f11cdf-1725-4abb-b39b-bd6bd948149c", modelId: "jt-4-1-flash-236b-a21b", reasoningEffort: null, thinking: "Reasoning", categories: { "Intelligence Index": 33.9172581709394, "Terminal-Bench 4.0": 3.03030303030303, SciCode: 51.9675925925926 }, overall: 33.9172581709394, source: { kind: "artificial-analysis", url: "https://artificialanalysis.ai/models/glm-5-3", releaseDate: null, fetchedAt: 1791286695126, indexVersion: "4.3.2", modelUrl: "https://artificialanalysis.ai/models/jt-4-1-flash-236b-a21b" } }, { id: "aa:4928e950-7f37-4475-b0dc-c5bad781a321", modelId: "mistral-large-3", reasoningEffort: null, thinking: null, categories: { "Intelligence Index": 9.26608812860467, "Terminal-Bench 4.0": 0, SciCode: 36.5740740740741 }, overall: 9.26608812860467, source: { kind: "artificial-analysis", url: "https://artificialanalysis.ai/models/glm-5-3", releaseDate: null, fetchedAt: 1791286695126, indexVersion: "4.3.2", modelUrl: "https://artificialanalysis.ai/models/mistral-large-3" } }, { id: "aa:4bbceacb-cf47-464b-b60f-e1d1fe016d67", modelId: "minimax-m2-7", reasoningEffort: null, thinking: "Reasoning configuration unspecified", categories: { "Intelligence Index": 22.7578150287271, "Terminal-Bench 4.0": 0, SciCode: 50.1157407407407 }, overall: 22.7578150287271, source: { kind: "artificial-analysis", url: "https://artificialanalysis.ai/models/glm-5-3", releaseDate: null, fetchedAt: 1791286695126, indexVersion: "4.3.2", modelUrl: "https://artificialanalysis.ai/models/minimax-m2-7" } }, { id: "aa:512d17ef-13d2-4f65-bf9b-154b0dec7e8d", modelId: "kimi-k3", reasoningEffort: "low", thinking: null, categories: { "Intelligence Index": 30.0666987529068, "Terminal-Bench 4.0": 12.6262626262626, SciCode: 52.662037037037 }, overall: 30.0666987529068, source: { kind: "artificial-analysis", url: "https://artificialanalysis.ai/models/glm-5-3", releaseDate: null, fetchedAt: 1791286695126, indexVersion: "4.3.2", modelUrl: "https://artificialanalysis.ai/models/kimi-k3-low" } }, { id: "aa:52eebe3e-6ede-4e46-92db-c5dea49fc410", modelId: "gpt-6-sol", reasoningEffort: "high", thinking: null, categories: { "Intelligence Index": 42.4004513642985, "Terminal-Bench 4.0": 26.2626262626263, SciCode: 54.86111111111111 }, overall: 42.4004513642985, source: { kind: "artificial-analysis", url: "https://artificialanalysis.ai/models/glm-5-3", releaseDate: null, fetchedAt: 1791286695126, indexVersion: "4.3.2", modelUrl: "https://artificialanalysis.ai/models/gpt-6-sol-high" } }, { id: "aa:53b9e276-e360-4a39-9076-1a19d72c25fe", modelId: "k2-horizon-mova-36b-a4b", reasoningEffort: null, thinking: "Reasoning configuration unspecified", categories: { "Intelligence Index": 25.3037790731435, "Terminal-Bench 4.0": 0, SciCode: 40.046296296296305 }, overall: 25.3037790731435, source: { kind: "artificial-analysis", url: "https://artificialanalysis.ai/models/glm-5-3", releaseDate: null, fetchedAt: 1791286695126, indexVersion: "4.3.2", modelUrl: "https://artificialanalysis.ai/models/k2-horizon-mova-36b-a4b" } }, { id: "aa:583f98fb-c4b8-4df3-8d40-60ac0ed69882", modelId: "muse-glimmer", reasoningEffort: "high", thinking: null, categories: { "Intelligence Index": 17.4754176089465, "Terminal-Bench 4.0": 0.505050505050505, SciCode: 44.907407407407405 }, overall: 17.4754176089465, source: { kind: "artificial-analysis", url: "https://artificialanalysis.ai/models/glm-5-3", releaseDate: null, fetchedAt: 1791286695126, indexVersion: "4.3.2", modelUrl: "https://artificialanalysis.ai/models/muse-glimmer" } }, { id: "aa:58b812bf-8498-46db-b834-f43ccc614b61", modelId: "gpt-5-6-luna", reasoningEffort: "medium", thinking: null, categories: { "Intelligence Index": 25.0358741440784, "Terminal-Bench 4.0": 0.505050505050505, SciCode: 46.7592592592593 }, overall: 25.0358741440784, source: { kind: "artificial-analysis", url: "https://artificialanalysis.ai/models/glm-5-3", releaseDate: null, fetchedAt: 1791286695126, indexVersion: "4.3.2", modelUrl: "https://artificialanalysis.ai/models/gpt-5-6-luna-medium" } }, { id: "aa:59627802-1546-422c-9a65-65b61c022d36", modelId: "grok-4-7", reasoningEffort: "xhigh", thinking: null, categories: { "Intelligence Index": 46.4465506302286, "Terminal-Bench 4.0": 25.7575757575758, SciCode: 57.4074074074074 }, overall: 46.4465506302286, source: { kind: "artificial-analysis", url: "https://artificialanalysis.ai/models/glm-5-3", releaseDate: null, fetchedAt: 1791286695126, indexVersion: "4.3.2", modelUrl: "https://artificialanalysis.ai/models/grok-4-7" }, speed: { outputTps: 74.37, latencyS: 25.307 } }, { id: "aa:598190f8-dc9c-4fea-a7ea-4b81c402ab18", modelId: "gemini-3-1-flash-lite", reasoningEffort: "high", thinking: null, categories: { "Intelligence Index": 15.554288713025, "Terminal-Bench 4.0": 0.505050505050505, SciCode: 43.4027777777778 }, overall: 15.554288713025, source: { kind: "artificial-analysis", url: "https://artificialanalysis.ai/models/glm-5-3", releaseDate: null, fetchedAt: 1791286695126, indexVersion: "4.3.2", modelUrl: "https://artificialanalysis.ai/models/gemini-3-1-flash-lite-preview" } }, { id: "aa:5aa1c578-af76-4b91-8699-cdd43582b3af", modelId: "glm-5-1", reasoningEffort: null, thinking: "Reasoning", categories: { "Intelligence Index": 26.0585912980095, "Terminal-Bench 4.0": 2.02020202020202, SciCode: 44.7916666666667 }, overall: 26.0585912980095, source: { kind: "artificial-analysis", url: "https://artificialanalysis.ai/models/glm-5-3", releaseDate: null, fetchedAt: 1791286695126, indexVersion: "4.3.2", modelUrl: "https://artificialanalysis.ai/models/glm-5-1" } }, { id: "aa:5b52def2-ac9b-4465-ad80-91ea8079e253", modelId: "nemotron-3-ultra-550b-a55b", reasoningEffort: null, thinking: "Reasoning", categories: { "Intelligence Index": 22.9279123422858, "Terminal-Bench 4.0": 0.505050505050505, SciCode: 40.2777777777778 }, overall: 22.9279123422858, source: { kind: "artificial-analysis", url: "https://artificialanalysis.ai/models/glm-5-3", releaseDate: null, fetchedAt: 1791286695126, indexVersion: "4.3.2", modelUrl: "https://artificialanalysis.ai/models/nvidia-nemotron-3-ultra-550b-a55b" } }, { id: "aa:5c3bdc0d-abab-4526-8079-34de4089bb4a", modelId: "longcat-2-0", reasoningEffort: null, thinking: "Reasoning configuration unspecified", categories: { "Intelligence Index": 19.1123256610623, "Terminal-Bench 4.0": 0, SciCode: 36.342592592592595 }, overall: 19.1123256610623, source: { kind: "artificial-analysis", url: "https://artificialanalysis.ai/models/glm-5-3", releaseDate: null, fetchedAt: 1791286695126, indexVersion: "4.3.2", modelUrl: "https://artificialanalysis.ai/models/longcat-2-0" } }, { id: "aa:5e0164b3-d902-4bcb-a1b2-83b4f4cd6143", modelId: "qwen3-30b-a3b-2507-reasoning", reasoningEffort: null, thinking: "Reasoning configuration unspecified", categories: { "Intelligence Index": 9.80537532870426, "Terminal-Bench 4.0": 0, SciCode: 32.9861111111111 }, overall: 9.80537532870426, source: { kind: "artificial-analysis", url: "https://artificialanalysis.ai/models/glm-5-3", releaseDate: null, fetchedAt: 1791286695126, indexVersion: "4.3.2", modelUrl: "https://artificialanalysis.ai/models/qwen3-30b-a3b-2507-reasoning" } }, { id: "aa:5e5b4ce7-bc54-47b2-b911-21b9cad8394c", modelId: "qwen3-8-max", reasoningEffort: null, thinking: "Reasoning configuration unspecified", categories: { "Intelligence Index": 40.1528623585941, "Terminal-Bench 4.0": 18.6868686868687, SciCode: 53.2407407407407 }, overall: 40.1528623585941, source: { kind: "artificial-analysis", url: "https://artificialanalysis.ai/models/glm-5-3", releaseDate: null, fetchedAt: 1791286695126, indexVersion: "4.3.2", modelUrl: "https://artificialanalysis.ai/models/qwen3-8-max-0803" } }, { id: "aa:62ea3198-9866-4d9f-8406-a79ee78c7164", modelId: "solar-mini4", reasoningEffort: null, thinking: "Reasoning configuration unspecified", categories: { "Intelligence Index": 24.0522018844171, "Terminal-Bench 4.0": 1.01010101010101, SciCode: 47.5694444444444 }, overall: 24.0522018844171, source: { kind: "artificial-analysis", url: "https://artificialanalysis.ai/models/glm-5-3", releaseDate: null, fetchedAt: 1791286695126, indexVersion: "4.3.2", modelUrl: "https://artificialanalysis.ai/models/solar-mini4" } }, { id: "aa:63872e9c-3377-4a6b-b477-7bba244c38e9", modelId: "nvidia-nemotron-3-super-120b-a12b", reasoningEffort: null, thinking: "Reasoning", categories: { "Intelligence Index": 12.8287575290979, "Terminal-Bench 4.0": 0, SciCode: 36.2268518518519 }, overall: 12.8287575290979, source: { kind: "artificial-analysis", url: "https://artificialanalysis.ai/models/glm-5-3", releaseDate: null, fetchedAt: 1791286695126, indexVersion: "4.3.2", modelUrl: "https://artificialanalysis.ai/models/nvidia-nemotron-3-super-120b-a12b" } }, { id: "aa:63cb48ea-0b0c-4e07-8ded-6d28dec4fa28", modelId: "gpt-6-luna", reasoningEffort: "none", thinking: null, categories: { "Intelligence Index": 18.4678465935701, "Terminal-Bench 4.0": 1.51515151515152, SciCode: 43.0555555555556 }, overall: 18.4678465935701, source: { kind: "artificial-analysis", url: "https://artificialanalysis.ai/models/glm-5-3", releaseDate: null, fetchedAt: 1791286695126, indexVersion: "4.3.2", modelUrl: "https://artificialanalysis.ai/models/gpt-6-luna-non-reasoning" } }, { id: "aa:641a073a-41c9-4773-9b02-d965c16607c5", modelId: "minicpm5-2b", reasoningEffort: null, thinking: "Reasoning configuration unspecified", categories: { "Intelligence Index": 12.463354831996, "Terminal-Bench 4.0": 0, SciCode: 26.273148148148103 }, overall: 12.463354831996, source: { kind: "artificial-analysis", url: "https://artificialanalysis.ai/models/glm-5-3", releaseDate: null, fetchedAt: 1791286695126, indexVersion: "4.3.2", modelUrl: "https://artificialanalysis.ai/models/minicpm5-2b" } }, { id: "aa:6657d7de-a2a9-40bc-a32f-86e80ad63698", modelId: "qwen3-8-27b", reasoningEffort: "medium", thinking: null, categories: { "Intelligence Index": 27.5508228231586, "Terminal-Bench 4.0": 5.05050505050505, SciCode: 39.0046296296296 }, overall: 27.5508228231586, source: { kind: "artificial-analysis", url: "https://artificialanalysis.ai/models/glm-5-3", releaseDate: null, fetchedAt: 1791286695126, indexVersion: "4.3.2", modelUrl: "https://artificialanalysis.ai/models/qwen3-8-27b-medium" } }, { id: "aa:66f4ce73-9a9b-4b49-9c6e-bedb9bfdc720", modelId: "ministral-3-3b", reasoningEffort: null, thinking: null, categories: { "Intelligence Index": 4.83760020546443, "Terminal-Bench 4.0": 0, SciCode: 15.277777777777802 }, overall: 4.83760020546443, source: { kind: "artificial-analysis", url: "https://artificialanalysis.ai/models/glm-5-3", releaseDate: null, fetchedAt: 1791286695126, indexVersion: "4.3.2", modelUrl: "https://artificialanalysis.ai/models/ministral-3-3b" } }, { id: "aa:69534bed-2ffd-4235-832b-e20a810333ab", modelId: "qwen3-7-max", reasoningEffort: null, thinking: "Reasoning configuration unspecified", categories: { "Intelligence Index": 29.4571634255623, "Terminal-Bench 4.0": 1.51515151515152, SciCode: 49.537037037037 }, overall: 29.4571634255623, source: { kind: "artificial-analysis", url: "https://artificialanalysis.ai/models/glm-5-3", releaseDate: null, fetchedAt: 1791286695126, indexVersion: "4.3.2", modelUrl: "https://artificialanalysis.ai/models/qwen3-7-max" } }, { id: "aa:6b79f899-e3c0-45f6-923c-243faccdb2fc", modelId: "gpt-5-5", reasoningEffort: "medium", thinking: null, categories: { "Intelligence Index": 33.8043604432432, "Terminal-Bench 4.0": 5.05050505050505, SciCode: 54.51388888888889 }, overall: 33.8043604432432, source: { kind: "artificial-analysis", url: "https://artificialanalysis.ai/models/glm-5-3", releaseDate: null, fetchedAt: 1791286695126, indexVersion: "4.3.2", modelUrl: "https://artificialanalysis.ai/models/gpt-5-5-medium" } }, { id: "aa:6c7b322e-2f35-48ff-9171-fb621a726fc0", modelId: "step-3-7-flash", reasoningEffort: "high", thinking: null, categories: { "Intelligence Index": null, "Terminal-Bench 4.0": null, SciCode: 43.8657407407407 }, overall: null, source: { kind: "artificial-analysis", url: "https://artificialanalysis.ai/models/glm-5-3", releaseDate: null, fetchedAt: 1791286695126, indexVersion: "4.3.2", modelUrl: "https://artificialanalysis.ai/models/step-3-7-flash" } }, { id: "aa:6d6fa1c9-b833-40b2-8a58-fa810e24a84e", modelId: "ling-3-0-flash-fin", reasoningEffort: null, thinking: "Reasoning configuration unspecified", categories: { "Intelligence Index": 22.5965828940594, "Terminal-Bench 4.0": 0, SciCode: 42.3611111111111 }, overall: 22.5965828940594, source: { kind: "artificial-analysis", url: "https://artificialanalysis.ai/models/glm-5-3", releaseDate: null, fetchedAt: 1791286695126, indexVersion: "4.3.2", modelUrl: "https://artificialanalysis.ai/models/ling-3-0-flash-fin" } }, { id: "aa:6e1b44ff-c227-496b-aef4-19b70cd18c76", modelId: "gemma-4-26b-a4b", reasoningEffort: null, thinking: "Reasoning", categories: { "Intelligence Index": null, "Terminal-Bench 4.0": null, SciCode: 40.046296296296305 }, overall: null, source: { kind: "artificial-analysis", url: "https://artificialanalysis.ai/models/glm-5-3", releaseDate: null, fetchedAt: 1791286695126, indexVersion: "4.3.2", modelUrl: "https://artificialanalysis.ai/models/gemma-4-26b-a4b" } }, { id: "aa:6f174934-5b7d-4333-86cb-f5ebf4a862e3", modelId: "gpt-5-6-sol", reasoningEffort: "medium", thinking: null, categories: { "Intelligence Index": 39.2363585889147, "Terminal-Bench 4.0": 14.6464646464646, SciCode: 57.4074074074074 }, overall: 39.2363585889147, source: { kind: "artificial-analysis", url: "https://artificialanalysis.ai/models/glm-5-3", releaseDate: null, fetchedAt: 1791286695126, indexVersion: "4.3.2", modelUrl: "https://artificialanalysis.ai/models/gpt-5-6-sol-medium" } }, { id: "aa:6fb13851-40ce-4bda-ad3f-6b38e0c5daa7", modelId: "gpt-6-luna", reasoningEffort: "max", thinking: null, categories: { "Intelligence Index": 38.1245186869738, "Terminal-Bench 4.0": 12.6262626262626, SciCode: 54.6296296296296 }, overall: 38.1245186869738, source: { kind: "artificial-analysis", url: "https://artificialanalysis.ai/models/glm-5-3", releaseDate: null, fetchedAt: 1791286695126, indexVersion: "4.3.2", modelUrl: "https://artificialanalysis.ai/models/gpt-6-luna" }, speed: { outputTps: 126.16, latencyS: 128.262 } }, { id: "aa:712be54a-77ae-41b2-9a58-21181479d6ee", modelId: "claude-opus-5", reasoningEffort: "high", thinking: null, categories: { "Intelligence Index": 48.1219182595908, "Terminal-Bench 4.0": 45.959595959596, SciCode: 55.4398148148148 }, overall: 48.1219182595908, source: { kind: "artificial-analysis", url: "https://artificialanalysis.ai/models/glm-5-3", releaseDate: null, fetchedAt: 1791286695126, indexVersion: "4.3.2", modelUrl: "https://artificialanalysis.ai/models/claude-opus-5-high" } }, { id: "aa:713fae11-c75c-4f10-ae2c-8e4074cd58af", modelId: "ministral-3-14b", reasoningEffort: null, thinking: null, categories: { "Intelligence Index": 6.04436817215002, "Terminal-Bench 4.0": 0, SciCode: 23.842592592592602 }, overall: 6.04436817215002, source: { kind: "artificial-analysis", url: "https://artificialanalysis.ai/models/glm-5-3", releaseDate: null, fetchedAt: 1791286695126, indexVersion: "4.3.2", modelUrl: "https://artificialanalysis.ai/models/ministral-3-14b" } }, { id: "aa:7261504e-503c-4a66-a9d3-a3272cdf9ad6", modelId: "inkling-small", reasoningEffort: null, thinking: "Reasoning configuration unspecified", categories: { "Intelligence Index": 25.6582584411942, "Terminal-Bench 4.0": 1.01010101010101, SciCode: 49.6527777777778 }, overall: 25.6582584411942, source: { kind: "artificial-analysis", url: "https://artificialanalysis.ai/models/glm-5-3", releaseDate: null, fetchedAt: 1791286695126, indexVersion: "4.3.2", modelUrl: "https://artificialanalysis.ai/models/inkling-small" } }, { id: "aa:73c96f99-0de3-4668-a4bd-b106a0fe18f2", modelId: "deepseek-v4-1-flash", reasoningEffort: "none", thinking: null, categories: { "Intelligence Index": 24.6733593924318, "Terminal-Bench 4.0": 5.55555555555556, SciCode: 35.532407407407405 }, overall: 24.6733593924318, source: { kind: "artificial-analysis", url: "https://artificialanalysis.ai/models/glm-5-3", releaseDate: null, fetchedAt: 1791286695126, indexVersion: "4.3.2", modelUrl: "https://artificialanalysis.ai/models/deepseek-v4-1-flash-non-reasoning" } }, { id: "aa:744fa3c1-42a7-4995-b138-fb6be11f463c", modelId: "gemini-3-8-flash", reasoningEffort: "medium", thinking: null, categories: { "Intelligence Index": 39.7740187061926, "Terminal-Bench 4.0": 19.6969696969697, SciCode: 55.0925925925926 }, overall: 39.7740187061926, source: { kind: "artificial-analysis", url: "https://artificialanalysis.ai/models/glm-5-3", releaseDate: null, fetchedAt: 1791286695126, indexVersion: "4.3.2", modelUrl: "https://artificialanalysis.ai/models/gemini-3-8-flash-medium" } }, { id: "aa:75e1c197-f239-4361-a9d6-66dccfead236", modelId: "deepseek-v3-0324", reasoningEffort: null, thinking: null, categories: { "Intelligence Index": 9.72000501684011, "Terminal-Bench 4.0": 0, SciCode: 39.0046296296296 }, overall: 9.72000501684011, source: { kind: "artificial-analysis", url: "https://artificialanalysis.ai/models/glm-5-3", releaseDate: null, fetchedAt: 1791286695126, indexVersion: "4.3.2", modelUrl: "https://artificialanalysis.ai/models/deepseek-v3-0324" } }, { id: "aa:765c9f31-95ec-4f14-900a-80614c3b0777", modelId: "mercury-2-5", reasoningEffort: null, thinking: "Reasoning configuration unspecified", categories: { "Intelligence Index": 12.3408453757638, "Terminal-Bench 4.0": 0, SciCode: 38.5416666666667 }, overall: 12.3408453757638, source: { kind: "artificial-analysis", url: "https://artificialanalysis.ai/models/glm-5-3", releaseDate: null, fetchedAt: 1791286695126, indexVersion: "4.3.2", modelUrl: "https://artificialanalysis.ai/models/mercury-2-5" } }, { id: "aa:76dcf6ef-39ea-4be0-b693-b88da25b4caf", modelId: "nvidia-nemotron-3-nano-30b-a3b", reasoningEffort: null, thinking: "Reasoning", categories: { "Intelligence Index": 8.8961440122188, "Terminal-Bench 4.0": 0, SciCode: 30.555555555555603 }, overall: 8.8961440122188, source: { kind: "artificial-analysis", url: "https://artificialanalysis.ai/models/glm-5-3", releaseDate: null, fetchedAt: 1791286695126, indexVersion: "4.3.2", modelUrl: "https://artificialanalysis.ai/models/nvidia-nemotron-3-nano-30b-a3b-reasoning" } }, { id: "aa:7707a46f-895f-4247-b7a8-ddab87c9a11d", modelId: "deepseek-v4-flash-vision", reasoningEffort: "max", thinking: null, categories: { "Intelligence Index": 34.8390628035969, "Terminal-Bench 4.0": 12.1212121212121, SciCode: 49.6527777777778 }, overall: 34.8390628035969, source: { kind: "artificial-analysis", url: "https://artificialanalysis.ai/models/glm-5-3", releaseDate: null, fetchedAt: 1791286695126, indexVersion: "4.3.2", modelUrl: "https://artificialanalysis.ai/models/deepseek-v4-flash-vision" } }, { id: "aa:780a4a85-17ff-4175-a8dd-ebca4823e61b", modelId: "gpt-6-sol", reasoningEffort: "medium", thinking: null, categories: { "Intelligence Index": 39.8118971749522, "Terminal-Bench 4.0": 18.6868686868687, SciCode: 53.8194444444444 }, overall: 39.8118971749522, source: { kind: "artificial-analysis", url: "https://artificialanalysis.ai/models/glm-5-3", releaseDate: null, fetchedAt: 1791286695126, indexVersion: "4.3.2", modelUrl: "https://artificialanalysis.ai/models/gpt-6-sol-medium" } }, { id: "aa:78332c88-fe60-42c8-af9d-3617e44cf1f5", modelId: "gemini-3-6-flash", reasoningEffort: "high", thinking: null, categories: { "Intelligence Index": 33.9785928920714, "Terminal-Bench 4.0": 7.07070707070707, SciCode: 53.3564814814815 }, overall: 33.9785928920714, source: { kind: "artificial-analysis", url: "https://artificialanalysis.ai/models/glm-5-3", releaseDate: null, fetchedAt: 1791286695126, indexVersion: "4.3.2", modelUrl: "https://artificialanalysis.ai/models/gemini-3-6-flash" } }, { id: "aa:794f69b5-cede-482b-b1cc-d769478497cd", modelId: "grok-4-5", reasoningEffort: "high", thinking: null, categories: { "Intelligence Index": 38.8121153240657, "Terminal-Bench 4.0": 10.6060606060606, SciCode: 54.976851851851805 }, overall: 38.8121153240657, source: { kind: "artificial-analysis", url: "https://artificialanalysis.ai/models/glm-5-3", releaseDate: null, fetchedAt: 1791286695126, indexVersion: "4.3.2", modelUrl: "https://artificialanalysis.ai/models/grok-4-5" } }, { id: "aa:7c4d1e30-6ecb-46cf-880c-41446d7b51f1", modelId: "gpt-5-6-sol", reasoningEffort: "none", thinking: null, categories: { "Intelligence Index": null, "Terminal-Bench 4.0": null, SciCode: 47.685185185185205 }, overall: null, source: { kind: "artificial-analysis", url: "https://artificialanalysis.ai/models/glm-5-3", releaseDate: null, fetchedAt: 1791286695126, indexVersion: "4.3.2", modelUrl: "https://artificialanalysis.ai/models/gpt-5-6-sol-non-reasoning" } }, { id: "aa:7d1229bc-deea-4717-ba5b-f59a35d991e3", modelId: "gpt-6-luna", reasoningEffort: "high", thinking: null, categories: { "Intelligence Index": 32.9282054150837, "Terminal-Bench 4.0": 4.545454545454549, SciCode: 50.3472222222222 }, overall: 32.9282054150837, source: { kind: "artificial-analysis", url: "https://artificialanalysis.ai/models/glm-5-3", releaseDate: null, fetchedAt: 1791286695126, indexVersion: "4.3.2", modelUrl: "https://artificialanalysis.ai/models/gpt-6-luna-high" } }, { id: "aa:7e30585f-fad7-40df-a8cb-03c1d96df38a", modelId: "qwen3-8-27b", reasoningEffort: "low", thinking: null, categories: { "Intelligence Index": 26.2047978189896, "Terminal-Bench 4.0": 2.52525252525253, SciCode: 40.046296296296305 }, overall: 26.2047978189896, source: { kind: "artificial-analysis", url: "https://artificialanalysis.ai/models/glm-5-3", releaseDate: null, fetchedAt: 1791286695126, indexVersion: "4.3.2", modelUrl: "https://artificialanalysis.ai/models/qwen3-8-27b-low" } }, { id: "aa:7eabd8ca-bf43-4d56-b3df-efd1c4eebfb0", modelId: "solar-open2-250b", reasoningEffort: null, thinking: "Reasoning configuration unspecified", categories: { "Intelligence Index": null, "Terminal-Bench 4.0": null, SciCode: 48.032407407407405 }, overall: null, source: { kind: "artificial-analysis", url: "https://artificialanalysis.ai/models/glm-5-3", releaseDate: null, fetchedAt: 1791286695126, indexVersion: "4.3.2", modelUrl: "https://artificialanalysis.ai/models/solar-open2-250b" } }, { id: "aa:7eaf926c-5f39-4e58-ae50-c38b5fc630fc", modelId: "ling-3-0-tiny", reasoningEffort: null, thinking: "Reasoning configuration unspecified", categories: { "Intelligence Index": 11.0636233769305, "Terminal-Bench 4.0": 0, SciCode: 24.1898148148148 }, overall: 11.0636233769305, source: { kind: "artificial-analysis", url: "https://artificialanalysis.ai/models/glm-5-3", releaseDate: null, fetchedAt: 1791286695126, indexVersion: "4.3.2", modelUrl: "https://artificialanalysis.ai/models/ling-3-0-tiny" } }, { id: "aa:8014c311-fa23-4a4b-8485-8a864db8a113", modelId: "celeris-1", reasoningEffort: null, thinking: null, categories: { "Intelligence Index": 6.3469533538601, "Terminal-Bench 4.0": 0, SciCode: 21.6435185185185 }, overall: 6.3469533538601, source: { kind: "artificial-analysis", url: "https://artificialanalysis.ai/models/glm-5-3", releaseDate: null, fetchedAt: 1791286695126, indexVersion: "4.3.2", modelUrl: "https://artificialanalysis.ai/models/celeris-1" } }, { id: "aa:81972fba-1219-477e-bbfb-18c656a63ff7", modelId: "gpt-5-6-terra", reasoningEffort: "high", thinking: null, categories: { "Intelligence Index": 34.2376558067555, "Terminal-Bench 4.0": 1.51515151515152, SciCode: 52.4305555555556 }, overall: 34.2376558067555, source: { kind: "artificial-analysis", url: "https://artificialanalysis.ai/models/glm-5-3", releaseDate: null, fetchedAt: 1791286695126, indexVersion: "4.3.2", modelUrl: "https://artificialanalysis.ai/models/gpt-5-6-terra-high" } }, { id: "aa:8215372b-66ff-457b-855e-e8abeafc9571", modelId: "a-x-k2", reasoningEffort: null, thinking: "Reasoning configuration unspecified", categories: { "Intelligence Index": 21.4612645385074, "Terminal-Bench 4.0": 0, SciCode: 40.9722222222222 }, overall: 21.4612645385074, source: { kind: "artificial-analysis", url: "https://artificialanalysis.ai/models/glm-5-3", releaseDate: null, fetchedAt: 1791286695126, indexVersion: "4.3.2", modelUrl: "https://artificialanalysis.ai/models/a-x-k2" } }, { id: "aa:83173329-c09a-41f1-a028-a282a5f908d7", modelId: "deepseek-v4-pro", reasoningEffort: "max", thinking: null, categories: { "Intelligence Index": 35.9967791278402, "Terminal-Bench 4.0": 14.1414141414141, SciCode: 51.0416666666667 }, overall: 35.9967791278402, source: { kind: "artificial-analysis", url: "https://artificialanalysis.ai/models/glm-5-3", releaseDate: null, fetchedAt: 1791286695126, indexVersion: "4.3.2", modelUrl: "https://artificialanalysis.ai/models/deepseek-v4-pro" } }, { id: "aa:8665ca00-c687-44c7-875c-22618cb31c4f", modelId: "qwen3-6-35b-a3b", reasoningEffort: null, thinking: "Reasoning", categories: { "Intelligence Index": 18.2289900189843, "Terminal-Bench 4.0": 0, SciCode: 36.5740740740741 }, overall: 18.2289900189843, source: { kind: "artificial-analysis", url: "https://artificialanalysis.ai/models/glm-5-3", releaseDate: null, fetchedAt: 1791286695126, indexVersion: "4.3.2", modelUrl: "https://artificialanalysis.ai/models/qwen3-6-35b-a3b" } }, { id: "aa:87110ff0-1f79-41b4-9976-eda250597317", modelId: "gpt-5-6-luna", reasoningEffort: "xhigh", thinking: null, categories: { "Intelligence Index": 34.555348822309, "Terminal-Bench 4.0": 3.53535353535354, SciCode: 50.462962962963 }, overall: 34.555348822309, source: { kind: "artificial-analysis", url: "https://artificialanalysis.ai/models/glm-5-3", releaseDate: null, fetchedAt: 1791286695126, indexVersion: "4.3.2", modelUrl: "https://artificialanalysis.ai/models/gpt-5-6-luna-xhigh" } }, { id: "aa:89a2c945-1fab-4ee4-9f45-83a9f46cb221", modelId: "deepseek-v4-flash-0420", reasoningEffort: "high", thinking: null, categories: { "Intelligence Index": 24.3839569152521, "Terminal-Bench 4.0": 3.03030303030303, SciCode: 40.162037037037 }, overall: 24.3839569152521, source: { kind: "artificial-analysis", url: "https://artificialanalysis.ai/models/glm-5-3", releaseDate: null, fetchedAt: 1791286695126, indexVersion: "4.3.2", modelUrl: "https://artificialanalysis.ai/models/deepseek-v4-flash-0420-high" } }, { id: "aa:8a999846-4c1d-4ce7-a8b7-1310a7166fd7", modelId: "gemini-3-8-flash", reasoningEffort: "high", thinking: null, categories: { "Intelligence Index": 40.9262321765904, "Terminal-Bench 4.0": 19.6969696969697, SciCode: 56.5972222222222 }, overall: 40.9262321765904, source: { kind: "artificial-analysis", url: "https://artificialanalysis.ai/models/glm-5-3", releaseDate: null, fetchedAt: 1791286695126, indexVersion: "4.3.2", modelUrl: "https://artificialanalysis.ai/models/gemini-3-8-flash" }, speed: { outputTps: 140.95, latencyS: 15.874 } }, { id: "aa:8afc250d-b538-45a2-812a-4605f4ffd87e", modelId: "gpt-5-6-sol", reasoningEffort: "high", thinking: null, categories: { "Intelligence Index": 42.3461010420519, "Terminal-Bench 4.0": 20.7070707070707, SciCode: 57.7546296296296 }, overall: 42.3461010420519, source: { kind: "artificial-analysis", url: "https://artificialanalysis.ai/models/glm-5-3", releaseDate: null, fetchedAt: 1791286695126, indexVersion: "4.3.2", modelUrl: "https://artificialanalysis.ai/models/gpt-5-6-sol-high" } }, { id: "aa:8c29d66d-bf98-4ea3-8572-5409353ecc66", modelId: "qwen3-6-27b", reasoningEffort: null, thinking: "Reasoning", categories: { "Intelligence Index": 21.4279902240782, "Terminal-Bench 4.0": 0, SciCode: 42.8240740740741 }, overall: 21.4279902240782, source: { kind: "artificial-analysis", url: "https://artificialanalysis.ai/models/glm-5-3", releaseDate: null, fetchedAt: 1791286695126, indexVersion: "4.3.2", modelUrl: "https://artificialanalysis.ai/models/qwen3-6-27b" } }, { id: "aa:8d0cb231-7303-452c-9923-a9620b948475", modelId: "kimi-k2-7-code", reasoningEffort: null, thinking: "Reasoning configuration unspecified", categories: { "Intelligence Index": 25.8121062401836, "Terminal-Bench 4.0": 1.01010101010101, SciCode: 47.8009259259259 }, overall: 25.8121062401836, source: { kind: "artificial-analysis", url: "https://artificialanalysis.ai/models/glm-5-3", releaseDate: null, fetchedAt: 1791286695126, indexVersion: "4.3.2", modelUrl: "https://artificialanalysis.ai/models/kimi-k2-7-code" } }, { id: "aa:8df710d3-9dae-4498-9b4e-9818238e6f31", modelId: "qwen3-8-2-4t-a95b", reasoningEffort: null, thinking: "Reasoning configuration unspecified", categories: { "Intelligence Index": 39.8861723105325, "Terminal-Bench 4.0": 11.1111111111111, SciCode: 54.050925925925895 }, overall: 39.8861723105325, source: { kind: "artificial-analysis", url: "https://artificialanalysis.ai/models/glm-5-3", releaseDate: null, fetchedAt: 1791286695126, indexVersion: "4.3.2", modelUrl: "https://artificialanalysis.ai/models/qwen3-8-2-4t-a95b" } }, { id: "aa:90c2a9cf-ad7e-4332-9be2-2fd1309833e2", modelId: "grok-4-3", reasoningEffort: "none", thinking: null, categories: { "Intelligence Index": 13.9926809505055, "Terminal-Bench 4.0": 0, SciCode: 39.3518518518519 }, overall: 13.9926809505055, source: { kind: "artificial-analysis", url: "https://artificialanalysis.ai/models/glm-5-3", releaseDate: null, fetchedAt: 1791286695126, indexVersion: "4.3.2", modelUrl: "https://artificialanalysis.ai/models/grok-4-3-non-reasoning" } }, { id: "aa:90e078f2-051b-4c63-8919-76618971cb3f", modelId: "claude-4-5-sonnet", reasoningEffort: null, thinking: "Reasoning", categories: { "Intelligence Index": 20.6661943537112, "Terminal-Bench 4.0": 0, SciCode: 45.717592592592595 }, overall: 20.6661943537112, source: { kind: "artificial-analysis", url: "https://artificialanalysis.ai/models/glm-5-3", releaseDate: null, fetchedAt: 1791286695126, indexVersion: "4.3.2", modelUrl: "https://artificialanalysis.ai/models/claude-4-5-sonnet-thinking" } }, { id: "aa:922c69c7-9037-43c6-8bcf-a1c555e7f3eb", modelId: "llama-4-maverick", reasoningEffort: null, thinking: null, categories: { "Intelligence Index": null, "Terminal-Bench 4.0": 0, SciCode: 31.712962962962997 }, overall: null, source: { kind: "artificial-analysis", url: "https://artificialanalysis.ai/models/glm-5-3", releaseDate: null, fetchedAt: 1791286695126, indexVersion: "4.3.2", modelUrl: "https://artificialanalysis.ai/models/llama-4-maverick" } }, { id: "aa:948892b5-db03-4118-a4a8-ccd51ed871ea", modelId: "grok-4-3", reasoningEffort: "high", thinking: null, categories: { "Intelligence Index": 24.8801191398002, "Terminal-Bench 4.0": 0, SciCode: 48.2638888888889 }, overall: 24.8801191398002, source: { kind: "artificial-analysis", url: "https://artificialanalysis.ai/models/glm-5-3", releaseDate: null, fetchedAt: 1791286695126, indexVersion: "4.3.2", modelUrl: "https://artificialanalysis.ai/models/grok-4-3" } }, { id: "aa:9741f3c2-cbb1-4a3f-99ee-7bd7384d9038", modelId: "ministral-3-8b", reasoningEffort: null, thinking: null, categories: { "Intelligence Index": 5.47767370454416, "Terminal-Bench 4.0": 0, SciCode: 20.717592592592602 }, overall: 5.47767370454416, source: { kind: "artificial-analysis", url: "https://artificialanalysis.ai/models/glm-5-3", releaseDate: null, fetchedAt: 1791286695126, indexVersion: "4.3.2", modelUrl: "https://artificialanalysis.ai/models/ministral-3-8b" } }, { id: "aa:975aeaef-50bd-4a65-9c73-f1015adcd4d4", modelId: "claude-sonnet-5-5", reasoningEffort: "xhigh", thinking: "Xhigh, Default Fallback", categories: { "Intelligence Index": 51.8955544183089, "Terminal-Bench 4.0": 57.07070707070711, SciCode: 57.2916666666667 }, overall: 51.8955544183089, source: { kind: "artificial-analysis", url: "https://artificialanalysis.ai/models/glm-5-3", releaseDate: null, fetchedAt: 1791286695126, indexVersion: "4.3.2", modelUrl: "https://artificialanalysis.ai/models/claude-sonnet-5-5-xhigh" } }, { id: "aa:992b7b84-5069-4c6a-9295-834252553d50", modelId: "claude-opus-4-8", reasoningEffort: "max", thinking: null, categories: { "Intelligence Index": 41.7899103794639, "Terminal-Bench 4.0": 21.7171717171717, SciCode: 54.398148148148195 }, overall: 41.7899103794639, source: { kind: "artificial-analysis", url: "https://artificialanalysis.ai/models/glm-5-3", releaseDate: null, fetchedAt: 1791286695126, indexVersion: "4.3.2", modelUrl: "https://artificialanalysis.ai/models/claude-opus-4-8" } }, { id: "aa:9999672c-b687-4026-9c15-5cef02ff53bb", modelId: "muse-spark-1-3", reasoningEffort: "max", thinking: null, categories: { "Intelligence Index": 48.0923107719685, "Terminal-Bench 4.0": 33.3333333333333, SciCode: 58.796296296296305 }, overall: 48.0923107719685, source: { kind: "artificial-analysis", url: "https://artificialanalysis.ai/models/glm-5-3", releaseDate: null, fetchedAt: 1791286695126, indexVersion: "4.3.2", modelUrl: "https://artificialanalysis.ai/models/muse-spark-1-3" } }, { id: "aa:99f376bf-cbcb-4124-bf3e-6b0a4e6e9bea", modelId: "claude-sonnet-5", reasoningEffort: "xhigh", thinking: null, categories: { "Intelligence Index": 34.384211557212, "Terminal-Bench 4.0": 7.07070707070707, SciCode: 54.050925925925895 }, overall: 34.384211557212, source: { kind: "artificial-analysis", url: "https://artificialanalysis.ai/models/glm-5-3", releaseDate: null, fetchedAt: 1791286695126, indexVersion: "4.3.2", modelUrl: "https://artificialanalysis.ai/models/claude-sonnet-5-xhigh" } }, { id: "aa:9ac3908c-9eb2-44db-8c01-3ec7da6fc2ae", modelId: "qwen3-8-flash-next", reasoningEffort: null, thinking: "Reasoning configuration unspecified", categories: { "Intelligence Index": 39.8223021864741, "Terminal-Bench 4.0": 25.2525252525253, SciCode: 50.578703703703695 }, overall: 39.8223021864741, source: { kind: "artificial-analysis", url: "https://artificialanalysis.ai/models/glm-5-3", releaseDate: null, fetchedAt: 1791286695126, indexVersion: "4.3.2", modelUrl: "https://artificialanalysis.ai/models/qwen3-8-flash-next" } }, { id: "aa:9b166bf3-42db-4f63-8338-1c4a1244ffe8", modelId: "claude-fable-5-1", reasoningEffort: "xhigh", thinking: "Xhigh, Default Fallback", categories: { "Intelligence Index": 53.2032587538944, "Terminal-Bench 4.0": 55.050505050505, SciCode: 60.8796296296296 }, overall: 53.2032587538944, source: { kind: "artificial-analysis", url: "https://artificialanalysis.ai/models/glm-5-3", releaseDate: null, fetchedAt: 1791286695126, indexVersion: "4.3.2", modelUrl: "https://artificialanalysis.ai/models/claude-fable-5-1-xhigh" } }, { id: "aa:9b97a35e-6ac7-44d9-91c6-422fa678963e", modelId: "gpt-5-6-terra", reasoningEffort: "none", thinking: null, categories: { "Intelligence Index": 20.7797013584503, "Terminal-Bench 4.0": 0.505050505050505, SciCode: 45.1388888888889 }, overall: 20.7797013584503, source: { kind: "artificial-analysis", url: "https://artificialanalysis.ai/models/glm-5-3", releaseDate: null, fetchedAt: 1791286695126, indexVersion: "4.3.2", modelUrl: "https://artificialanalysis.ai/models/gpt-5-6-terra-non-reasoning" } }, { id: "aa:9d7d72cd-d95d-45a0-b109-4ad292c9aabd", modelId: "claude-fable-5-1", reasoningEffort: "high", thinking: "High, Default Fallback", categories: { "Intelligence Index": 51.1515708852237, "Terminal-Bench 4.0": 52.020202020202, SciCode: 58.6805555555556 }, overall: 51.1515708852237, source: { kind: "artificial-analysis", url: "https://artificialanalysis.ai/models/glm-5-3", releaseDate: null, fetchedAt: 1791286695126, indexVersion: "4.3.2", modelUrl: "https://artificialanalysis.ai/models/claude-fable-5-1-high" } }, { id: "aa:9dba61f5-78ee-4190-8d1d-8e7063ffd386", modelId: "qwen3-8b-instruct", reasoningEffort: null, thinking: "Reasoning", categories: { "Intelligence Index": null, "Terminal-Bench 4.0": 0, SciCode: 27.8935185185185 }, overall: null, source: { kind: "artificial-analysis", url: "https://artificialanalysis.ai/models/glm-5-3", releaseDate: null, fetchedAt: 1791286695126, indexVersion: "4.3.2", modelUrl: "https://artificialanalysis.ai/models/qwen3-8b-instruct-reasoning" } }, { id: "aa:9e30696f-16fa-4b4f-ba53-161895a85fed", modelId: "gpt-5-6-terra", reasoningEffort: "xhigh", thinking: null, categories: { "Intelligence Index": 37.9513370742927, "Terminal-Bench 4.0": 10.1010101010101, SciCode: 52.3148148148148 }, overall: 37.9513370742927, source: { kind: "artificial-analysis", url: "https://artificialanalysis.ai/models/glm-5-3", releaseDate: null, fetchedAt: 1791286695126, indexVersion: "4.3.2", modelUrl: "https://artificialanalysis.ai/models/gpt-5-6-terra-xhigh" } }, { id: "aa:9e9fb958-87f5-4835-a761-26102ef25898", modelId: "k2-horizon-0-9b", reasoningEffort: null, thinking: "Reasoning configuration unspecified", categories: { "Intelligence Index": 3.04760621054014, "Terminal-Bench 4.0": 0, SciCode: 6.94444444444444 }, overall: 3.04760621054014, source: { kind: "artificial-analysis", url: "https://artificialanalysis.ai/models/glm-5-3", releaseDate: null, fetchedAt: 1791286695126, indexVersion: "4.3.2", modelUrl: "https://artificialanalysis.ai/models/k2-horizon-0-9b" } }, { id: "aa:9ee13921-62a4-425a-a22b-df3302198d93", modelId: "nvidia-nemotron-3-nano-4b", reasoningEffort: null, thinking: "Reasoning configuration unspecified", categories: { "Intelligence Index": 4.76910061591993, "Terminal-Bench 4.0": 0, SciCode: 16.087962962963 }, overall: 4.76910061591993, source: { kind: "artificial-analysis", url: "https://artificialanalysis.ai/models/glm-5-3", releaseDate: null, fetchedAt: 1791286695126, indexVersion: "4.3.2", modelUrl: "https://artificialanalysis.ai/models/nvidia-nemotron-3-nano-4b" } }, { id: "aa:a2e51d62-ea4e-4f15-8be0-be9dc1fb489d", modelId: "gpt-6-1-sol", reasoningEffort: "medium", thinking: null, categories: { "Intelligence Index": 47.7833271274065, "Terminal-Bench 4.0": 47.979797979798, SciCode: 53.2407407407407 }, overall: 47.7833271274065, source: { kind: "artificial-analysis", url: "https://artificialanalysis.ai/models/glm-5-3", releaseDate: null, fetchedAt: 1791286695126, indexVersion: "4.3.2", modelUrl: "https://artificialanalysis.ai/models/gpt-6-1-sol-medium" } }, { id: "aa:a3f8100d-e38f-408b-b0fa-0085dae18dc1", modelId: "gpt-6-astra", reasoningEffort: "low", thinking: null, categories: { "Intelligence Index": 45.7819243120341, "Terminal-Bench 4.0": 41.9191919191919, SciCode: 54.050925925925895 }, overall: 45.7819243120341, source: { kind: "artificial-analysis", url: "https://artificialanalysis.ai/models/glm-5-3", releaseDate: null, fetchedAt: 1791286695126, indexVersion: "4.3.2", modelUrl: "https://artificialanalysis.ai/models/gpt-6-astra-low" } }, { id: "aa:a6043b9b-628a-4a76-a021-2834e0627d05", modelId: "ling-3-1-flash", reasoningEffort: null, thinking: "Reasoning configuration unspecified", categories: { "Intelligence Index": 41.0906200397391, "Terminal-Bench 4.0": 33.3333333333333, SciCode: 54.050925925925895 }, overall: 41.0906200397391, source: { kind: "artificial-analysis", url: "https://artificialanalysis.ai/models/glm-5-3", releaseDate: null, fetchedAt: 1791286695126, indexVersion: "4.3.2", modelUrl: "https://artificialanalysis.ai/models/ling-3-1-flash" } }, { id: "aa:a6340098-d7ae-462d-b372-0a0a67fc44b4", modelId: "claude-4-5-haiku", reasoningEffort: null, thinking: "Reasoning", categories: { "Intelligence Index": 16.8822352291856, "Terminal-Bench 4.0": 0, SciCode: 42.2453703703704 }, overall: 16.8822352291856, source: { kind: "artificial-analysis", url: "https://artificialanalysis.ai/models/glm-5-3", releaseDate: null, fetchedAt: 1791286695126, indexVersion: "4.3.2", modelUrl: "https://artificialanalysis.ai/models/claude-4-5-haiku-reasoning" } }, { id: "aa:a87fce42-eea3-4e45-a96d-fe057814f371", modelId: "qwen3-7-plus", reasoningEffort: null, thinking: "Reasoning configuration unspecified", categories: { "Intelligence Index": 25.1622215821984, "Terminal-Bench 4.0": 1.01010101010101, SciCode: 46.064814814814795 }, overall: 25.1622215821984, source: { kind: "artificial-analysis", url: "https://artificialanalysis.ai/models/glm-5-3", releaseDate: null, fetchedAt: 1791286695126, indexVersion: "4.3.2", modelUrl: "https://artificialanalysis.ai/models/qwen3-7-plus" } }, { id: "aa:aa55297e-8fbf-4372-b4ab-9b068dc6396c", modelId: "gpt-5-6-luna", reasoningEffort: "high", thinking: null, categories: { "Intelligence Index": 32.1196453501091, "Terminal-Bench 4.0": 2.52525252525253, SciCode: 51.6203703703704 }, overall: 32.1196453501091, source: { kind: "artificial-analysis", url: "https://artificialanalysis.ai/models/glm-5-3", releaseDate: null, fetchedAt: 1791286695126, indexVersion: "4.3.2", modelUrl: "https://artificialanalysis.ai/models/gpt-5-6-luna-high" } }, { id: "aa:adf9a85e-abc3-4f28-937b-db6655cc5238", modelId: "llama-4-scout", reasoningEffort: null, thinking: null, categories: { "Intelligence Index": null, "Terminal-Bench 4.0": 0, SciCode: 21.296296296296298 }, overall: null, source: { kind: "artificial-analysis", url: "https://artificialanalysis.ai/models/glm-5-3", releaseDate: null, fetchedAt: 1791286695126, indexVersion: "4.3.2", modelUrl: "https://artificialanalysis.ai/models/llama-4-scout" } }, { id: "aa:adfae555-f489-4f3e-9064-c6b7fcdd0783", modelId: "granite-4-2-8b", reasoningEffort: null, thinking: "Reasoning configuration unspecified", categories: { "Intelligence Index": 11.0812712267815, "Terminal-Bench 4.0": 0, SciCode: 31.4814814814815 }, overall: 11.0812712267815, source: { kind: "artificial-analysis", url: "https://artificialanalysis.ai/models/glm-5-3", releaseDate: null, fetchedAt: 1791286695126, indexVersion: "4.3.2", modelUrl: "https://artificialanalysis.ai/models/granite-4-2-8b" } }, { id: "aa:b00ecd62-a53f-4aed-b833-3e9d6b0170ba", modelId: "qwen3-32b-instruct", reasoningEffort: null, thinking: "Reasoning", categories: { "Intelligence Index": null, "Terminal-Bench 4.0": 0, SciCode: 35.9953703703704 }, overall: null, source: { kind: "artificial-analysis", url: "https://artificialanalysis.ai/models/glm-5-3", releaseDate: null, fetchedAt: 1791286695126, indexVersion: "4.3.2", modelUrl: "https://artificialanalysis.ai/models/qwen3-32b-instruct-reasoning" } }, { id: "aa:b01dee41-c62b-48ed-8d16-984adc405e5c", modelId: "qwen3-8-27b", reasoningEffort: "xhigh", thinking: null, categories: { "Intelligence Index": 33.6962858057476, "Terminal-Bench 4.0": 5.55555555555556, SciCode: 46.6435185185185 }, overall: 33.6962858057476, source: { kind: "artificial-analysis", url: "https://artificialanalysis.ai/models/glm-5-3", releaseDate: null, fetchedAt: 1791286695126, indexVersion: "4.3.2", modelUrl: "https://artificialanalysis.ai/models/qwen3-8-27b" }, speed: { outputTps: 39.44, latencyS: 1.37 } }, { id: "aa:b01eefb1-c9f8-412d-8353-571031a52f23", modelId: "motif-3", reasoningEffort: null, thinking: "Reasoning configuration unspecified", categories: { "Intelligence Index": null, "Terminal-Bench 4.0": null, SciCode: 42.2453703703704 }, overall: null, source: { kind: "artificial-analysis", url: "https://artificialanalysis.ai/models/glm-5-3", releaseDate: null, fetchedAt: 1791286695126, indexVersion: "4.3.2", modelUrl: "https://artificialanalysis.ai/models/motif-3" } }, { id: "aa:b112af07-3bd5-4647-b09f-b23204361bb2", modelId: "qwen3-8-max-0902", reasoningEffort: null, thinking: "Reasoning configuration unspecified", categories: { "Intelligence Index": 45.4152084980521, "Terminal-Bench 4.0": 38.8888888888889, SciCode: 52.0833333333333 }, overall: 45.4152084980521, source: { kind: "artificial-analysis", url: "https://artificialanalysis.ai/models/glm-5-3", releaseDate: null, fetchedAt: 1791286695126, indexVersion: "4.3.2", modelUrl: "https://artificialanalysis.ai/models/qwen3-8-max" }, speed: { outputTps: 36.8, latencyS: 1.779 } }, { id: "aa:b13c1257-d746-4027-8fc8-4892dc14701c", modelId: "gpt-5-5", reasoningEffort: "high", thinking: null, categories: { "Intelligence Index": 36.9793737887731, "Terminal-Bench 4.0": 9.09090909090909, SciCode: 56.1342592592593 }, overall: 36.9793737887731, source: { kind: "artificial-analysis", url: "https://artificialanalysis.ai/models/glm-5-3", releaseDate: null, fetchedAt: 1791286695126, indexVersion: "4.3.2", modelUrl: "https://artificialanalysis.ai/models/gpt-5-5-high" } }, { id: "aa:b171d979-5ec1-45de-b8b9-db1ee65e77ec", modelId: "claude-sonnet-5-5", reasoningEffort: "max", thinking: "Max, Default Fallback", categories: { "Intelligence Index": 56.0001286580794, "Terminal-Bench 4.0": 63.636363636363605, SciCode: 60.9953703703704 }, overall: 56.0001286580794, source: { kind: "artificial-analysis", url: "https://artificialanalysis.ai/models/glm-5-3", releaseDate: null, fetchedAt: 1791286695126, indexVersion: "4.3.2", modelUrl: "https://artificialanalysis.ai/models/claude-sonnet-5-5" }, speed: { outputTps: 141.97, latencyS: 372.255 } }, { id: "aa:b2331108-72ed-415a-82d1-188633875bbc", modelId: "gemini-3-7-flash", reasoningEffort: "high", thinking: null, categories: { "Intelligence Index": 39.0594566404896, "Terminal-Bench 4.0": 13.6363636363636, SciCode: 57.175925925925895 }, overall: 39.0594566404896, source: { kind: "artificial-analysis", url: "https://artificialanalysis.ai/models/glm-5-3", releaseDate: null, fetchedAt: 1791286695126, indexVersion: "4.3.2", modelUrl: "https://artificialanalysis.ai/models/gemini-3-7-flash" } }, { id: "aa:b23e6c69-96e5-44c9-8f58-4b42e0c399d5", modelId: "hy3", reasoningEffort: null, thinking: "Reasoning configuration unspecified", categories: { "Intelligence Index": 25.2972775731571, "Terminal-Bench 4.0": 0.505050505050505, SciCode: 48.6111111111111 }, overall: 25.2972775731571, source: { kind: "artificial-analysis", url: "https://artificialanalysis.ai/models/glm-5-3", releaseDate: null, fetchedAt: 1791286695126, indexVersion: "4.3.2", modelUrl: "https://artificialanalysis.ai/models/hy3" } }, { id: "aa:b25ac058-1e33-4c31-bbc9-a20c3ad0717a", modelId: "gpt-6-1-sol", reasoningEffort: "max", thinking: null, categories: { "Intelligence Index": 51.8332597011541, "Terminal-Bench 4.0": 56.0606060606061, SciCode: 54.1666666666667 }, overall: 51.8332597011541, source: { kind: "artificial-analysis", url: "https://artificialanalysis.ai/models/glm-5-3", releaseDate: null, fetchedAt: 1791286695126, indexVersion: "4.3.2", modelUrl: "https://artificialanalysis.ai/models/gpt-6-1-sol" }, speed: { outputTps: 55.78, latencyS: 218.529 } }, { id: "aa:b6d2e43d-3082-43f5-9318-0f4dbcb54163", modelId: "trinity-large-thinking", reasoningEffort: null, thinking: "Reasoning configuration unspecified", categories: { "Intelligence Index": 10.8242425924218, "Terminal-Bench 4.0": 0.505050505050505, SciCode: 40.625 }, overall: 10.8242425924218, source: { kind: "artificial-analysis", url: "https://artificialanalysis.ai/models/glm-5-3", releaseDate: null, fetchedAt: 1791286695126, indexVersion: "4.3.2", modelUrl: "https://artificialanalysis.ai/models/trinity-large-thinking" } }, { id: "aa:b89c4faf-219e-4171-a1aa-e3bd2fd0a924", modelId: "solar-pro-3", reasoningEffort: "high", thinking: null, categories: { "Intelligence Index": 7.81551744502774, "Terminal-Bench 4.0": 0, SciCode: 25.462962962962997 }, overall: 7.81551744502774, source: { kind: "artificial-analysis", url: "https://artificialanalysis.ai/models/glm-5-3", releaseDate: null, fetchedAt: 1791286695126, indexVersion: "4.3.2", modelUrl: "https://artificialanalysis.ai/models/solar-pro-3" } }, { id: "aa:b8fc61f7-5e9a-49e6-8547-6ac56db24627", modelId: "claude-opus-5", reasoningEffort: "max", thinking: null, categories: { "Intelligence Index": 50.7771115797629, "Terminal-Bench 4.0": 48.989898989899, SciCode: 56.3657407407407 }, overall: 50.7771115797629, source: { kind: "artificial-analysis", url: "https://artificialanalysis.ai/models/glm-5-3", releaseDate: null, fetchedAt: 1791286695126, indexVersion: "4.3.2", modelUrl: "https://artificialanalysis.ai/models/claude-opus-5" } }, { id: "aa:ba0224cf-0351-4f56-8508-b3f1a740ae4a", modelId: "claude-sonnet-5", reasoningEffort: "high", thinking: null, categories: { "Intelligence Index": 31.6623246664651, "Terminal-Bench 4.0": 5.05050505050505, SciCode: 54.2824074074074 }, overall: 31.6623246664651, source: { kind: "artificial-analysis", url: "https://artificialanalysis.ai/models/glm-5-3", releaseDate: null, fetchedAt: 1791286695126, indexVersion: "4.3.2", modelUrl: "https://artificialanalysis.ai/models/claude-sonnet-5-high" } }, { id: "aa:ba242e40-83b7-4cd3-a0e0-b56237984914", modelId: "gpt-5-4-mini", reasoningEffort: "xhigh", thinking: null, categories: { "Intelligence Index": 24.0682169231964, "Terminal-Bench 4.0": 2.02020202020202, SciCode: 52.0833333333333 }, overall: 24.0682169231964, source: { kind: "artificial-analysis", url: "https://artificialanalysis.ai/models/glm-5-3", releaseDate: null, fetchedAt: 1791286695126, indexVersion: "4.3.2", modelUrl: "https://artificialanalysis.ai/models/gpt-5-4-mini" } }, { id: "aa:bb3d7e75-8e22-4082-b9d6-1db0803e042f", modelId: "k2-horizon-375b-a23b", reasoningEffort: null, thinking: "Reasoning configuration unspecified", categories: { "Intelligence Index": 30.5015302696723, "Terminal-Bench 4.0": 1.51515151515152, SciCode: 42.939814814814795 }, overall: 30.5015302696723, source: { kind: "artificial-analysis", url: "https://artificialanalysis.ai/models/glm-5-3", releaseDate: null, fetchedAt: 1791286695126, indexVersion: "4.3.2", modelUrl: "https://artificialanalysis.ai/models/k2-horizon-375b-a23b" }, speed: { outputTps: 938.17, latencyS: 2.19 } }, { id: "aa:bbc2ffea-cf6b-43be-8c41-1769347e234d", modelId: "claude-sonnet-5-5", reasoningEffort: "low", thinking: "Low, Default Fallback", categories: { "Intelligence Index": 35.8681594577587, "Terminal-Bench 4.0": 20.7070707070707, SciCode: 49.0740740740741 }, overall: 35.8681594577587, source: { kind: "artificial-analysis", url: "https://artificialanalysis.ai/models/glm-5-3", releaseDate: null, fetchedAt: 1791286695126, indexVersion: "4.3.2", modelUrl: "https://artificialanalysis.ai/models/claude-sonnet-5-5-low" } }, { id: "aa:bbd93ebe-80da-4594-bb19-61e69d0331df", modelId: "gemini-3-1-pro-preview", reasoningEffort: null, thinking: "Reasoning configuration unspecified", categories: { "Intelligence Index": 29.7185656132261, "Terminal-Bench 4.0": 4.04040404040404, SciCode: 58.6805555555556 }, overall: 29.7185656132261, source: { kind: "artificial-analysis", url: "https://artificialanalysis.ai/models/glm-5-3", releaseDate: null, fetchedAt: 1791286695126, indexVersion: "4.3.2", modelUrl: "https://artificialanalysis.ai/models/gemini-3-1-pro-preview" } }, { id: "aa:bcf8db0a-3bb6-4d82-9516-0f57370c85a6", modelId: "gpt-5-6-terra", reasoningEffort: "max", thinking: null, categories: { "Intelligence Index": 42.0829248239494, "Terminal-Bench 4.0": 35.3535353535354, SciCode: 54.976851851851805 }, overall: 42.0829248239494, source: { kind: "artificial-analysis", url: "https://artificialanalysis.ai/models/glm-5-3", releaseDate: null, fetchedAt: 1791286695126, indexVersion: "4.3.2", modelUrl: "https://artificialanalysis.ai/models/gpt-5-6-terra" } }, { id: "aa:bf220674-68bd-43cc-a1b8-ce5ed4d2f18d", modelId: "deepseek-v4-pro-0424", reasoningEffort: "max", thinking: null, categories: { "Intelligence Index": 30.4496601315524, "Terminal-Bench 4.0": 14.6464646464646, SciCode: 50.8101851851852 }, overall: 30.4496601315524, source: { kind: "artificial-analysis", url: "https://artificialanalysis.ai/models/glm-5-3", releaseDate: null, fetchedAt: 1791286695126, indexVersion: "4.3.2", modelUrl: "https://artificialanalysis.ai/models/deepseek-v4-pro-0424" } }, { id: "aa:bf9708d8-933d-44f6-affa-b696a7a650c9", modelId: "gpt-6-luna", reasoningEffort: "low", thinking: null, categories: { "Intelligence Index": 21.5261980080866, "Terminal-Bench 4.0": 0, SciCode: 46.875 }, overall: 21.5261980080866, source: { kind: "artificial-analysis", url: "https://artificialanalysis.ai/models/glm-5-3", releaseDate: null, fetchedAt: 1791286695126, indexVersion: "4.3.2", modelUrl: "https://artificialanalysis.ai/models/gpt-6-luna-low" } }, { id: "aa:c07e65e6-32fc-451e-938d-7477a1c3ffcc", modelId: "grok-4-6", reasoningEffort: "low", thinking: null, categories: { "Intelligence Index": 35.1246953482174, "Terminal-Bench 4.0": 3.03030303030303, SciCode: 49.421296296296305 }, overall: 35.1246953482174, source: { kind: "artificial-analysis", url: "https://artificialanalysis.ai/models/glm-5-3", releaseDate: null, fetchedAt: 1791286695126, indexVersion: "4.3.2", modelUrl: "https://artificialanalysis.ai/models/grok-4-6-low" } }, { id: "aa:c1c5db7c-968f-445a-a274-7b5689348bf8", modelId: "g9v3-39a5b", reasoningEffort: null, thinking: "Reasoning configuration unspecified", categories: { "Intelligence Index": null, "Terminal-Bench 4.0": null, SciCode: 36.8055555555556 }, overall: null, source: { kind: "artificial-analysis", url: "https://artificialanalysis.ai/models/glm-5-3", releaseDate: null, fetchedAt: 1791286695126, indexVersion: "4.3.2", modelUrl: "https://artificialanalysis.ai/models/g9v3-39a5b" } }, { id: "aa:c4169d75-9d24-4794-a9c3-69e1fe364de5", modelId: "gpt-5-5-instant-06-26", reasoningEffort: null, thinking: "Reasoning configuration unspecified", categories: { "Intelligence Index": 26.0135173401368, "Terminal-Bench 4.0": 12.6262626262626, SciCode: 52.546296296296305 }, overall: 26.0135173401368, source: { kind: "artificial-analysis", url: "https://artificialanalysis.ai/models/glm-5-3", releaseDate: null, fetchedAt: 1791286695126, indexVersion: "4.3.2", modelUrl: "https://artificialanalysis.ai/models/gpt-5-5-instant-06-26" } }, { id: "aa:c50ea08c-88c0-4eb7-85b8-27f2bbf6d527", modelId: "gpt-6-sol", reasoningEffort: "max", thinking: null, categories: { "Intelligence Index": 47.6305176437724, "Terminal-Bench 4.0": 43.9393939393939, SciCode: 57.63888888888889 }, overall: 47.6305176437724, source: { kind: "artificial-analysis", url: "https://artificialanalysis.ai/models/glm-5-3", releaseDate: null, fetchedAt: 1791286695126, indexVersion: "4.3.2", modelUrl: "https://artificialanalysis.ai/models/gpt-6-sol" } }, { id: "aa:c8adc5cf-fd5a-407b-af51-dc3bede3e49c", modelId: "grok-4-6", reasoningEffort: "high", thinking: null, categories: { "Intelligence Index": 44.3113073012592, "Terminal-Bench 4.0": 21.2121212121212, SciCode: 56.4814814814815 }, overall: 44.3113073012592, source: { kind: "artificial-analysis", url: "https://artificialanalysis.ai/models/glm-5-3", releaseDate: null, fetchedAt: 1791286695126, indexVersion: "4.3.2", modelUrl: "https://artificialanalysis.ai/models/grok-4-6" } }, { id: "aa:cc1e488b-8ba4-464d-875d-690166b15ad3", modelId: "glm-5-3", reasoningEffort: "low", thinking: null, categories: { "Intelligence Index": 34.2990078159643, "Terminal-Bench 4.0": 34.8484848484849, SciCode: 42.0138888888889 }, overall: 34.2990078159643, source: { kind: "artificial-analysis", url: "https://artificialanalysis.ai/models/glm-5-3", releaseDate: null, fetchedAt: 1791286695126, indexVersion: "4.3.2", modelUrl: "https://artificialanalysis.ai/models/glm-5-3-low" } }, { id: "aa:cc4a20cd-09fe-4962-a430-119c815e85fa", modelId: "gpt-5-6-terra", reasoningEffort: "low", thinking: null, categories: { "Intelligence Index": 27.496203401716, "Terminal-Bench 4.0": 1.51515151515152, SciCode: 49.8842592592593 }, overall: 27.496203401716, source: { kind: "artificial-analysis", url: "https://artificialanalysis.ai/models/glm-5-3", releaseDate: null, fetchedAt: 1791286695126, indexVersion: "4.3.2", modelUrl: "https://artificialanalysis.ai/models/gpt-5-6-terra-low" } }, { id: "aa:cd26a386-4873-46ff-b853-d239050025a2", modelId: "gemma-4-31b", reasoningEffort: null, thinking: "Reasoning", categories: { "Intelligence Index": 14.6689500745828, "Terminal-Bench 4.0": 0, SciCode: 45.4861111111111 }, overall: 14.6689500745828, source: { kind: "artificial-analysis", url: "https://artificialanalysis.ai/models/glm-5-3", releaseDate: null, fetchedAt: 1791286695126, indexVersion: "4.3.2", modelUrl: "https://artificialanalysis.ai/models/gemma-4-31b" } }, { id: "aa:cd55210d-358e-4df1-ba9c-9acb5f186cc9", modelId: "claude-fable-5", reasoningEffort: "max", thinking: "Max, Opus 4.8 Fallback", categories: { "Intelligence Index": 49.6258202733378, "Terminal-Bench 4.0": 42.4242424242424, SciCode: 60.9953703703704 }, overall: 49.6258202733378, source: { kind: "artificial-analysis", url: "https://artificialanalysis.ai/models/glm-5-3", releaseDate: null, fetchedAt: 1791286695126, indexVersion: "4.3.2", modelUrl: "https://artificialanalysis.ai/models/claude-fable-5" } }, { id: "aa:ce819310-af7c-49d3-9a02-6845111e1788", modelId: "devstral-small-2", reasoningEffort: null, thinking: null, categories: { "Intelligence Index": 7.5369358990318, "Terminal-Bench 4.0": 0, SciCode: 32.407407407407405 }, overall: 7.5369358990318, source: { kind: "artificial-analysis", url: "https://artificialanalysis.ai/models/glm-5-3", releaseDate: null, fetchedAt: 1791286695126, indexVersion: "4.3.2", modelUrl: "https://artificialanalysis.ai/models/devstral-small-2" } }, { id: "aa:d366dfa1-d940-4788-aa73-d298c45699b3", modelId: "gemini-4-argon", reasoningEffort: "high", thinking: null, categories: { "Intelligence Index": 52.5605655745982, "Terminal-Bench 4.0": 57.07070707070711, SciCode: 61.8055555555556 }, overall: 52.5605655745982, source: { kind: "artificial-analysis", url: "https://artificialanalysis.ai/models/glm-5-3", releaseDate: null, fetchedAt: 1791286695126, indexVersion: "4.3.2", modelUrl: "https://artificialanalysis.ai/models/gemini-4-argon" } }, { id: "aa:d3e20e76-9e1a-45b6-b809-ad6aa37430cf", modelId: "gpt-6-sol", reasoningEffort: "none", thinking: null, categories: { "Intelligence Index": 28.5121413410513, "Terminal-Bench 4.0": 13.1313131313131, SciCode: 47.337962962963 }, overall: 28.5121413410513, source: { kind: "artificial-analysis", url: "https://artificialanalysis.ai/models/glm-5-3", releaseDate: null, fetchedAt: 1791286695126, indexVersion: "4.3.2", modelUrl: "https://artificialanalysis.ai/models/gpt-6-sol-non-reasoning" } }, { id: "aa:d4f5b250-be37-4801-85e6-32fda4179337", modelId: "deepseek-v4-pro", reasoningEffort: "none", thinking: null, categories: { "Intelligence Index": 20.3605101726847, "Terminal-Bench 4.0": 1.51515151515152, SciCode: 39.9305555555556 }, overall: 20.3605101726847, source: { kind: "artificial-analysis", url: "https://artificialanalysis.ai/models/glm-5-3", releaseDate: null, fetchedAt: 1791286695126, indexVersion: "4.3.2", modelUrl: "https://artificialanalysis.ai/models/deepseek-v4-pro-non-reasoning" } }, { id: "aa:d4fc3f33-f2b0-4da1-88ee-f1f82bd4de31", modelId: "gpt-5-4-nano", reasoningEffort: "xhigh", thinking: null, categories: { "Intelligence Index": 20.7197352504557, "Terminal-Bench 4.0": 0.505050505050505, SciCode: 47.2222222222222 }, overall: 20.7197352504557, source: { kind: "artificial-analysis", url: "https://artificialanalysis.ai/models/glm-5-3", releaseDate: null, fetchedAt: 1791286695126, indexVersion: "4.3.2", modelUrl: "https://artificialanalysis.ai/models/gpt-5-4-nano" } }, { id: "aa:d5170215-69be-4129-849b-26d8d8825bfc", modelId: "muse-spark-1-3", reasoningEffort: "xhigh", thinking: null, categories: { "Intelligence Index": 45.0732966922226, "Terminal-Bench 4.0": 16.6666666666667, SciCode: 59.7222222222222 }, overall: 45.0732966922226, source: { kind: "artificial-analysis", url: "https://artificialanalysis.ai/models/glm-5-3", releaseDate: null, fetchedAt: 1791286695126, indexVersion: "4.3.2", modelUrl: "https://artificialanalysis.ai/models/muse-spark-1-3-xhigh" } }, { id: "aa:d61493e2-43ff-460c-9054-eaf6ba317360", modelId: "muse-spark-1-1", reasoningEffort: "xhigh", thinking: null, categories: { "Intelligence Index": 33.7298425919846, "Terminal-Bench 4.0": 6.06060606060606, SciCode: 58.796296296296305 }, overall: 33.7298425919846, source: { kind: "artificial-analysis", url: "https://artificialanalysis.ai/models/glm-5-3", releaseDate: null, fetchedAt: 1791286695126, indexVersion: "4.3.2", modelUrl: "https://artificialanalysis.ai/models/muse-spark-1-1" } }, { id: "aa:d6f43d0a-e8c4-447c-9ff7-5cf0a9d59aa3", modelId: "grok-4-6", reasoningEffort: "xhigh", thinking: null, categories: { "Intelligence Index": 44.199810436996, "Terminal-Bench 4.0": 17.171717171717198, SciCode: 53.0092592592593 }, overall: 44.199810436996, source: { kind: "artificial-analysis", url: "https://artificialanalysis.ai/models/glm-5-3", releaseDate: null, fetchedAt: 1791286695126, indexVersion: "4.3.2", modelUrl: "https://artificialanalysis.ai/models/grok-4-6-xhigh" } }, { id: "aa:d80eb0f1-f62e-4d31-99d2-7a925eb126b0", modelId: "gemma-4-e4b", reasoningEffort: null, thinking: "Reasoning", categories: { "Intelligence Index": null, "Terminal-Bench 4.0": 0, SciCode: 24.421296296296298 }, overall: null, source: { kind: "artificial-analysis", url: "https://artificialanalysis.ai/models/glm-5-3", releaseDate: null, fetchedAt: 1791286695126, indexVersion: "4.3.2", modelUrl: "https://artificialanalysis.ai/models/gemma-4-e4b" } }, { id: "aa:d8ddb241-b3e4-4c25-a6a3-72eb1b30c541", modelId: "deepseek-v4-flash-0420", reasoningEffort: "max", thinking: null, categories: { "Intelligence Index": 24.1673138235549, "Terminal-Bench 4.0": 2.52525252525253, SciCode: 45.2546296296296 }, overall: 24.1673138235549, source: { kind: "artificial-analysis", url: "https://artificialanalysis.ai/models/glm-5-3", releaseDate: null, fetchedAt: 1791286695126, indexVersion: "4.3.2", modelUrl: "https://artificialanalysis.ai/models/deepseek-v4-flash-0420" } }, { id: "aa:d93edfe8-bf35-49ad-b56e-b18116142a1c", modelId: "gpt-5-6-sol", reasoningEffort: "max", thinking: null, categories: { "Intelligence Index": 46.9727068915036, "Terminal-Bench 4.0": 39.8989898989899, SciCode: 57.0601851851852 }, overall: 46.9727068915036, source: { kind: "artificial-analysis", url: "https://artificialanalysis.ai/models/glm-5-3", releaseDate: null, fetchedAt: 1791286695126, indexVersion: "4.3.2", modelUrl: "https://artificialanalysis.ai/models/gpt-5-6-sol" } }, { id: "aa:d998db47-9b67-4727-a2bb-2e1261020ac0", modelId: "gpt-5-6-sol", reasoningEffort: "xhigh", thinking: null, categories: { "Intelligence Index": 44.008876369169, "Terminal-Bench 4.0": 24.747474747474698, SciCode: 57.0601851851852 }, overall: 44.008876369169, source: { kind: "artificial-analysis", url: "https://artificialanalysis.ai/models/glm-5-3", releaseDate: null, fetchedAt: 1791286695126, indexVersion: "4.3.2", modelUrl: "https://artificialanalysis.ai/models/gpt-5-6-sol-xhigh" } }, { id: "aa:da2642fe-9f73-4788-b5af-24edcd55b37e", modelId: "gpt-6-sol", reasoningEffort: "xhigh", thinking: null, categories: { "Intelligence Index": 44.2448955516407, "Terminal-Bench 4.0": 30.303030303030297, SciCode: 55.0925925925926 }, overall: 44.2448955516407, source: { kind: "artificial-analysis", url: "https://artificialanalysis.ai/models/glm-5-3", releaseDate: null, fetchedAt: 1791286695126, indexVersion: "4.3.2", modelUrl: "https://artificialanalysis.ai/models/gpt-6-sol-xhigh" } }, { id: "aa:dbe7c625-3100-4463-b479-a228c41f75dd", modelId: "deepseek-v4-1-flash", reasoningEffort: "max", thinking: null, categories: { "Intelligence Index": 39.456167472527, "Terminal-Bench 4.0": 26.7676767676768, SciCode: 51.851851851851805 }, overall: 39.456167472527, source: { kind: "artificial-analysis", url: "https://artificialanalysis.ai/models/glm-5-3", releaseDate: null, fetchedAt: 1791286695126, indexVersion: "4.3.2", modelUrl: "https://artificialanalysis.ai/models/deepseek-v4-1-flash" }, speed: { outputTps: 231.88, latencyS: 0.679 } }, { id: "aa:dc64f856-3ded-497d-9527-d41d31267ed5", modelId: "gpt-5-6-luna", reasoningEffort: "none", thinking: null, categories: { "Intelligence Index": 15.5270002110259, "Terminal-Bench 4.0": 1.01010101010101, SciCode: 40.3935185185185 }, overall: 15.5270002110259, source: { kind: "artificial-analysis", url: "https://artificialanalysis.ai/models/glm-5-3", releaseDate: null, fetchedAt: 1791286695126, indexVersion: "4.3.2", modelUrl: "https://artificialanalysis.ai/models/gpt-5-6-luna-non-reasoning" } }, { id: "aa:dd059b25-d82a-4ead-82a4-4adceaaec48b", modelId: "mistral-medium-3-5", reasoningEffort: "high", thinking: null, categories: { "Intelligence Index": 14.1889227802691, "Terminal-Bench 4.0": 0, SciCode: 40.162037037037 }, overall: 14.1889227802691, source: { kind: "artificial-analysis", url: "https://artificialanalysis.ai/models/glm-5-3", releaseDate: null, fetchedAt: 1791286695126, indexVersion: "4.3.2", modelUrl: "https://artificialanalysis.ai/models/mistral-medium-3-5" } }, { id: "aa:ddfdaf64-3f8e-40a6-a492-608ee83a1351", modelId: "gemini-3-7-flash", reasoningEffort: "low", thinking: null, categories: { "Intelligence Index": null, "Terminal-Bench 4.0": null, SciCode: 55.671296296296305 }, overall: null, source: { kind: "artificial-analysis", url: "https://artificialanalysis.ai/models/glm-5-3", releaseDate: null, fetchedAt: 1791286695126, indexVersion: "4.3.2", modelUrl: "https://artificialanalysis.ai/models/gemini-3-7-flash-low" } }, { id: "aa:df5bf99d-d228-4715-b41b-19ca86118777", modelId: "claude-opus-5-5", reasoningEffort: "xhigh", thinking: "Xhigh, Default Fallback", categories: { "Intelligence Index": 55.9873505840139, "Terminal-Bench 4.0": 59.5959595959596, SciCode: 65.0462962962963 }, overall: 55.9873505840139, source: { kind: "artificial-analysis", url: "https://artificialanalysis.ai/models/glm-5-3", releaseDate: null, fetchedAt: 1791286695126, indexVersion: "4.3.2", modelUrl: "https://artificialanalysis.ai/models/claude-opus-5-5-xhigh" } }, { id: "aa:df8d14e0-3997-4e4d-b4ad-9c047acc9c69", modelId: "claude-sonnet-4-6", reasoningEffort: "max", thinking: null, categories: { "Intelligence Index": 30.0575611117644, "Terminal-Bench 4.0": 3.03030303030303, SciCode: 50.1157407407407 }, overall: 30.0575611117644, source: { kind: "artificial-analysis", url: "https://artificialanalysis.ai/models/glm-5-3", releaseDate: null, fetchedAt: 1791286695126, indexVersion: "4.3.2", modelUrl: "https://artificialanalysis.ai/models/claude-sonnet-4-6-adaptive" } }, { id: "aa:e05a4828-0536-4876-870d-a235023f992b", modelId: "gpt-6-astra", reasoningEffort: "high", thinking: null, categories: { "Intelligence Index": 50.9191471636152, "Terminal-Bench 4.0": 54.040404040404, SciCode: 55.4398148148148 }, overall: 50.9191471636152, source: { kind: "artificial-analysis", url: "https://artificialanalysis.ai/models/glm-5-3", releaseDate: null, fetchedAt: 1791286695126, indexVersion: "4.3.2", modelUrl: "https://artificialanalysis.ai/models/gpt-6-astra-high" } }, { id: "aa:e1bfc488-5f48-4d42-abf6-7f3c53d79f9c", modelId: "lfm2-5-2-6b", reasoningEffort: null, thinking: "Reasoning configuration unspecified", categories: { "Intelligence Index": null, "Terminal-Bench 4.0": null, SciCode: 14.3518518518519 }, overall: null, source: { kind: "artificial-analysis", url: "https://artificialanalysis.ai/models/glm-5-3", releaseDate: null, fetchedAt: 1791286695126, indexVersion: "4.3.2", modelUrl: "https://artificialanalysis.ai/models/lfm2-5-2-6b" } }, { id: "aa:e33dc369-ae81-40e0-8c4e-28b002d02197", modelId: "ling-3-0-flash", reasoningEffort: null, thinking: "Reasoning configuration unspecified", categories: { "Intelligence Index": 20.1332521865481, "Terminal-Bench 4.0": 0, SciCode: 42.0138888888889 }, overall: 20.1332521865481, source: { kind: "artificial-analysis", url: "https://artificialanalysis.ai/models/glm-5-3", releaseDate: null, fetchedAt: 1791286695126, indexVersion: "4.3.2", modelUrl: "https://artificialanalysis.ai/models/ling-3-0-flash" } }, { id: "aa:e76e0fe5-93ca-4272-9359-2eb1740467d1", modelId: "gpt-6-1-sol", reasoningEffort: "low", thinking: null, categories: { "Intelligence Index": 42.0835618555848, "Terminal-Bench 4.0": 30.808080808080803, SciCode: 53.2407407407407 }, overall: 42.0835618555848, source: { kind: "artificial-analysis", url: "https://artificialanalysis.ai/models/glm-5-3", releaseDate: null, fetchedAt: 1791286695126, indexVersion: "4.3.2", modelUrl: "https://artificialanalysis.ai/models/gpt-6-1-sol-low" } }, { id: "aa:e97a4ef5-e817-480e-9595-12f81dc4974f", modelId: "gpt-6-astra", reasoningEffort: "medium", thinking: null, categories: { "Intelligence Index": 49.5704363034369, "Terminal-Bench 4.0": 49.494949494949495, SciCode: 54.1666666666667 }, overall: 49.5704363034369, source: { kind: "artificial-analysis", url: "https://artificialanalysis.ai/models/glm-5-3", releaseDate: null, fetchedAt: 1791286695126, indexVersion: "4.3.2", modelUrl: "https://artificialanalysis.ai/models/gpt-6-astra-medium" } }, { id: "aa:ea9e0da6-169f-43c6-92f5-730a10d6ff8d", modelId: "claude-opus-5-5", reasoningEffort: "medium", thinking: "Medium, Default Fallback", categories: { "Intelligence Index": 51.2434931792768, "Terminal-Bench 4.0": 52.5252525252525, SciCode: 59.2592592592593 }, overall: 51.2434931792768, source: { kind: "artificial-analysis", url: "https://artificialanalysis.ai/models/glm-5-3", releaseDate: null, fetchedAt: 1791286695126, indexVersion: "4.3.2", modelUrl: "https://artificialanalysis.ai/models/claude-opus-5-5-medium" } }, { id: "aa:eb0d4272-7204-42b9-b875-8866fed58548", modelId: "gemini-3-7-flash", reasoningEffort: "medium", thinking: null, categories: { "Intelligence Index": null, "Terminal-Bench 4.0": null, SciCode: 59.837962962963 }, overall: null, source: { kind: "artificial-analysis", url: "https://artificialanalysis.ai/models/glm-5-3", releaseDate: null, fetchedAt: 1791286695126, indexVersion: "4.3.2", modelUrl: "https://artificialanalysis.ai/models/gemini-3-7-flash-medium" } }, { id: "aa:eb4ba465-3fcd-4065-9fe2-e8225e7b2c6c", modelId: "ring-2-6-1t", reasoningEffort: "xhigh", thinking: null, categories: { "Intelligence Index": 16.6172363768618, "Terminal-Bench 4.0": 0.505050505050505, SciCode: 45.0231481481481 }, overall: 16.6172363768618, source: { kind: "artificial-analysis", url: "https://artificialanalysis.ai/models/glm-5-3", releaseDate: null, fetchedAt: 1791286695126, indexVersion: "4.3.2", modelUrl: "https://artificialanalysis.ai/models/ring-2-6-1t" } }, { id: "aa:effcd151-7c31-4437-af3d-e88daeae9385", modelId: "claude-sonnet-5", reasoningEffort: "medium", thinking: null, categories: { "Intelligence Index": 28.0531468379456, "Terminal-Bench 4.0": 2.02020202020202, SciCode: 51.6203703703704 }, overall: 28.0531468379456, source: { kind: "artificial-analysis", url: "https://artificialanalysis.ai/models/glm-5-3", releaseDate: null, fetchedAt: 1791286695126, indexVersion: "4.3.2", modelUrl: "https://artificialanalysis.ai/models/claude-sonnet-5-medium" } }, { id: "aa:f0083258-8646-45b8-8082-7aaf6c2ea82a", modelId: "gpt-oss-120b", reasoningEffort: "high", thinking: null, categories: { "Intelligence Index": 11.6028431512592, "Terminal-Bench 4.0": 0, SciCode: 34.0277777777778 }, overall: 11.6028431512592, source: { kind: "artificial-analysis", url: "https://artificialanalysis.ai/models/glm-5-3", releaseDate: null, fetchedAt: 1791286695126, indexVersion: "4.3.2", modelUrl: "https://artificialanalysis.ai/models/gpt-oss-120b" } }, { id: "aa:f314eade-2232-44bf-a3ab-9b326bc67de6", modelId: "claude-opus-5-5", reasoningEffort: "high", thinking: "High, Default Fallback", categories: { "Intelligence Index": 53.5831959822067, "Terminal-Bench 4.0": 56.565656565656596, SciCode: 60.4166666666667 }, overall: 53.5831959822067, source: { kind: "artificial-analysis", url: "https://artificialanalysis.ai/models/glm-5-3", releaseDate: null, fetchedAt: 1791286695126, indexVersion: "4.3.2", modelUrl: "https://artificialanalysis.ai/models/claude-opus-5-5-high" } }, { id: "aa:f6ccbe1d-bd7e-484b-9795-18cc9f91552d", modelId: "qwen3-235b-a22b-instruct-2507-reasoning", reasoningEffort: null, thinking: "Reasoning configuration unspecified", categories: { "Intelligence Index": 12.7108511527974, "Terminal-Bench 4.0": 0, SciCode: 41.435185185185205 }, overall: 12.7108511527974, source: { kind: "artificial-analysis", url: "https://artificialanalysis.ai/models/glm-5-3", releaseDate: null, fetchedAt: 1791286695126, indexVersion: "4.3.2", modelUrl: "https://artificialanalysis.ai/models/qwen3-235b-a22b-instruct-2507-reasoning" } }, { id: "aa:f6db039b-0f3b-485c-9d7f-982988e44f26", modelId: "gemini-3-8-flash", reasoningEffort: "low", thinking: null, categories: { "Intelligence Index": 33.4548106699132, "Terminal-Bench 4.0": 10.1010101010101, SciCode: 54.976851851851805 }, overall: 33.4548106699132, source: { kind: "artificial-analysis", url: "https://artificialanalysis.ai/models/glm-5-3", releaseDate: null, fetchedAt: 1791286695126, indexVersion: "4.3.2", modelUrl: "https://artificialanalysis.ai/models/gemini-3-8-flash-low" } }, { id: "aa:f7a4ea75-e548-4069-80d4-9be8bc7c009b", modelId: "glm-5-2", reasoningEffort: "max", thinking: null, categories: { "Intelligence Index": 33.7054572377545, "Terminal-Bench 4.0": 1.01010101010101, SciCode: 51.1574074074074 }, overall: 33.7054572377545, source: { kind: "artificial-analysis", url: "https://artificialanalysis.ai/models/glm-5-3", releaseDate: null, fetchedAt: 1791286695126, indexVersion: "4.3.2", modelUrl: "https://artificialanalysis.ai/models/glm-5-2" } }, { id: "aa:f7d2fc3e-1f7b-405f-818c-07952a4af78f", modelId: "kimi-k3", reasoningEffort: "max", thinking: null, categories: { "Intelligence Index": 43.5938229518782, "Terminal-Bench 4.0": 12.6262626262626, SciCode: 59.4907407407407 }, overall: 43.5938229518782, source: { kind: "artificial-analysis", url: "https://artificialanalysis.ai/models/glm-5-3", releaseDate: null, fetchedAt: 1791286695126, indexVersion: "4.3.2", modelUrl: "https://artificialanalysis.ai/models/kimi-k3" }, speed: { outputTps: 40.98, latencyS: 2.841 } }, { id: "aa:f9739750-6d42-450f-ba1e-2f76c869b4fe", modelId: "quasar-438b", reasoningEffort: "max", thinking: "Max, Based on GLM-5.2", categories: { "Intelligence Index": 26.7372536607816, "Terminal-Bench 4.0": 1.01010101010101, SciCode: 48.1481481481481 }, overall: 26.7372536607816, source: { kind: "artificial-analysis", url: "https://artificialanalysis.ai/models/glm-5-3", releaseDate: null, fetchedAt: 1791286695126, indexVersion: "4.3.2", modelUrl: "https://artificialanalysis.ai/models/quasar-438b" } }, { id: "aa:fc92f822-04b7-420d-9c07-a21af5e9aac7", modelId: "qwen3-coder-next", reasoningEffort: null, thinking: null, categories: { "Intelligence Index": 9.23682203219174, "Terminal-Bench 4.0": 0, SciCode: 36.2268518518519 }, overall: 9.23682203219174, source: { kind: "artificial-analysis", url: "https://artificialanalysis.ai/models/glm-5-3", releaseDate: null, fetchedAt: 1791286695126, indexVersion: "4.3.2", modelUrl: "https://artificialanalysis.ai/models/qwen3-coder-next" } }, { id: "aa:fe4c0848-e284-4e52-a79d-cdc28392f1a9", modelId: "deepseek-v4-flash", reasoningEffort: "max", thinking: null, categories: { "Intelligence Index": 34.3305129347816, "Terminal-Bench 4.0": 12.1212121212121, SciCode: 50.3472222222222 }, overall: 34.3305129347816, source: { kind: "artificial-analysis", url: "https://artificialanalysis.ai/models/glm-5-3", releaseDate: null, fetchedAt: 1791286695126, indexVersion: "4.3.2", modelUrl: "https://artificialanalysis.ai/models/deepseek-v4-flash" } }, { id: "aa:ff51be8f-e362-4a7e-9043-687ba15de207", modelId: "claude-opus-5", reasoningEffort: "medium", thinking: null, categories: { "Intelligence Index": 44.8253265420613, "Terminal-Bench 4.0": 34.343434343434296, SciCode: 51.5046296296296 }, overall: 44.8253265420613, source: { kind: "artificial-analysis", url: "https://artificialanalysis.ai/models/glm-5-3", releaseDate: null, fetchedAt: 1791286695126, indexVersion: "4.3.2", modelUrl: "https://artificialanalysis.ai/models/claude-opus-5-medium" } }], sourceErrors: {} };
 
 // src/auto/catalog/catalog.ts
 import { randomUUID as randomUUID2 } from "node:crypto";
 import { renameSync } from "node:fs";
 import { mkdir as mkdir4, open as open2, unlink, writeFile as writeFile4 } from "node:fs/promises";
-import { join as join8 } from "node:path";
+import { join as join9 } from "node:path";
 
 // src/auto/catalog/identity.ts
 var EFFORTS = ["none", "minimal", "low", "medium", "high", "xhigh", "max", "ultra"];
@@ -9984,6 +10219,14 @@ var slug = (v) => {
 };
 var points = (v) => typeof v === "number" && Number.isFinite(v) && v >= 0 && v <= 100 ? v : null;
 var percent = (v) => typeof v === "number" && Number.isFinite(v) && v >= 0 && v <= 1 ? v * 100 : null;
+var round2 = (v, digits) => Math.round(v * 10 ** digits) / 10 ** digits;
+function speedOf(row) {
+  const medium = object(object(row.performanceByPromptType)?.medium);
+  const tps = medium?.medianOutputSpeed;
+  if (typeof tps !== "number" || !Number.isFinite(tps) || tps < 0.1 || tps > 1e5) return null;
+  const latency = medium?.medianTimeToFirstChunk;
+  return { outputTps: round2(tps, 2), latencyS: typeof latency === "number" && Number.isFinite(latency) && latency >= 0 && latency <= 3600 ? round2(latency, 3) : null };
+}
 function normalizeArtificialAnalysis(html, fetchedAt) {
   if (Buffer.byteLength(html) > ARTIFICIAL_ANALYSIS_BYTES) throw Error("Artificial Analysis response too large");
   const versions = new Set([...html.matchAll(/Intelligence Index\s+v(\d+(?:\.\d+){1,2})\b/g)].map((match) => match[1]));
@@ -10037,6 +10280,8 @@ function normalizeArtificialAnalysis(html, fetchedAt) {
         overall: measured,
         source: { kind: "artificial-analysis", url: ARTIFICIAL_ANALYSIS_URL, releaseDate: null, fetchedAt, indexVersion, modelUrl: `https://artificialanalysis.ai/models/${modelSlug}` }
       };
+      const speed = speedOf(row);
+      if (speed) benchmark.speed = speed;
       const prior = rows.get(benchmark.id);
       if (prior && JSON.stringify(prior) !== JSON.stringify(benchmark)) throw Error("Conflicting duplicate Artificial Analysis variant");
       rows.set(benchmark.id, benchmark);
@@ -10360,7 +10605,9 @@ function validateRatings(input, now) {
     }));
     const overall = aa ? categories["Intelligence Index"] : mean(Object.values(categories));
     if (b.overall !== overall) fail3();
-    return { ...variant, categories, overall, source };
+    if (b.speed === void 0) return { ...variant, categories, overall, source };
+    if (!aa) fail3();
+    return { ...variant, categories, overall, source, speed: validSpeed(b.speed) };
   });
   if (!benchmarks.some((b) => Object.values(b.categories).some((v) => v !== null))) fail3();
   const sourceErrors = {};
@@ -10369,6 +10616,14 @@ function validateRatings(input, now) {
     sourceErrors[key] = boundedText(value, 160);
   }
   return { version: 2, fetchedAt, modelsFetchedAt, models, providers, benchmarks, sourceErrors };
+}
+function validSpeed(value) {
+  const v = record3(value);
+  if (Object.keys(v).some((key) => key !== "outputTps" && key !== "latencyS")) fail3();
+  const tps = v.outputTps, latency = v.latencyS;
+  if (typeof tps !== "number" || !Number.isFinite(tps) || tps < 0.1 || tps > 1e5) fail3();
+  if (latency !== null && (typeof latency !== "number" || !Number.isFinite(latency) || latency < 0 || latency > 3600)) fail3();
+  return { outputTps: tps, latencyS: latency };
 }
 function freeze(value) {
   if (value && typeof value === "object" && !Object.isFrozen(value)) {
@@ -10463,7 +10718,7 @@ var CatalogStore = class {
     this.notify();
   }
   async readCache(name) {
-    const handle = await open2(join8(this.directory, name), "r");
+    const handle = await open2(join9(this.directory, name), "r");
     try {
       const size = (await handle.stat()).size;
       if (size > CACHE_BYTES) fail3("Catalog cache too large");
@@ -10703,12 +10958,12 @@ var CatalogStore = class {
     const serialized = JSON.stringify(value);
     if (Buffer.byteLength(serialized) > CACHE_BYTES) fail3("Catalog cache too large");
     await mkdir4(this.directory, { recursive: true, mode: 448 });
-    const temporary = join8(this.directory, `.${name}.${randomUUID2()}.tmp`);
+    const temporary = join9(this.directory, `.${name}.${randomUUID2()}.tmp`);
     try {
       this.check(signal);
       await writeFile4(temporary, serialized, { encoding: "utf8", mode: 384, flag: "wx" });
       this.check(signal);
-      renameSync(temporary, join8(this.directory, name));
+      renameSync(temporary, join9(this.directory, name));
     } finally {
       await unlink(temporary).catch(() => void 0);
     }
@@ -10846,6 +11101,19 @@ var BenchmarkIndex = class {
     for (const [cohort, rows] of byCohort) if (rows.length === 1) result.set(cohort.replace(/:chat$/u, ""), rows[0]);
     return result;
   }
+  /**
+   * The measured speed of exactly this model and effort (the same exact-row rule as scores: a speed never moves to
+   * another effort or version): the newest Artificial Analysis row for it that states one. Null: unknown.
+   */
+  speed(bare, effort, context) {
+    const resolved = effectiveEffort(bare, effort, context);
+    let found = null;
+    for (const row of this.rows(bare)) {
+      if (row.thinking !== null || row.reasoningEffort !== resolved.effort || !row.speed) continue;
+      if (!found || row.source.fetchedAt > found.fetchedAt) found = { ...row.speed, fetchedAt: row.source.fetchedAt, effort: resolved.effort, label: sourceLabel(row) };
+    }
+    return found;
+  }
   /** models.dev's entry for an OpenAI-compatible upstream: the provider whose stated API origin is the upstream's. */
   catalogModel(upstreamModelId, context) {
     if (context.openRouter || !context.origin) return null;
@@ -10856,6 +11124,10 @@ var BenchmarkIndex = class {
     return found.length === 1 ? found[0] : null;
   }
 };
+function callSeconds(speed, outputTokens, withLatency = true) {
+  if (!speed) return null;
+  return (withLatency ? speed.latencyS ?? 0 : 0) + outputTokens / speed.outputTps;
+}
 function variantScores(index, bare, effort, context, type) {
   const scores = /* @__PURE__ */ new Map();
   if (!bare) return scores;
@@ -10948,7 +11220,7 @@ function buildInventory(settings, catalog, index = new BenchmarkIndex(catalog)) 
       }
       for (const variant of efforts) {
         if (entries.length >= MAX_INVENTORY) break;
-        const entry = { key: `${upstream.id}|${id}|${variant.effort ?? ""}`, ...base, effort: variant.effort, sendEffort: variant.send, scores: {} };
+        const entry = { key: `${upstream.id}|${id}|${variant.effort ?? ""}`, ...base, effort: variant.effort, sendEffort: variant.send, scores: {}, speed: bare ? index.speed(bare, variant.effort, context) : null };
         entries.push(entry);
         const maps = /* @__PURE__ */ new Map();
         for (const type of TASK_TYPES) maps.set(type, variantScores(index, bare, variant.effort, context, type));
@@ -10979,6 +11251,8 @@ function median(values) {
 // src/auto/settings.ts
 var AUTO_TIERS = ["small", "medium", "large"];
 var AUTO_PREFERENCES = ["cheap", "balanced", "best"];
+var CONSENSUS_MODES = ["off", "auto", "always"];
+var MAX_CONSENSUS_K = 3;
 var OPENROUTER_BASE_URL = "https://openrouter.ai/api/v1";
 var MAX_AUTO_UPSTREAMS = 8;
 var MAX_AUTO_MODELS = 64;
@@ -10992,9 +11266,10 @@ var DEFAULT_AUTO_SETTINGS = {
   decider: "jev",
   dailyUsdCap: 1,
   perCardUsdCap: 0.4,
-  catalog: { autoRefresh: true, refreshHours: 168 }
+  catalog: { autoRefresh: true, refreshHours: 168 },
+  strategy: { consensus: "auto", k: 3, bestOfN: false, turnUsdCap: 1 }
 };
-var OPTIONAL_KEYS = ["catalog"];
+var OPTIONAL_KEYS = ["catalog", "strategy"];
 var ID4 = /^[a-z0-9][a-z0-9-]{0,23}$/u;
 var MODEL_ID = /^[A-Za-z0-9][A-Za-z0-9._:/@+-]{0,159}$/u;
 var CLASSES = ["D0", "D1", "D2", "D3"];
@@ -11076,7 +11351,23 @@ function validateAutoSettings(value) {
   if (!isRecord7(catalog)) fail4("Invalid catalog settings.");
   only(catalog, ["autoRefresh", "refreshHours"], "Catalog settings");
   if (typeof catalog.autoRefresh !== "boolean" || !Number.isInteger(catalog.refreshHours) || catalog.refreshHours < 1 || catalog.refreshHours > 720) fail4("Catalog refresh: every 1 to 720 hours.");
-  return { upstreams, preference: value.preference, cheaperFallback: value.cheaperFallback, decider: value.decider, dailyUsdCap: value.dailyUsdCap, perCardUsdCap: value.perCardUsdCap, catalog: { autoRefresh: catalog.autoRefresh, refreshHours: catalog.refreshHours } };
+  const strategy = value.strategy ?? DEFAULT_AUTO_SETTINGS.strategy;
+  if (!isRecord7(strategy)) fail4("Invalid strategy settings.");
+  only(strategy, ["consensus", "k", "bestOfN", "turnUsdCap"], "Strategy settings");
+  if (!CONSENSUS_MODES.includes(strategy.consensus)) fail4("Invalid consensus choice.");
+  if (!Number.isInteger(strategy.k) || strategy.k < 2 || strategy.k > MAX_CONSENSUS_K) fail4(`Consensus: 2 to ${MAX_CONSENSUS_K} models.`);
+  if (typeof strategy.bestOfN !== "boolean") fail4("Invalid best-of-N choice.");
+  if (!usd(strategy.turnUsdCap)) fail4("Caps are USD from 0 to 100.");
+  return {
+    upstreams,
+    preference: value.preference,
+    cheaperFallback: value.cheaperFallback,
+    decider: value.decider,
+    dailyUsdCap: value.dailyUsdCap,
+    perCardUsdCap: value.perCardUsdCap,
+    catalog: { autoRefresh: catalog.autoRefresh, refreshHours: catalog.refreshHours },
+    strategy: { consensus: strategy.consensus, k: strategy.k, bestOfN: strategy.bestOfN, turnUsdCap: strategy.turnUsdCap }
+  };
 }
 function normalizeAutoSettings(value) {
   const source = isRecord7(value) ? value : {};
@@ -11222,15 +11513,15 @@ function plan(usable2, request, options) {
   const best = scored.length ? Math.max(...scored.map(value)) : null;
   const loss = qualityWindow(view, options.preference);
   const lowerEffort = view.level !== "large";
-  const eligible = best === null ? [] : scored.filter((entry) => value(entry) >= best - loss - 1e-9).sort((a, b) => comparePrice(a, b) || (lowerEffort ? effortRank(a) - effortRank(b) : 0) || value(b) - value(a) || effortRank(a) - effortRank(b) || a.key.localeCompare(b.key));
+  const eligible2 = best === null ? [] : scored.filter((entry) => value(entry) >= best - loss - 1e-9).sort((a, b) => comparePrice(a, b) || (lowerEffort ? effortRank(a) - effortRank(b) : 0) || value(b) - value(a) || effortRank(a) - effortRank(b) || a.key.localeCompare(b.key));
   const bestEntry = best === null ? null : scored.filter((entry) => value(entry) >= best - 1e-9).sort((a, b) => comparePrice(a, b) || effortRank(a) - effortRank(b) || a.key.localeCompare(b.key))[0] ?? null;
-  const others = scored.filter((entry) => !eligible.includes(entry)).sort((a, b) => value(b) - value(a) || comparePrice(a, b) || a.key.localeCompare(b.key));
+  const others = scored.filter((entry) => !eligible2.includes(entry)).sort((a, b) => value(b) - value(a) || comparePrice(a, b) || a.key.localeCompare(b.key));
   const unknown = conservative(auto.filter((entry) => !entry.scores[scoredAs]));
-  let list = [...manualFirst, ...eligible, ...others, ...manualRest, ...unknown];
-  let why = manualFirst.length ? "manual_tier" : eligible.length ? value(eligible[0]) >= best - 1e-9 ? eligible.filter((entry) => value(entry) >= best - 1e-9).length > 1 ? "cheaper_tie" : "best_score" : bestEntry && comparePrice(eligible[0], bestEntry) === 0 && effortRank(eligible[0]) < effortRank(bestEntry) ? "lower_effort_within_loss" : "cheaper_within_loss" : manualRest.length ? "manual_tier_fallback" : "unknown_scores";
+  let list = [...manualFirst, ...eligible2, ...others, ...manualRest, ...unknown];
+  let why = manualFirst.length ? "manual_tier" : eligible2.length ? value(eligible2[0]) >= best - 1e-9 ? eligible2.filter((entry) => value(entry) >= best - 1e-9).length > 1 ? "cheaper_tie" : "best_score" : bestEntry && comparePrice(eligible2[0], bestEntry) === 0 && effortRank(eligible2[0]) < effortRank(bestEntry) ? "lower_effort_within_loss" : "cheaper_within_loss" : manualRest.length ? "manual_tier_fallback" : "unknown_scores";
   if (request.preferred) {
     const kept = list.find((entry) => entry.key === request.preferred);
-    const firstGroup = manualFirst.length ? manualFirst : eligible.length ? eligible : list;
+    const firstGroup = manualFirst.length ? manualFirst : eligible2.length ? eligible2 : list;
     if (kept && (request.kind === "continuation" || firstGroup.includes(kept))) {
       if (kept !== list[0]) why = request.kind === "continuation" ? "kept_turn_model" : why;
       list = [kept, ...list.filter((entry) => entry !== kept)];
@@ -11318,11 +11609,11 @@ function badgeText(model) {
 
 // src/auto/launch.ts
 import { randomBytes as randomBytes4 } from "node:crypto";
-import { existsSync as existsSync2, readFileSync as readFileSync2, statSync as statSync3 } from "node:fs";
-import { dirname as dirname3, join as join9, resolve as resolve5 } from "node:path";
+import { existsSync as existsSync2, readFileSync as readFileSync3, statSync as statSync4 } from "node:fs";
+import { dirname as dirname4, join as join10, resolve as resolve6 } from "node:path";
 var LOCAL_ENVIRONMENT_KINDS = ["worktree"];
 var MODEL_KEYS = ["model", "small_model", "enabled_providers", "disabled_providers"];
-var CONFIG_NAMES = ["opencode.json", "opencode.jsonc", join9(".opencode", "opencode.json"), join9(".opencode", "opencode.jsonc")];
+var CONFIG_NAMES = ["opencode.json", "opencode.jsonc", join10(".opencode", "opencode.json"), join10(".opencode", "opencode.jsonc")];
 var MAX_CONFIG_BYTES = 1048576;
 function parseJsonc(text6) {
   let out = "";
@@ -11370,20 +11661,20 @@ function modelChoiceIn(config) {
   return null;
 }
 function projectModelConfig(cwd) {
-  let current = resolve5(cwd);
+  let current = resolve6(cwd);
   for (let depth = 0; depth < 64; depth++) {
     for (const name of CONFIG_NAMES) {
-      const path = join9(current, name);
+      const path = join10(current, name);
       let size;
       try {
-        size = statSync3(path).size;
+        size = statSync4(path).size;
       } catch {
         continue;
       }
       if (size > MAX_CONFIG_BYTES) return { found: null, unreadable: path };
       let parsed;
       try {
-        parsed = parseJsonc(readFileSync2(path, "utf8"));
+        parsed = parseJsonc(readFileSync3(path, "utf8"));
       } catch {
         return { found: null, unreadable: path };
       }
@@ -11391,8 +11682,8 @@ function projectModelConfig(cwd) {
       const key = modelChoiceIn(parsed);
       if (key) return { found: `${path} (${key})`, unreadable: null };
     }
-    if (existsSync2(join9(current, ".git"))) break;
-    const parent = dirname3(current);
+    if (existsSync2(join10(current, ".git"))) break;
+    const parent = dirname4(current);
     if (parent === current) break;
     current = parent;
   }
@@ -11461,28 +11752,169 @@ function openCodeContribution(input) {
 
 // src/auto/router.ts
 import { randomBytes as randomBytes6 } from "node:crypto";
-import { appendFileSync, mkdirSync as mkdirSync2, readFileSync as readFileSync4, renameSync as renameSync3, statSync as statSync4, writeFileSync as writeFileSync2 } from "node:fs";
+import { appendFileSync, mkdirSync as mkdirSync2, readFileSync as readFileSync5, renameSync as renameSync3, statSync as statSync5, writeFileSync as writeFileSync2 } from "node:fs";
 import { createServer } from "node:http";
-import { join as join11 } from "node:path";
+import { join as join12 } from "node:path";
+
+// src/auto/consensus.ts
+var GAIN_PER_FAMILY = 1.5;
+var MAX_GAIN = 3;
+var COST_WEIGHT = { cheap: 3, balanced: 1, best: 0 };
+var TIME_WEIGHT = 0.5;
+var MEMBER_WINDOW = 8;
+var JUDGE_WINDOW = 3;
+var MAX_JUDGES = 3;
+var DRAFT_TOKENS = 4096;
+var OUTCOME_MIN = 10;
+var TEXT_TYPES = /* @__PURE__ */ new Set(["research", "review", "writing"]);
+var single = (reason) => ({ kind: "single", reason, members: [], judges: [], estimateUsd: 0, ev: null });
+function familyOf2(entry) {
+  const [vendor, rest] = entry.model.includes("/") ? [entry.model.split("/")[0], entry.model.split("/").at(-1)] : [null, entry.model];
+  if (vendor) return vendor.replace(/^~/u, "").toLowerCase();
+  const bare = bareModelId(rest) ?? rest;
+  return normalizeModelIdentity(bare).split("-")[0] ?? bare;
+}
+function eligible(input) {
+  const { view, settings } = input;
+  if (settings.consensus === "off" && !settings.bestOfN) return "strategy_off";
+  if (view.level !== "large") return "not_hard";
+  if (!view.strong && !TEXT_TYPES.has(view.type) && !(settings.bestOfN && view.type === "coding")) return "not_text_type";
+  if (input.role === "orchestrator") return "orchestrator";
+  if (input.agentic) return "agentic_conversation";
+  return null;
+}
+function judgeEstimate(judge, members, estimate2) {
+  return estimate2(judge) + members.length * DRAFT_TOKENS * (judge.priceIn ?? 0) / 1e6;
+}
+function chooseStrategy(input) {
+  const notEligible = eligible(input);
+  if (notEligible) return single(notEligible);
+  const { plan: plan3, settings } = input;
+  const kind = settings.bestOfN && (input.view.type === "coding" || settings.consensus === "off") ? "best-of-n" : settings.consensus === "off" ? "single" : "consensus";
+  if (kind === "single") return single("strategy_off");
+  const type = plan3.scoredAs;
+  const primary = plan3.list[0];
+  if (!primary || !type || plan3.best === null) return single("unscored");
+  const scoreOf = (entry) => entry.scores[type]?.value ?? null;
+  if (scoreOf(primary) === null) return single("primary_unscored");
+  const best = plan3.best;
+  const healthy = (entry) => {
+    const outcome = input.outcome(entry.key);
+    return !outcome || outcome.n < OUTCOME_MIN || (outcome.failed + outcome.timeout) / outcome.n < 0.5;
+  };
+  const k = Math.min(settings.k, 3);
+  const pool = plan3.list.filter((entry) => entry !== primary && scoreOf(entry) !== null && scoreOf(entry) >= best - MEMBER_WINDOW - 1e-9 && healthy(entry)).sort((a, b) => scoreOf(b) - scoreOf(a) || input.estimate(a) - input.estimate(b) || a.key.localeCompare(b.key));
+  const members = [primary];
+  const load = /* @__PURE__ */ new Map([[primary.upstream.id, 1]]);
+  const fits = (entry) => {
+    const cap = input.parallelCap(entry.upstream);
+    return cap === null || input.busy(entry.upstream) + (load.get(entry.upstream.id) ?? 0) < cap;
+  };
+  for (const pass of ["new-upstream", "any"]) {
+    for (const entry of pool) {
+      if (members.length >= k) break;
+      if (members.some((member) => member.model === entry.model || familyOf2(member) === familyOf2(entry))) continue;
+      if (pass === "new-upstream" && load.has(entry.upstream.id)) continue;
+      if (!fits(entry)) continue;
+      members.push(entry);
+      load.set(entry.upstream.id, (load.get(entry.upstream.id) ?? 0) + 1);
+    }
+  }
+  if (members.length < 2) return single("no_diverse_models");
+  const judges = [...plan3.list].filter((entry) => scoreOf(entry) !== null && scoreOf(entry) >= best - JUDGE_WINDOW - 1e-9 && healthy(entry)).sort((a, b) => scoreOf(b) - scoreOf(a) || input.estimate(a) - input.estimate(b) || a.key.localeCompare(b.key)).slice(0, MAX_JUDGES);
+  if (!judges.length) return single("no_strong_judge");
+  const total = () => members.reduce((sum, entry) => sum + input.estimate(entry), 0) + judgeEstimate(judges[0], members, input.estimate);
+  while (total() > settings.turnUsdCap + 1e-12 && members.length > 2) {
+    const dearest = members.slice(1).sort((a, b) => input.estimate(b) - input.estimate(a))[0];
+    members.splice(members.indexOf(dearest), 1);
+  }
+  if (total() > settings.turnUsdCap + 1e-12) return single("over_turn_cap");
+  const estimateUsd = total();
+  const families = new Set(members.map(familyOf2)).size;
+  const gain = Math.min(MAX_GAIN, GAIN_PER_FAMILY * (families - 1));
+  const singleCost = input.estimate(primary);
+  const quality = scoreOf(judges[0]) + gain - scoreOf(primary);
+  const cost = singleCost > 0 && estimateUsd > 0 ? COST_WEIGHT[input.preference] * Math.log2(estimateUsd / singleCost) : 0;
+  const drafts = members.map(input.seconds);
+  const judgeTime = input.seconds(judges[0]);
+  const singleTime = input.seconds(primary);
+  const time2 = drafts.every((value) => value !== null) && judgeTime !== null && singleTime ? TIME_WEIGHT * Math.log2((Math.max(...drafts) + judgeTime) / singleTime) : 0;
+  const round4 = (value) => Math.round(value * 1e3) / 1e3;
+  const ev = { gain: round4(gain), quality: round4(quality), cost: round4(cost), time: round4(time2), total: round4(quality - cost - time2) };
+  if (kind === "consensus" && settings.consensus === "auto" && ev.total <= 0) return { ...single("single_better"), ev };
+  return { kind, reason: kind === "best-of-n" ? "best_of_n_on" : settings.consensus === "always" ? "consensus_always" : "consensus_pays", members, judges, estimateUsd: round4(estimateUsd * 1e3) / 1e3, ev };
+}
+function parseAnswer(raw) {
+  const result = { text: "", toolCalls: false, usage: { in: null, out: null, cost: null } };
+  const take = (value) => {
+    if (!value || typeof value !== "object") return;
+    const v = value;
+    for (const choice of Array.isArray(v.choices) ? v.choices : []) {
+      const c = choice;
+      const part = c.delta ?? c.message;
+      if (typeof part?.content === "string") result.text += part.content;
+      if (Array.isArray(part?.tool_calls) && part.tool_calls.length) result.toolCalls = true;
+      if (c.finish_reason === "tool_calls") result.toolCalls = true;
+    }
+    const u = v.usage;
+    if (u && typeof u === "object") {
+      if (typeof u.prompt_tokens === "number") result.usage.in = u.prompt_tokens;
+      if (typeof u.completion_tokens === "number") result.usage.out = u.completion_tokens;
+      if (typeof u.cost === "number" && Number.isFinite(u.cost) && u.cost >= 0) result.usage.cost = u.cost;
+    }
+  };
+  const trimmed = raw.trimStart();
+  if (trimmed.startsWith("{")) {
+    try {
+      take(JSON.parse(trimmed));
+    } catch {
+    }
+    return result;
+  }
+  for (const line of raw.split("\n")) {
+    if (!line.startsWith("data:")) continue;
+    const data = line.slice(5).trim();
+    if (!data || data === "[DONE]") continue;
+    try {
+      take(JSON.parse(data));
+    } catch {
+    }
+  }
+  return result;
+}
+var mentionsToolCall = (chunk) => /"tool_calls"\s*:\s*\[\s*\{/u.test(chunk);
+var DRAFT_CHARS = 24e3;
+var MERGE = "Below are draft answers from different models to the last user message above. Write the single best final answer to that message: keep what the drafts agree on, settle disagreements by reasoning it through, correct mistakes, and leave out anything unsupported. Answer the user directly, in the language of their message; do not mention the drafts, the models or this instruction.";
+var PICK = "Below are draft answers from different models to the last user message above. Choose the best one and reply with it in full; you may correct clear mistakes in it, but do not merge drafts. Answer the user directly; do not mention the drafts, the models or this instruction.";
+function judgeBody(body, drafts, kind) {
+  const messages = Array.isArray(body.messages) ? body.messages : [];
+  const text6 = [kind === "best-of-n" ? PICK : MERGE, ...drafts.map((draft, index) => `--- Draft ${index + 1} ---
+${draft.length > DRAFT_CHARS ? `${draft.slice(0, DRAFT_CHARS)}
+[\u2026]` : draft}`)].join("\n\n");
+  const next = { ...body, messages: [...messages, { role: "user", content: text6 }] };
+  if (Array.isArray(body.tools) && body.tools.length) next.tool_choice = "none";
+  else delete next.tool_choice;
+  return next;
+}
 
 // src/auto/tokens.ts
-import { createHash as createHash5, randomBytes as randomBytes5 } from "node:crypto";
-import { mkdirSync, readFileSync as readFileSync3, renameSync as renameSync2, writeFileSync } from "node:fs";
-import { join as join10 } from "node:path";
+import { createHash as createHash6, randomBytes as randomBytes5 } from "node:crypto";
+import { mkdirSync, readFileSync as readFileSync4, renameSync as renameSync2, writeFileSync } from "node:fs";
+import { join as join11 } from "node:path";
 var PREFIX = "sk-ctty-";
 var SHAPE = /^sk-ctty-[A-Za-z0-9_-]{43}$/u;
 var MAX_GRANTS = 1024;
-var hashToken = (token) => createHash5("sha256").update(token, "utf8").digest("hex");
+var hashToken = (token) => createHash6("sha256").update(token, "utf8").digest("hex");
 var TokenStore = class {
   file;
   grants = /* @__PURE__ */ new Map();
   now;
   constructor(directory, now = Date.now) {
     this.now = now;
-    this.file = directory ? join10(directory, "tokens.json") : null;
+    this.file = directory ? join11(directory, "tokens.json") : null;
     if (!this.file) return;
     try {
-      const saved = JSON.parse(readFileSync3(this.file, "utf8"));
+      const saved = JSON.parse(readFileSync4(this.file, "utf8"));
       if (Array.isArray(saved)) {
         for (const entry of saved.slice(0, MAX_GRANTS)) {
           if (!Array.isArray(entry) || typeof entry[0] !== "string" || !/^[0-9a-f]{64}$/u.test(entry[0])) continue;
@@ -11537,7 +11969,7 @@ var TokenStore = class {
   save() {
     if (!this.file) return;
     try {
-      mkdirSync(join10(this.file, ".."), { recursive: true, mode: 448 });
+      mkdirSync(join11(this.file, ".."), { recursive: true, mode: 448 });
       writeFileSync(`${this.file}.tmp`, JSON.stringify([...this.grants]), { mode: 384 });
       renameSync2(`${this.file}.tmp`, this.file);
     } catch {
@@ -11546,8 +11978,8 @@ var TokenStore = class {
 };
 
 // src/auto/router.ts
-var ROUTER_TIMEOUTS = { jevMs: 2500, headersMs: 6e4, firstChunkMs: 6e4, idleMs: 9e4, totalMs: 15 * 6e4 };
-var ROUTER_LIMITS = Object.freeze({ bodyBytes: 32 * 1048576, perCard: 16, total: 64, attempts: 6, conversations: 1024, leaseMs: 30 * 6e4, recent: 50, logBytes: 512 * 1024 });
+var ROUTER_TIMEOUTS = { jevMs: 2500, headersMs: 6e4, firstChunkMs: 6e4, idleMs: 9e4, totalMs: 15 * 6e4, memberMs: 18e4 };
+var ROUTER_LIMITS = Object.freeze({ bodyBytes: 32 * 1048576, perCard: 16, total: 64, attempts: 6, conversations: 1024, leaseMs: 30 * 6e4, recent: 50, logBytes: 512 * 1024, outcomes: 512 });
 var COOLDOWN_MS = Object.freeze({ transient: 3e4, quota: 3e5, missing: 9e5, auth: 9e5, maxRetryAfter: 24 * 36e5 });
 var HttpError = class extends Error {
   status;
@@ -11583,9 +12015,9 @@ var Spend = class {
   now;
   constructor(directory, now) {
     this.now = now;
-    this.file = directory ? join11(directory, "spend.json") : null;
+    this.file = directory ? join12(directory, "spend.json") : null;
     try {
-      const saved = JSON.parse(readFileSync4(this.file, "utf8"));
+      const saved = JSON.parse(readFileSync5(this.file, "utf8"));
       if (saved.day === this.dayKey() && typeof saved.total === "number" && saved.total >= 0) {
         this.day = saved.day;
         this.total = saved.total;
@@ -11723,7 +12155,13 @@ var AutoRouter = class {
   mainConversation = /* @__PURE__ */ new Map();
   recentRecords = [];
   hosts = /* @__PURE__ */ new Set();
-  stats = { requests: 0, turns: 0, continuations: 0, small: 0, jevAsked: 0, jevAnswered: 0, rules: 0, leaseReuses: 0, failovers: 0 };
+  /** Conversations (keyed hashes) where a fan-out met a tool call: their turns stay single. */
+  agentic = /* @__PURE__ */ new Set();
+  /** Calls running now per upstream (for subscription-like upstreams' parallel cap). */
+  upstreamActive = /* @__PURE__ */ new Map();
+  /** Per-route fan-out outcomes (route key → counts), kept in `fanout-outcomes.json`. */
+  outcomes = /* @__PURE__ */ new Map();
+  stats = { requests: 0, turns: 0, continuations: 0, small: 0, jevAsked: 0, jevAnswered: 0, rules: 0, leaseReuses: 0, failovers: 0, fanOuts: 0, merged: 0, fanOutToolCalls: 0, fanOutDegraded: 0, judgeFailed: 0 };
   constructor(deps) {
     this.deps = deps;
     this.now = deps.now ?? Date.now;
@@ -11738,12 +12176,51 @@ var AutoRouter = class {
     this.tokens = new TokenStore(deps.directory, this.now);
     this.salt = this.loadSalt();
     this.spend = new Spend(deps.directory, this.now);
+    this.loadOutcomes();
+  }
+  outcomesFile() {
+    return this.deps.directory ? join12(this.deps.directory, "fanout-outcomes.json") : null;
+  }
+  loadOutcomes() {
+    try {
+      const saved = JSON.parse(readFileSync5(this.outcomesFile(), "utf8"));
+      const count2 = (value) => Number.isInteger(value) && value >= 0 ? value : 0;
+      for (const [key, raw] of Object.entries(saved).slice(0, ROUTER_LIMITS.outcomes)) {
+        if (!raw || typeof raw !== "object" || key.length > 300) continue;
+        const r = raw;
+        this.outcomes.set(key, { n: count2(r.n), text: count2(r.text), toolCalls: count2(r.toolCalls), failed: count2(r.failed), timeout: count2(r.timeout) });
+      }
+    } catch {
+    }
+  }
+  noteOutcome(key, status) {
+    if (status === "stopped" || status === "capped") return;
+    const o = this.outcomes.get(key) ?? { n: 0, text: 0, toolCalls: 0, failed: 0, timeout: 0 };
+    o.n++;
+    if (status === "text") o.text++;
+    else if (status === "tool_calls") o.toolCalls++;
+    else if (status === "timeout") o.timeout++;
+    else o.failed++;
+    this.outcomes.delete(key);
+    this.outcomes.set(key, o);
+    while (this.outcomes.size > ROUTER_LIMITS.outcomes) this.outcomes.delete(this.outcomes.keys().next().value);
+    const file = this.outcomesFile();
+    if (!file) return;
+    try {
+      writeFileSync2(`${file}.tmp`, JSON.stringify(Object.fromEntries(this.outcomes)), { mode: 384 });
+      renameSync3(`${file}.tmp`, file);
+    } catch {
+    }
+  }
+  /** Fan-out outcomes per route (route key → counts). */
+  routeOutcomes() {
+    return Object.fromEntries([...this.outcomes].map(([key, value]) => [key, { ...value }]));
   }
   loadSalt() {
-    const file = this.deps.directory ? join11(this.deps.directory, "salt") : null;
+    const file = this.deps.directory ? join12(this.deps.directory, "salt") : null;
     if (file) {
       try {
-        const saved = readFileSync4(file);
+        const saved = readFileSync5(file);
         if (saved.length === 32) return saved;
       } catch {
       }
@@ -11764,7 +12241,7 @@ var AutoRouter = class {
     return this.server ? this.port : null;
   }
   portFile() {
-    return this.deps.directory ? join11(this.deps.directory, "port") : null;
+    return this.deps.directory ? join12(this.deps.directory, "port") : null;
   }
   /** Starts the listener (once), on the port used before when it is free. Resolves to the port. */
   start() {
@@ -11772,11 +12249,11 @@ var AutoRouter = class {
     if (this.starting) return this.starting;
     let stored = 0;
     try {
-      const value = Number(readFileSync4(this.portFile(), "utf8"));
+      const value = Number(readFileSync5(this.portFile(), "utf8"));
       if (Number.isInteger(value) && value > 1023 && value < 65536) stored = value;
     } catch {
     }
-    const listen = (port) => new Promise((resolve6, reject) => {
+    const listen = (port) => new Promise((resolve7, reject) => {
       const server = createServer((request, response) => {
         void this.handle(request, response);
       });
@@ -11786,7 +12263,7 @@ var AutoRouter = class {
       server.once("error", reject);
       server.listen({ port, host: "127.0.0.1", exclusive: true }, () => {
         server.off("error", reject);
-        resolve6(server);
+        resolve7(server);
       });
     });
     this.starting = (async () => {
@@ -11818,7 +12295,7 @@ var AutoRouter = class {
     this.server = null;
     if (!server) return;
     server.closeAllConnections?.();
-    await new Promise((resolve6) => server.close(() => resolve6()));
+    await new Promise((resolve7) => server.close(() => resolve7()));
   }
   /** Nothing uses the router any more: the port closes (it is reused next time). */
   idle() {
@@ -11903,7 +12380,7 @@ var AutoRouter = class {
     }
   }
   readBody(request) {
-    return new Promise((resolve6, reject) => {
+    return new Promise((resolve7, reject) => {
       const chunks = [];
       let size = 0;
       request.on("data", (chunk) => {
@@ -11915,7 +12392,7 @@ var AutoRouter = class {
         }
         chunks.push(chunk);
       });
-      request.on("end", () => resolve6(Buffer.concat(chunks)));
+      request.on("end", () => resolve7(Buffer.concat(chunks)));
       request.on("error", reject);
     });
   }
@@ -11944,10 +12421,10 @@ var AutoRouter = class {
       try {
         const answer = await Promise.race([
           this.deps.decide(text6, grant, controller.signal),
-          new Promise((resolve6) => {
+          new Promise((resolve7) => {
             timer = setTimeout(() => {
               controller.abort();
-              resolve6(null);
+              resolve7(null);
             }, this.timeouts.jevMs);
           })
         ]);
@@ -12026,7 +12503,11 @@ var AutoRouter = class {
       totalMs: 0,
       tokensIn: null,
       tokensOut: null,
-      costUsd: null
+      costUsd: null,
+      strategy: "single",
+      strategyWhy: null,
+      ev: null,
+      fanOut: null
     };
     try {
       let request2;
@@ -12078,6 +12559,28 @@ var AutoRouter = class {
       record4.tier = request2.kind === "small" ? "small" : request2.view.level;
       const list = chosen.list;
       if (!list.length) throw new HttpError(503, "no_model", "Auto (Jev): no allowed model is available now (all are off, excluded, cooling down or not allowed for this card's data class).");
+      if (request2.kind === "turn" && kind === "turn") {
+        const typical = this.typicalOutput(grant.sessionId, body.max_tokens);
+        const decision = chooseStrategy({
+          plan: chosen,
+          view: request2.view,
+          role: grant.role,
+          agentic: this.agentic.has(keys.conversation),
+          settings: settings.strategy,
+          preference: settings.preference,
+          estimate: (entry) => this.estimate(entry, raw.length, body.max_tokens, grant.sessionId),
+          seconds: (entry) => callSeconds(entry.speed, typical),
+          busy: (upstream) => this.upstreamActive.get(upstream.id) ?? 0,
+          parallelCap: (upstream) => this.deps.parallelCap?.(upstream) ?? null,
+          outcome: (key) => this.outcomes.get(key)
+        });
+        record4.strategyWhy = decision.reason;
+        record4.ev = decision.ev;
+        if (decision.kind !== "single") {
+          await this.fanOut(decision, list, body, raw.length, grant, response, controller, record4, keys.conversation, chosen.scoredAs);
+          return;
+        }
+      }
       await this.forward(list.slice(0, ROUTER_LIMITS.attempts), body, grant, response, controller, record4, kind, keys.conversation, chosen.scoredAs);
     } catch (error) {
       if (error instanceof HttpError) {
@@ -12107,10 +12610,14 @@ var AutoRouter = class {
    */
   estimate(entry, bodyBytes, maxTokens, sessionId) {
     const limit2 = typeof maxTokens === "number" && maxTokens > 0 ? Math.min(maxTokens, 32768) : entry.output ?? DEFAULT_OUTPUT;
+    const output = Math.min(limit2, Math.max(1, this.typicalOutput(sessionId, void 0)));
+    return (bodyBytes / 4 * (entry.priceIn ?? 0) + output * (entry.priceOut ?? 0)) / 1e6;
+  }
+  /** The card's p90 output tokens (4k until 3 calls were seen), bounded by max_tokens when given. */
+  typicalOutput(sessionId, maxTokens) {
     const seen = sessionId ? this.outputs.get(sessionId) ?? [] : [];
     const typical = seen.length >= OUTPUT_SAMPLES_MIN ? percentile3(seen, 0.9) : COLD_OUTPUT_TOKENS;
-    const output = Math.min(limit2, Math.max(1, typical));
-    return (bodyBytes / 4 * (entry.priceIn ?? 0) + output * (entry.priceOut ?? 0)) / 1e6;
+    return typeof maxTokens === "number" && maxTokens > 0 ? Math.min(typical, maxTokens) : typical;
   }
   /** The output tokens a finished call reported, for this card's next reservations. */
   sawOutput(sessionId, tokens3) {
@@ -12168,6 +12675,7 @@ var AutoRouter = class {
       let timer = setTimeout(() => attempt.abort(), stream ? this.timeouts.headersMs : this.timeouts.totalMs);
       let sent = false;
       const usage = new UsageReader();
+      this.busyUpstream(candidate.upstream.id, 1);
       try {
         const url = `${candidate.upstream.baseUrl}/chat/completions`;
         this.hosts.add(new URL(url).host);
@@ -12268,9 +12776,9 @@ var AutoRouter = class {
           }
           if (next.done) break;
           take(next.value);
-          if (!response.write(next.value)) await new Promise((resolve6) => {
-            response.once("drain", resolve6);
-            response.once("close", resolve6);
+          if (!response.write(next.value)) await new Promise((resolve7) => {
+            response.once("drain", resolve7);
+            response.once("close", resolve7);
           });
           if (response.destroyed) {
             failed = true;
@@ -12303,10 +12811,287 @@ var AutoRouter = class {
         clearTimeout(timer);
         controller.signal.removeEventListener("abort", relay);
         if (!sent) attempt.abort();
+        this.busyUpstream(candidate.upstream.id, -1);
       }
     }
     if (capped && record4.attempts === 0) throw capped;
     throw new HttpError(lastStatus === 429 ? 429 : 503, lastCode, `Auto (Jev): no allowed model answered (last: ${lastCode}). It tries again on the next call.`);
+  }
+  busyUpstream(id, delta) {
+    const next = (this.upstreamActive.get(id) ?? 0) + delta;
+    if (next > 0) this.upstreamActive.set(id, next);
+    else this.upstreamActive.delete(id);
+  }
+  /** The cooldown an upstream answer earns (the same classes as `forward`). */
+  coolFor(entry, status, retryAfter, detail) {
+    const model = `${entry.upstream.id}|${entry.model}`;
+    if (status === 401 || status === 403) this.cool(entry.upstream.id, COOLDOWN_MS.auth);
+    else if (status === 400 && UNKNOWN_MODEL.test(detail)) this.cool(model, COOLDOWN_MS.missing);
+    else if (status === 429) this.cool(model, retryAfterMs2(retryAfter, this.now()) ?? COOLDOWN_MS.quota);
+    else if (status === 404) this.cool(model, COOLDOWN_MS.missing);
+    else if (RETRYABLE.has(status)) this.cool(model, COOLDOWN_MS.transient);
+  }
+  /**
+   * One draft of a fan-out: the CLI's own request to one model, buffered whole (nothing reaches the CLI). `stop`
+   * aborts it on purpose (another draft called a tool); the deadline (`memberMs`) and the usual header, first-chunk
+   * and idle timeouts drop a late one. `onToolCall` fires once when its stream starts a tool call.
+   */
+  async draft(entry, body, stop, onToolCall) {
+    const started = this.now();
+    const record4 = { upstream: entry.upstream.id, model: entry.model, effort: entry.effort, status: "failed", http: null, ms: 0, costUsd: null };
+    const done = (status, extra = {}) => {
+      record4.status = status;
+      record4.ms = this.now() - started;
+      return { record: record4, bytes: extra.bytes ?? null, contentType: extra.contentType ?? null, parsed: extra.parsed ?? null };
+    };
+    const key = entry.upstream.key === "none" ? null : await this.deps.key(entry.upstream).catch(() => null);
+    if (entry.upstream.key !== "none" && !key) {
+      this.cool(entry.upstream.id, COOLDOWN_MS.auth);
+      return done("failed");
+    }
+    const effort = entry.sendEffort && entry.effort && body.reasoning === void 0 && body.reasoning_effort === void 0 ? { reasoning: { effort: entry.effort } } : {};
+    const stream = body.stream === true;
+    const attempt = new AbortController();
+    const relay = () => attempt.abort();
+    stop.addEventListener("abort", relay, { once: true });
+    let late = false;
+    const deadline = setTimeout(() => {
+      late = true;
+      attempt.abort();
+    }, this.timeouts.memberMs);
+    let step = setTimeout(() => {
+      late = true;
+      attempt.abort();
+    }, stream ? this.timeouts.headersMs : this.timeouts.memberMs);
+    const url = `${entry.upstream.baseUrl}/chat/completions`;
+    this.hosts.add(new URL(url).host);
+    this.busyUpstream(entry.upstream.id, 1);
+    const chunks = [];
+    try {
+      let upstream;
+      try {
+        upstream = await this.transport(url, {
+          method: "POST",
+          body: Buffer.from(JSON.stringify({ ...body, model: entry.model, ...effort }), "utf8"),
+          signal: attempt.signal,
+          redirect: "error",
+          headers: { "content-type": "application/json", accept: stream ? "text/event-stream" : "application/json", ...key ? { authorization: `Bearer ${key}` } : {} }
+        });
+      } catch {
+        if (stop.aborted && !late) return done("stopped");
+        this.cool(late ? `${entry.upstream.id}|${entry.model}` : entry.upstream.id, COOLDOWN_MS.transient);
+        return done(late ? "timeout" : "failed");
+      }
+      record4.http = upstream.status;
+      if (!upstream.ok) {
+        const detail = await upstream.text().then((text6) => upstreamMessage(text6), () => "");
+        this.coolFor(entry, upstream.status, upstream.headers.get("retry-after"), detail);
+        return done("failed");
+      }
+      const reader = upstream.body?.getReader();
+      if (!reader) return done("failed");
+      const decoder = new TextDecoder();
+      let tail = "";
+      let first = true;
+      let called = false;
+      for (; ; ) {
+        clearTimeout(step);
+        step = setTimeout(() => {
+          late = true;
+          attempt.abort();
+        }, stream ? first ? this.timeouts.firstChunkMs : this.timeouts.idleMs : this.timeouts.memberMs);
+        let next;
+        try {
+          next = await reader.read();
+        } catch {
+          if (stop.aborted && !late) return done("stopped");
+          if (late) this.cool(`${entry.upstream.id}|${entry.model}`, COOLDOWN_MS.transient);
+          return done(late ? "timeout" : "failed");
+        }
+        if (next.done) break;
+        first = false;
+        chunks.push(Buffer.from(next.value));
+        const text6 = decoder.decode(next.value, { stream: true });
+        if (!called && mentionsToolCall(tail + text6)) {
+          called = true;
+          onToolCall();
+        }
+        tail = text6.slice(-64);
+      }
+      const bytes = Buffer.concat(chunks);
+      const parsed = parseAnswer(bytes.toString("utf8"));
+      record4.costUsd = this.costOf(entry, parsed.usage);
+      const status = parsed.toolCalls ? "tool_calls" : parsed.text.trim() ? "text" : "failed";
+      return done(status, { bytes, contentType: upstream.headers.get("content-type"), parsed });
+    } finally {
+      clearTimeout(deadline);
+      clearTimeout(step);
+      stop.removeEventListener("abort", relay);
+      attempt.abort();
+      this.busyUpstream(entry.upstream.id, -1);
+    }
+  }
+  /** A buffered draft becomes the answer, byte for byte. */
+  replay(entry, answer, body, response, grant, record4, conversation, scoredAs) {
+    record4.upstream = entry.upstream.id;
+    record4.model = entry.model;
+    record4.effort = entry.effort;
+    record4.priceIn = entry.priceIn;
+    record4.priceOut = entry.priceOut;
+    const score2 = scoredAs ? entry.scores[scoredAs] : void 0;
+    record4.score = score2?.value ?? null;
+    record4.scoreSource = score2 ? `${score2.label}${scoredAs !== record4.taskType ? ` (${scoredAs})` : ""}${score2.historical ? ", old" : ""}` : null;
+    record4.tokensIn = answer.parsed?.usage.in ?? null;
+    record4.tokensOut = answer.parsed?.usage.out ?? null;
+    record4.ttfbMs = this.now() - record4.at;
+    const lease = this.leases.get(conversation);
+    if (lease) lease.model = entry.key;
+    this.showModel(grant.sessionId, entry.model, record4.difficulty ?? "large", record4.source);
+    response.writeHead(200, { "content-type": answer.contentType ?? (body.stream === true ? "text/event-stream" : "application/json"), "cache-control": "no-cache" });
+    response.end(answer.bytes ?? Buffer.alloc(0));
+    record4.status = 200;
+  }
+  /**
+   * A fan-out: every draft and the judge are reserved against the caps first (a draft that does not fit is left out;
+   * the single choice not fitting, or the judge, ends the fan-out before anything is sent). The drafts run in
+   * parallel, buffered. Then: a tool call anywhere → the single choice's answer as it came (the others are stopped);
+   * no draft → the single path; one → it; two or more → the judge's answer, streamed (a failed judge → the best draft).
+   */
+  async fanOut(decision, list, body, bodyBytes, grant, response, controller, record4, conversation, scoredAs) {
+    const settings = this.deps.settings();
+    const caps = { daily: settings.dailyUsdCap, perCard: settings.perCardUsdCap };
+    const kind = decision.kind;
+    const fan = { kind, estimateUsd: decision.estimateUsd, drafts: [], judge: null, outcome: null };
+    record4.fanOut = fan;
+    record4.strategy = kind;
+    const single2 = (why) => {
+      record4.strategy = "single";
+      record4.strategyWhy = why;
+      record4.fanOut = null;
+      return this.forward(list.slice(0, ROUTER_LIMITS.attempts), body, grant, response, controller, record4, "turn", conversation, scoredAs);
+    };
+    const judgeHold = (() => {
+      const judge = decision.judges[0];
+      const usd2 = this.estimate(judge, bodyBytes, body.max_tokens, grant.sessionId) + decision.members.length * DRAFT_TOKENS * (judge.priceIn ?? 0) / 1e6;
+      try {
+        return this.spend.reserve(grant.sessionId, usd2, caps);
+      } catch {
+        return null;
+      }
+    })();
+    if (!judgeHold) return single2("judge_over_cap");
+    const members = [];
+    for (const entry of decision.members) {
+      try {
+        members.push({ entry, hold: this.spend.reserve(grant.sessionId, this.estimate(entry, bodyBytes, body.max_tokens, grant.sessionId), caps) });
+      } catch {
+        if (entry === decision.members[0]) {
+          judgeHold.release();
+          for (const m of members) m.hold.release();
+          return single2("primary_over_cap");
+        }
+        fan.drafts.push({ upstream: entry.upstream.id, model: entry.model, effort: entry.effort, status: "capped", http: null, ms: 0, costUsd: null });
+      }
+    }
+    if (members.length < 2) {
+      judgeHold.release();
+      for (const m of members) m.hold.release();
+      return single2("drafts_over_cap");
+    }
+    this.stats.fanOuts++;
+    const stops = members.map(() => new AbortController());
+    const relay = () => {
+      for (const stop of stops) stop.abort();
+    };
+    controller.signal.addEventListener("abort", relay, { once: true });
+    let results;
+    try {
+      results = await Promise.all(members.map(({ entry }, index) => this.draft(entry, body, stops[index].signal, () => {
+        stops.forEach((stop, other) => {
+          if (other !== 0 && other !== index) stop.abort();
+        });
+      })));
+    } finally {
+      controller.signal.removeEventListener("abort", relay);
+    }
+    let draftCost = 0;
+    results.forEach((result, index) => {
+      const { entry, hold } = members[index];
+      if (result.bytes || result.record.status === "stopped" || result.record.status === "timeout") {
+        hold.commit(result.record.costUsd);
+        draftCost += result.record.costUsd ?? 0;
+      } else hold.release();
+      if (result.parsed) this.sawOutput(grant.sessionId, result.parsed.usage.out);
+      fan.drafts.push(result.record);
+      this.noteOutcome(entry.key, result.record.status);
+    });
+    const finish = () => {
+      record4.costUsd = (record4.costUsd ?? 0) + draftCost;
+    };
+    if (controller.signal.aborted) {
+      judgeHold.release();
+      finish();
+      throw new HttpError(499, "aborted", "The call was cancelled.");
+    }
+    const answered = results.map((result, index) => ({ result, entry: members[index].entry }));
+    if (answered.some(({ result }) => result.record.status === "tool_calls")) {
+      judgeHold.release();
+      this.agentic.add(conversation);
+      while (this.agentic.size > ROUTER_LIMITS.conversations) this.agentic.delete(this.agentic.keys().next().value);
+      this.stats.fanOutToolCalls++;
+      fan.outcome = "tool_calls";
+      const primary = answered[0];
+      const chosen = primary.result.bytes && (primary.result.record.status === "text" || primary.result.record.status === "tool_calls") ? primary : answered.find(({ result }) => result.record.status === "tool_calls");
+      this.replay(chosen.entry, chosen.result, body, response, grant, record4, conversation, scoredAs);
+      record4.costUsd = draftCost;
+      return;
+    }
+    const texts = answered.filter(({ result }) => result.record.status === "text");
+    if (!texts.length) {
+      judgeHold.release();
+      this.stats.fanOutDegraded++;
+      fan.outcome = "no_draft";
+      const failed = new Set(members.map((m) => m.entry));
+      try {
+        await this.forward(list.filter((entry) => !failed.has(entry)).slice(0, ROUTER_LIMITS.attempts), body, grant, response, controller, record4, "turn", conversation, scoredAs);
+      } finally {
+        finish();
+      }
+      return;
+    }
+    if (texts.length === 1) {
+      judgeHold.release();
+      this.stats.fanOutDegraded++;
+      fan.outcome = "one_draft";
+      this.replay(texts[0].entry, texts[0].result, body, response, grant, record4, conversation, scoredAs);
+      record4.costUsd = draftCost;
+      return;
+    }
+    judgeHold.release();
+    const judged = judgeBody(body, texts.map(({ result }) => result.parsed.text), kind);
+    try {
+      await this.forward(decision.judges.slice(0, ROUTER_LIMITS.attempts), judged, grant, response, controller, record4, "turn", conversation, scoredAs);
+      fan.judge = record4.upstream && record4.model ? { upstream: record4.upstream, model: record4.model } : null;
+      fan.outcome = kind === "best-of-n" ? "picked" : "merged";
+      this.stats.merged++;
+      finish();
+    } catch (error) {
+      if (error instanceof HttpError && error.status === 499) {
+        finish();
+        throw error;
+      }
+      if (response.headersSent) {
+        finish();
+        throw error;
+      }
+      this.stats.judgeFailed++;
+      fan.outcome = "judge_failed";
+      record4.reason = "judge_failed";
+      const value = (entry) => scoredAs ? entry.scores[scoredAs]?.value ?? -1 : -1;
+      const best = [...texts].sort((a, b) => value(b.entry) - value(a.entry))[0];
+      record4.costUsd = draftCost;
+      this.replay(best.entry, best.result, body, response, grant, record4, conversation, scoredAs);
+    }
   }
   showModel(sessionId, model, level, source) {
     if (this.shownModel.get(sessionId) === model) return;
@@ -12316,11 +13101,11 @@ var AutoRouter = class {
   remember(record4) {
     this.recentRecords.unshift(record4);
     if (this.recentRecords.length > ROUTER_LIMITS.recent) this.recentRecords.length = ROUTER_LIMITS.recent;
-    const file = this.deps.directory ? join11(this.deps.directory, "decisions.jsonl") : null;
+    const file = this.deps.directory ? join12(this.deps.directory, "decisions.jsonl") : null;
     if (!file) return;
     try {
       try {
-        if (statSync4(file).size > ROUTER_LIMITS.logBytes) renameSync3(file, `${file}.1`);
+        if (statSync5(file).size > ROUTER_LIMITS.logBytes) renameSync3(file, `${file}.1`);
       } catch {
       }
       appendFileSync(file, `${JSON.stringify(record4)}
@@ -12357,7 +13142,7 @@ var AutoService = class {
     this.settings = normalizeAutoSettings(this.readable ? options.saved : null);
     const strings3 = AUTO_STRINGS[options.locale];
     this.catalog = new CatalogStore({
-      directory: join12(options.dataDir, "auto"),
+      directory: join13(options.dataDir, "auto"),
       bundled: bundled_default,
       ...options.catalogTransport ? { transport: options.catalogTransport } : {},
       ...options.now ? { now: options.now } : {},
@@ -12368,7 +13153,7 @@ var AutoService = class {
     });
     this.configureCatalog();
     this.router = new AutoRouter({
-      directory: join12(options.dataDir, "auto"),
+      directory: join13(options.dataDir, "auto"),
       settings: () => this.settings,
       inventory: () => this.inventory(),
       dataClassMode: options.dataClassMode,
@@ -12377,6 +13162,7 @@ var AutoService = class {
       ...options.turn ? { turn: options.turn } : {},
       badge: (sessionId, model) => options.publishBadge(sessionId, model ? { text: badgeText(model.model), tone: "neutral", tooltip: strings3.badgeTip(model.tier, model.source) } : null),
       log: (level, message) => options.host.log(level, message),
+      ...options.parallelCap ? { parallelCap: options.parallelCap } : {},
       ...options.transport ? { transport: options.transport } : {},
       ...options.now ? { now: options.now } : {},
       ...options.timeouts ? { timeouts: options.timeouts } : {}
@@ -12521,7 +13307,7 @@ var AutoService = class {
   async state() {
     const keys = {};
     for (const upstream of this.settings.upstreams) keys[upstream.id] = upstream.key === "none" ? true : !!await this.keyFor(upstream).catch(() => null);
-    return { settings: this.settings, readable: this.readable, keys, recent: this.router.recent(), stats: this.router.statsView(), catalog: this.catalog.status(), models: this.modelRows(), waitingForList: this.inventory().waitingForList };
+    return { settings: this.settings, readable: this.readable, keys, recent: this.router.recent(), stats: this.router.statsView(), catalog: this.catalog.status(), models: this.modelRows(), waitingForList: this.inventory().waitingForList, outcomes: this.router.routeOutcomes() };
   }
   async save(value) {
     if (!this.readable) throw new Error(this.options.locale === "ru" ? "\u0421\u043E\u0445\u0440\u0430\u043D\u0451\u043D\u043D\u044B\u0435 \u043D\u0430\u0441\u0442\u0440\u043E\u0439\u043A\u0438 \u0435\u0449\u0451 \u043D\u0435 \u043F\u0440\u043E\u0447\u0438\u0442\u0430\u043D\u044B, \u043F\u043E\u044D\u0442\u043E\u043C\u0443 \u043D\u0438\u0447\u0435\u0433\u043E \u043D\u0435 \u0438\u0437\u043C\u0435\u043D\u0435\u043D\u043E." : "The saved settings could not be read yet, so nothing is changed.");
@@ -12570,9 +13356,9 @@ var AutoService = class {
 
 // src/route/service.ts
 import { randomUUID as randomUUID3 } from "node:crypto";
-import { readFileSync as readFileSync5 } from "node:fs";
+import { readFileSync as readFileSync6 } from "node:fs";
 import { mkdir as mkdir5, rename as rename3, writeFile as writeFile5 } from "node:fs/promises";
-import { join as join13 } from "node:path";
+import { join as join14 } from "node:path";
 
 // src/route/aliases.ts
 var ALIAS_TABLE_AS_OF = "2026-10-15";
@@ -12648,18 +13434,18 @@ function quotaOf(limits, reserve, now) {
   }
   if (!tight) return { state: "presumed-reset", headroom: null, pace: null, window: null, readAt: limits.fetchedAt, note: "its windows have probably reset since the last read", code: "reset" };
   const view = { label: tight.label, usedPercent: tight.usedPercent, minutes: tight.windowMinutes };
-  if (headroom <= 0) return { state: "exhausted", headroom: 0, pace: paced ? round2(pace) : null, window: view, readAt: limits.fetchedAt, note: "no headroom above the reserve", code: "no-headroom" };
-  return { state: presumed ? "presumed-reset" : "known", headroom: round2(headroom), pace: paced ? round2(pace) : null, window: view, readAt: limits.fetchedAt, note: presumed ? "one window has probably reset since the last read" : "", code: presumed ? "reset" : "" };
+  if (headroom <= 0) return { state: "exhausted", headroom: 0, pace: paced ? round3(pace) : null, window: view, readAt: limits.fetchedAt, note: "no headroom above the reserve", code: "no-headroom" };
+  return { state: presumed ? "presumed-reset" : "known", headroom: round3(headroom), pace: paced ? round3(pace) : null, window: view, readAt: limits.fetchedAt, note: presumed ? "one window has probably reset since the last read" : "", code: presumed ? "reset" : "" };
 }
-var round2 = (value) => Math.round(value * 1e3) / 1e3;
+var round3 = (value) => Math.round(value * 1e3) / 1e3;
 function shadowPrice(quota, share, ref) {
   if (quota.state === "exhausted") return { usd: null, basis: "unavailable" };
   if (quota.state !== "known" || quota.headroom === null) return { usd: 0, basis: "unknown" };
   const burning = quota.pace !== null && quota.pace > 1;
   if (quota.headroom >= share && !burning) return { usd: 0, basis: "free" };
   const base = ref ?? 0;
-  if (quota.headroom < share) return { usd: round2(base * Math.max(1, burning ? quota.pace - 1 : 1)), basis: "low" };
-  return { usd: round2(base * (quota.pace - 1)), basis: "burning" };
+  if (quota.headroom < share) return { usd: round3(base * Math.max(1, burning ? quota.pace - 1 : 1)), basis: "low" };
+  return { usd: round3(base * (quota.pace - 1)), basis: "burning" };
 }
 
 // src/route/settings.ts
@@ -12903,7 +13689,7 @@ function rawCandidates(ctx) {
   const raws = [];
   const known = (identity) => ctx.index.rows(identity).length > 0;
   const declared = /* @__PURE__ */ new Set();
-  const resolve6 = (cli, model) => {
+  const resolve7 = (cli, model) => {
     const r = resolveModel(cli, model, ctx.settings.aliases, known);
     return { identity: r.identity, from: r.from };
   };
@@ -12916,7 +13702,7 @@ function rawCandidates(ctx) {
     else models = plan3.models.length ? plan3.models : [null];
     if (!MODEL_CLIS.has(plan3.cli)) models = [null];
     for (const model of models) {
-      const resolved = model ? resolve6(plan3.cli, model) : { identity: null, from: "none" };
+      const resolved = model ? resolve7(plan3.cli, model) : { identity: null, from: "none" };
       const takes = effortsOf(plan3.cli, entry);
       for (const effort of effortVariants(ctx.index, resolved.identity, takes)) {
         raws.push({ ...base, model, resolved, effort, effortVia: takes.length ? "spawn" : "none", ...plan3.cli === "opencode" ? { context: openCodeContext(model) } : {} });
@@ -12925,7 +13711,7 @@ function rawCandidates(ctx) {
   }
   for (const row of ctx.accountRows) {
     const host = row.endpoint;
-    const resolved = resolve6(row.provider, row.model);
+    const resolved = resolve7(row.provider, row.model);
     const takes = CLI_EFFORTS[row.provider] ?? [];
     const rowEffort = typeof row.launchOptions?.[ACCOUNTS_ID]?.effort === "string" && row.launchOptions[ACCOUNTS_ID].effort !== "default" ? row.launchOptions[ACCOUNTS_ID].effort : null;
     const efforts = rowEffort ? [rowEffort] : effortVariants(ctx.index, resolved.identity, takes);
@@ -13233,17 +14019,17 @@ function decide(ctx) {
   const quotaKnown = (c) => c.availability.state === "ready" && !(SUBSCRIPTION_KINDS.has(c.kind) && c.costBasis === "unknown");
   const lowerEffort = view.level !== "large";
   const qualityFirst = view.level === "large" || view.strong || ctx.explore.highRisk;
-  let eligible = best === null ? [] : scored.filter((group) => rep(group).score.value >= best - window - 1e-9).sort((ga, gb) => {
+  let eligible2 = best === null ? [] : scored.filter((group) => rep(group).score.value >= best - window - 1e-9).sort((ga, gb) => {
     const a = rep(ga), b = rep(gb);
     return (ctx.settings.preferSubscriptions ? Number(headroomOk(b)) - Number(headroomOk(a)) : 0) || compareCost(a, b) || (qualityFirst ? 0 : comparePlan(a, b)) || (a.allow === "prefer" || b.allow === "prefer" ? allowRank(a.allow) - allowRank(b.allow) : Number(quotaKnown(b)) - Number(quotaKnown(a))) || (lowerEffort ? effortRank2(a.effort) - effortRank2(b.effort) : 0) || b.score.value - a.score.value || a.key.localeCompare(b.key);
   });
-  if (view.level === "large") eligible = keepMeasuredFirst(eligible, rep);
-  const others = scored.filter((group) => !eligible.includes(group)).sort((a, b) => rep(b).score.value - rep(a).score.value || compareCost(rep(a), rep(b)) || rep(a).key.localeCompare(rep(b).key));
+  if (view.level === "large") eligible2 = keepMeasuredFirst(eligible2, rep);
+  const others = scored.filter((group) => !eligible2.includes(group)).sort((a, b) => rep(b).score.value - rep(a).score.value || compareCost(rep(a), rep(b)) || rep(a).key.localeCompare(rep(b).key));
   const unscored = rest.filter((group) => !rep(group).score);
   const boosted = unscored.filter((group) => rep(group).boost !== 0);
   const defaults = unscored.filter((group) => !rep(group).model || rep(group).kind === "auto").sort((a, b) => Number(rep(b).cli === ctx.callerProvider) - Number(rep(a).cli === ctx.callerProvider) || Number(quotaKnown(rep(b))) - Number(quotaKnown(rep(a))) || compareCost(rep(a), rep(b)) || rep(a).key.localeCompare(rep(b).key));
   const unused = unscored.filter((group) => !boosted.includes(group) && !defaults.includes(group));
-  let ordered = [...pinned, ...eligible, ...others, ...boosted, ...defaults];
+  let ordered = [...pinned, ...eligible2, ...others, ...boosted, ...defaults];
   if (ctx.settings.preferPlansSmall && view.level === "small" && view.confident && !view.strong && !ctx.explore.highRisk && !ctx.orchestrate) {
     const W = ctx.settings.planWindowSmall;
     const isPlan = (c) => c.kind === "subscription" || c.kind === "coding-plan" || c.costBasis === "flat" || c.costBasis === "local";
@@ -13311,6 +14097,15 @@ function expectedTokens(identity, level, ctx) {
   const learned = identity ? ctx.tokenFactor?.(identity) ?? null : null;
   return Math.round(base * (learned ?? (identity && SMALL_MODEL2.test(identity) ? SMALL_MODEL_TOKENS : 1)));
 }
+var TASK_CALLS = { small: 5, medium: 15, large: 30 };
+function speedFor(c, ctx) {
+  if (!c.identity) return null;
+  const person2 = ctx.settings.speeds[c.identity];
+  if (person2 !== void 0) return { outputTps: person2, latencyS: null, source: "person", label: null };
+  const effort = c.scoredEffort && EFFORT_RANK2.includes(c.scoredEffort) ? c.scoredEffort : null;
+  const measured = ctx.index.speed(c.identity, effort, { openRouter: true, origin: null });
+  return measured ? { outputTps: measured.outputTps, latencyS: measured.latencyS, source: "measured", label: measured.label } : null;
+}
 function planCosts(candidates, ctx, raws) {
   const groupOf = (c) => c.kind === "subscription" || c.kind === "coding-plan" || c.kind === "cli-default" ? c.signIn : c.costBasis === "flat" ? `flat:${c.endpoint}` : null;
   const plans = new Map(ctx.settings.plans.map((plan3) => [`plan:${plan3.id}`, plan3]));
@@ -13325,6 +14120,7 @@ function planCosts(candidates, ctx, raws) {
     return p2 ? (p2.priceIn ?? 0) + (p2.priceOut ?? 0) * 3 : null;
   };
   const weightK = SPEED_WEIGHT[ctx.settings.valueSpeed];
+  const base = TASK_TOKENS[ctx.view.level].input + TASK_TOKENS[ctx.view.level].output;
   for (const [key, members] of groups) {
     const plan3 = plans.get(key);
     const quotaBy = plan3?.quotaBy ?? "tokens";
@@ -13337,18 +14133,21 @@ function planCosts(candidates, ctx, raws) {
       const price3 = blend(c.identity);
       return quotaBy === "tokens" && price3 !== null && topPrice ? price3 / topPrice : 1;
     };
-    const speedOf = (c) => c.identity ? ctx.settings.speeds[c.identity] ?? null : null;
-    const timed = members.every((c) => speedOf(c) !== null);
+    const topSpeed = speedFor(top, ctx);
+    const outputOf = (c) => TASK_TOKENS[ctx.view.level].output * (tokensOf(c) / base);
+    const secondsOf = (speed, c, latency) => (latency ? TASK_CALLS[ctx.view.level] * (speed.latencyS ?? 0) : 0) + outputOf(c) / speed.outputTps;
     const topQuota = quotaBy === "prompts" ? 1 : tokensOf(top) * weightOf(top);
-    const topTime = timed ? tokensOf(top) / speedOf(top) : null;
     for (const c of members) {
       const quota = quotaBy === "prompts" ? 1 : tokensOf(c) * weightOf(c) / topQuota;
-      const time2 = timed && topTime ? tokensOf(c) / speedOf(c) / topTime : null;
+      const speed = c === top ? topSpeed : speedFor(c, ctx);
+      const latency = !!speed && !!topSpeed && speed.latencyS !== null && topSpeed.latencyS !== null;
+      const time2 = speed && topSpeed ? Math.round(secondsOf(speed, c, latency) / secondsOf(topSpeed, top, latency) * 1e3) / 1e3 : null;
       c.planCost = {
-        cost: Math.round((quota + (time2 === null ? 0 : weightK * time2)) * 1e3) / 1e3,
+        cost: Math.round((quota + weightK * (time2 ?? 1)) * 1e3) / 1e3,
         quota: Math.round(quota * 1e3) / 1e3,
         time: time2,
         faster: time2 ? Math.round(1 / time2 * 10) / 10 : null,
+        speedFrom: time2 === null ? null : speed.source === "person" && topSpeed.source === "person" ? "person" : speed.source === "measured" && topSpeed.source === "measured" ? "measured" : "mixed",
         against: c === top ? null : top.identity ?? top.model,
         tokens: tokensOf(c)
       };
@@ -13420,7 +14219,8 @@ function costText(c, now) {
   const base = costBase(c, now);
   const p2 = c.planCost;
   if (!p2 || !p2.against) return base;
-  return `${base}; ~${Math.round(p2.quota * 100)}% of the plan quota ${p2.against} would use${p2.faster && p2.faster !== 1 ? `, ~${p2.faster}\xD7 ${p2.faster > 1 ? "faster" : "as fast"}` : ""}`;
+  const from = p2.speedFrom === "measured" ? " (Artificial Analysis speeds)" : p2.speedFrom === "mixed" ? " (your and measured speeds)" : "";
+  return `${base}; ~${Math.round(p2.quota * 100)}% of the plan quota ${p2.against} would use${p2.faster && p2.faster !== 1 ? `, ~${p2.faster}\xD7 ${p2.faster > 1 ? "faster" : "as fast"}${from}` : ""}`;
 }
 function costBase(c, now) {
   const read = c.quota ? `, read ${ago(c.quota.readAt, now)}` : "";
@@ -13734,10 +14534,10 @@ var RouteService = class {
     this.random = options.random ?? Math.random;
     this.readable = options.savedUnavailable !== true;
     this.settings = normalizeRouteSettings(this.readable ? options.saved : null);
-    this.dir = join13(options.dataDir, "route");
+    this.dir = join14(options.dataDir, "route");
     let saved = null;
     try {
-      saved = JSON.parse(readFileSync5(join13(this.dir, "decisions.json"), "utf8"));
+      saved = JSON.parse(readFileSync6(join14(this.dir, "decisions.json"), "utf8"));
     } catch {
       saved = null;
     }
@@ -14069,7 +14869,7 @@ ${JSON.stringify({
     this.writing = this.writing.then(async () => {
       try {
         await mkdir5(this.dir, { recursive: true, mode: 448 });
-        const path = join13(this.dir, "decisions.json");
+        const path = join14(this.dir, "decisions.json");
         await writeFile5(`${path}.tmp`, json, { mode: 384 });
         await rename3(`${path}.tmp`, path);
       } catch (error) {
@@ -14141,7 +14941,7 @@ var Assistant = class {
     };
     this.engine = new AssistantEngine({
       settings: () => this.settings,
-      directory: join14(options.dataDir, "assistant"),
+      directory: join15(options.dataDir, "assistant"),
       secrets,
       ...options.transport ? { transport: options.transport } : {}
     });
@@ -14158,6 +14958,14 @@ var Assistant = class {
       turn: (text6, grant) => this.review.noteTurn(grant.sessionId, text6, { role: grant.role, parentSessionId: grant.parentSessionId }),
       publishBadge: (sessionId, badge) => {
         void this.harness.setBadge(sessionId, "model", badge);
+      },
+      // A fan-out keeps a subscription-like upstream (an address the person marked flat-rate) at its parallel cap.
+      parallelCap: (upstream) => {
+        try {
+          return this.routing.settings.flat.includes(`host:${new URL(upstream.baseUrl).host}`) ? DEFAULT_MAX_PARALLEL : null;
+        } catch {
+          return null;
+        }
       },
       ...options.transport ? { transport: options.transport } : {},
       ...options.catalogTransport ? { catalogTransport: options.catalogTransport } : {},
@@ -14577,8 +15385,8 @@ function retryStored(host, failed, apply, delays = RETRY_DELAYS_MS) {
 
 // src/service/main.ts
 var resolveReady;
-var ready = new Promise((resolve6) => {
-  resolveReady = resolve6;
+var ready = new Promise((resolve7) => {
+  resolveReady = resolve7;
 });
 var assistant = null;
 var str2 = (value) => typeof value === "string" ? value : "";

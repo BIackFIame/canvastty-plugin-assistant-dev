@@ -131,6 +131,20 @@ export class BenchmarkIndex {
     return result;
   }
 
+  /**
+   * The measured speed of exactly this model and effort (the same exact-row rule as scores: a speed never moves to
+   * another effort or version): the newest Artificial Analysis row for it that states one. Null: unknown.
+   */
+  speed(bare: string, effort: ReasoningEffort | null, context: MatchContext): MeasuredSpeed | null {
+    const resolved = effectiveEffort(bare, effort, context);
+    let found: MeasuredSpeed | null = null;
+    for (const row of this.rows(bare)) {
+      if (row.thinking !== null || row.reasoningEffort !== resolved.effort || !row.speed) continue;
+      if (!found || row.source.fetchedAt > found.fetchedAt) found = { ...row.speed, fetchedAt: row.source.fetchedAt, effort: resolved.effort, label: sourceLabel(row) };
+    }
+    return found;
+  }
+
   /** models.dev's entry for an OpenAI-compatible upstream: the provider whose stated API origin is the upstream's. */
   catalogModel(upstreamModelId: string, context: MatchContext): CatalogModel | null {
     if (context.openRouter || !context.origin) return null;
@@ -140,6 +154,18 @@ export class BenchmarkIndex {
     const found = this.catalog.models.filter(model => providers.has(model.providerId) && model.modelId.toLowerCase() === lower);
     return found.length === 1 ? found[0]! : null;
   }
+}
+
+/** A row's stated speed, with the effort and source it belongs to. */
+export interface MeasuredSpeed { outputTps: number; latencyS: number | null; fetchedAt: number; effort: ReasoningEffort | null; label: string }
+
+/**
+ * Seconds one model call takes: time to its first chunk plus its output at the measured speed (latency counts only
+ * when known). Null when the speed is unknown: callers treat that as neutral, never as fast or slow.
+ */
+export function callSeconds(speed: Pick<MeasuredSpeed, 'outputTps' | 'latencyS'> | null, outputTokens: number, withLatency = true): number | null {
+  if (!speed) return null;
+  return (withLatency ? speed.latencyS ?? 0 : 0) + outputTokens / speed.outputTps;
 }
 
 export interface Score {
