@@ -7,6 +7,7 @@ import type { AssistantSettings, DataClass } from '../shared/settings.ts';
 import { ReviewCircuit } from '../engine/bands.ts';
 import type { ShadowLabel } from '../engine/ShadowRecorder.ts';
 import { askCommandReview, reviewSummary, type CommandReviewEngine, type CommandReviewVerdict } from './commandReview.ts';
+import { sha256, verifyTestRun } from './testChain.ts';
 import { computeCommandFacts, defaultGit, factPhrases, isCredentialPath, isProtectedRel, pathContext, realish, SessionWriteTracker, commandFromArgv, type CommandFacts, type GitRunner, type ReviewAction } from './commandFacts.ts';
 import { tier1, type TIER1_DENY_RULES } from './commandRules.ts';
 import { collectReferencedFiles } from './referencedFiles.ts';
@@ -133,9 +134,13 @@ interface SessionState {
   dataClass: DataClass | null;
   /** From the launch triage (§3.1a step 7); `pending` while it runs, which counts as strict. */
   strict: boolean | 'pending';
+  /** Whole contents this card's review allowed (real path → sha256), for the trust chain's test commands. */
+  reviewed: Map<string, string>;
 }
 
 const MAX_SESSIONS = 512;
+/** Whole contents remembered per card for test commands. */
+const MAX_REVIEWED = 256;
 /** Per card: the first user turn and the latest few; each text at most this long (the engine bounds it again). */
 const MAX_TURNS = 5;
 const MAX_REQUEST_CHARS = 16_384;
@@ -365,7 +370,7 @@ export class ReviewService {
   private state(sessionId: string): SessionState {
     let state = this.sessions.get(sessionId);
     if (!state) {
-      state = { suspect: false, launchTask: null, turns: [], subagent: false, parent: null, dataClass: null, strict: false };
+      state = { suspect: false, launchTask: null, turns: [], subagent: false, parent: null, dataClass: null, strict: false, reviewed: new Map() };
       this.sessions.set(sessionId, state);
       // The oldest session goes from every per-session map, not only this one.
       while (this.sessions.size > MAX_SESSIONS) this.forget(this.sessions.keys().next().value!);
@@ -523,8 +528,14 @@ export class ReviewService {
       const verdict = await run();
       const chained = !verdict.act && !signal.aborted && this.trustChain(request, state, rules, facts, verdict);
       if (chained) {
+        this.noteReviewed(state, request, action, visible);
         this.rememberVerdict(request.sessionId, summary, mode, { ...verdict, act: 'allow', outcome: 'allow', by: 'assistant', reason: 'trust-chain' }, 'allow');
         return { verdict: 'allow', reason: 'CanvasTTY Assistant: allowed by the trust chain: the person asked its orchestrator for this task, and this writes a new file inside the project that the review is sure serves it' };
+      }
+      const tested = !verdict.act && !signal.aborted ? await this.testChain(request, state, rules, facts, verdict, action, signal) : null;
+      if (tested) {
+        this.rememberVerdict(request.sessionId, summary, mode, { ...verdict, act: 'allow', outcome: 'allow', by: 'assistant', reason: 'trust-chain-test' }, 'allow');
+        return { verdict: 'allow', reason: `CanvasTTY Assistant: allowed by the trust chain: the person asked its orchestrator for this task, and this runs the tests with ${tested.runner === 'node' ? 'node --test' : 'pytest'} on files the review saw whole in this card or that are committed and unchanged (${tested.files.length} file${tested.files.length === 1 ? '' : 's'})` };
       }
       if (signal.aborted && !verdict.act) {
         const answer = ask('unavailable');
@@ -532,6 +543,7 @@ export class ReviewService {
         return answer;
       }
       if (verdict.act === 'allow') {
+        this.noteReviewed(state, request, action, visible);
         this.rememberVerdict(request.sessionId, summary, mode, verdict, 'allow');
         return { verdict: 'allow', reason: verdict.by === 'rule' ? 'CanvasTTY Assistant: a read-only command' : 'CanvasTTY Assistant: both reviews agree it serves the task' };
       }
@@ -583,6 +595,40 @@ export class ReviewService {
       const abs = realish(resolve(path));
       return texts.some(text => namesFile(text, abs)) && folders.some(dir => inside(dir, abs));
     });
+  }
+
+  /** An allowed write whose whole content the review saw: its content hash, for a later test command of this card. */
+  private noteReviewed(state: SessionState, request: DecideRequest, action: ReviewAction, visible: boolean): void {
+    if (!visible || action.inputTruncated || typeof action.content !== 'string') return;
+    const raw = record(request.input);
+    const path = raw ? [raw.file_path, raw.filePath, raw.path].find((value): value is string => typeof value === 'string' && value.length > 0) : undefined;
+    if (!path || request.tool.name === 'apply_patch' || request.tool.name === 'patch') return;
+    const abs = realish(resolve(isAbsolute(path) ? path : join(action.commandCwd ?? request.agentCwd ?? request.cwd, path)));
+    state.reviewed.delete(abs);
+    state.reviewed.set(abs, sha256(action.content));
+    while (state.reviewed.size > MAX_REVIEWED) state.reviewed.delete(state.reviewed.keys().next().value!);
+  }
+
+  /**
+   * The trust chain for a test command (the same switch and the same chain from the person as for new files): a
+   * plain known test runner, every file it runs seen whole by this card's review with the same content now, or
+   * tracked in git and unchanged (testChain.ts), the review at least TRUST_CHAIN_NAMED_MIN_SERVES sure it serves the
+   * request, and every risk but effect_hidden at most TRUST_CHAIN_LOW_RISK. Nothing it cannot determine.
+   */
+  private async testChain(request: DecideRequest, state: SessionState, rules: ReturnType<typeof tier1>, facts: CommandFacts, verdict: CommandReviewVerdict, action: ReviewAction, signal: AbortSignal): Promise<{ runner: string; files: string[] } | null> {
+    if (this.options.trustChain?.() !== true) return null;
+    if (!state.subagent || !state.parent || state.suspect || this.circuit.personOnly(request.sessionId)) return null;
+    const above = this.sessions.get(state.parent);
+    if (!above || above.subagent || !this.ownTexts(above).length) return null;
+    if (rules.verdict || facts.kind !== 'execute' || facts.actionClass !== 'build_test' || facts.network !== 'none' || facts.truncated || action.inputTruncated
+      || facts.writesOutside || facts.credentialAccess || facts.protectedWrite || facts.pipeToShell || facts.subshell || facts.background || facts.inlineCode || facts.encoded || facts.unresolvedVariables) return null;
+    if (verdict.outcome === 'deny' || verdict.modelDenied || typeof verdict.probability !== 'number' || verdict.probability < TRUST_CHAIN_NAMED_MIN_SERVES) return null;
+    const risks = Object.entries(verdict.risks ?? {}).filter(([id]) => id !== 'effect_hidden');
+    if (!risks.length || risks.some(([, p]) => typeof p !== 'number' || p > TRUST_CHAIN_LOW_RISK)) return null;
+    if (!action.command) return null;
+    const git = this.options.git === null ? null : this.options.git ?? defaultGit;
+    const checked = await verifyTestRun({ command: action.command, cwd: action.commandCwd ?? request.agentCwd ?? request.cwd, root: request.cwd, reviewed: state.reviewed, git, signal });
+    return checked.ok ? checked : null;
   }
 
   private async ladder(request: DecideRequest, state: SessionState, personRequest: string | null, facts: CommandFacts, rules: ReturnType<typeof tier1>, content: string | null, signal: AbortSignal, contentVisible = false): Promise<CommandReviewVerdict> {

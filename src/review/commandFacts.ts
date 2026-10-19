@@ -185,7 +185,7 @@ export const defaultGit: GitRunner = (cwd, args, signal) => new Promise((resolve
   }, (error, stdout) => error ? reject(error) : resolvePromise(String(stdout)));
 });
 
-interface GitState { repo: boolean; changed: Set<string>; tracked: Set<string> }
+export interface GitState { repo: boolean; changed: Set<string>; tracked: Set<string> }
 
 /**
  * Which of `candidates` (absolute files inside the project) differ from the last commit, through plumbing that never
@@ -195,7 +195,7 @@ interface GitState { repo: boolean; changed: Set<string>; tracked: Set<string> }
  * (`hash-object --no-filters`) and staged changes (`diff-index --cached`). A file under a filter reads as changed:
  * the safe side. An untracked file is changed.
  */
-async function gitState(root: string, candidates: readonly string[], git: GitRunner, signal: AbortSignal): Promise<GitState | null> {
+export async function gitState(root: string, candidates: readonly string[], git: GitRunner, signal: AbortSignal): Promise<GitState | null> {
   try {
     const top = (await git(root, ['rev-parse', '--show-toplevel'], signal)).trim();
     if (!top) return { repo: false, changed: new Set(), tracked: new Set() };
