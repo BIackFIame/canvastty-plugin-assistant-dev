@@ -2,6 +2,12 @@
 
 ## Next
 
+- **Several models on hard turns** (Model: Auto (Jev), request level): consensus Off / Auto (default, only when its
+  expected value beats one strong model) / Always, K 2–3, best of N (off by default), a cap per turn. Drafts from
+  diverse vendors, buffered and reserved against the caps; a strong judge's merged answer is streamed; a tool call
+  passes the single model's answer through; failed or late drafts and a failed judge degrade to what answered.
+- **Measured speed**: Artificial Analysis's output speed and first-chunk time per variant are kept with the catalog
+  (bundled for the rows its page states) and used for plan time on the routing page; unknown speed is neutral.
 - **Trust chain** (command review, off by default, the person's switch on the settings page): a subagent may create
   new files in the project without asking when its orchestrator's task was typed by the person and the review is at
   least 95% sure the file serves it. Never for overwrites, partial edits, paths outside the project, secrets,
