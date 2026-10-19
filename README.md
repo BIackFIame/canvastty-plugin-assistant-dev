@@ -34,6 +34,8 @@ The Assistant only knows the orchestrator's task as **yours** from what reaches 
 - the launcher's **Task** field (Advanced → CanvasTTY Assistant). CanvasTTY limits it to 200 characters;
 - or the turns of an orchestrator on Model: Auto (Jev).
 
+**Tests under the trust chain.** It also lets such a subagent run its tests when the command is a plain known runner (`node --test <files>`, `pytest <files>`, or `npm`/`pnpm`/`yarn test` whose package.json the review saw or git tracks unchanged, with a plain runner as its test script and no pre/post scripts or package-manager config) and every file it runs or imports is one the review allowed whole in this card (same content now) or is committed and unchanged; the review must be at least 75% sure it serves the task, every risk but a hidden effect at most 10%. Shell syntax, packages, dynamic imports, `go test` and `cargo test` still go to you. The review log says `trust-chain-test`.
+
 For a longer task, put its first line in the Task field (with the file names the subagents will create) and the details in your first message to the orchestrator. Without the Task field, an orchestrator on a model account or its own sign-in gets no trust chain, and its subagents' writes go to you as before.
 
 ## For orchestrators
