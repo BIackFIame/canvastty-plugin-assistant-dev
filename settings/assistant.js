@@ -514,15 +514,13 @@
         next.decider = value;
       })))
     );
-    const daily = el("input", { type: "number", name: "auto-daily", min: "0", max: "100", step: "0.01", value: String(settings.dailyUsdCap) });
     const perCard = el("input", { type: "number", name: "auto-per-card", min: "0", max: "100", step: "0.01", value: String(settings.perCardUsdCap) });
     const saveCaps = el("button", { type: "button", textContent: t2.save, name: "auto-caps-save" });
     saveCaps.addEventListener("click", () => save2((next) => {
-      next.dailyUsdCap = Number(daily.value);
       next.perCardUsdCap = Number(perCard.value);
     }));
     section.append(
-      el("div", { className: "row" }, el("span", { className: "label", textContent: t2.daily }), daily, el("span", { textContent: t2.perCard }), perCard, saveCaps),
+      el("div", { className: "row" }, el("span", { className: "label", textContent: t2.perCard }), perCard, saveCaps),
       el("p", { className: "muted", textContent: t2.capsHelp })
     );
     section.append(strategySection(settings, t2, save2));
@@ -929,7 +927,7 @@
       accountsNone: "Not passed by an orchestrator since the Assistant started.",
       flatRate: "flat-rate plan",
       plansSmall: "Prefer plans and subscriptions for small tasks",
-      plansWindow: "within, points of the best",
+      plansWindow: "when its score is close to the best (points)",
       quotaBy: "Quota counted by",
       quotaKind: { tokens: "tokens", prompts: "prompts", unknown: "not known" },
       weights: "Quota weights (model=weight, \u2026; 1 = like the plan's top model)",
@@ -942,12 +940,12 @@
       never: "Never use this CLI on its own sign-in",
       neverList: "Never:",
       choices: "Choices",
-      preferSubs: "Prefer subscriptions with headroom over a cheaper API route, within the quality window",
+      preferSubs: "Prefer a subscription with room left over a cheaper API route of about the same quality",
       newModels: "New models",
       policy: { wait: "Wait for a measured score", provisional: "Provisional score (mapped, \u22125)", explore: "Provisional, and explore 5% of easy tasks" },
-      policyHelp: "A model without its own measured score is not used until you pin or boost it. Provisional maps a score from another source through models measured in both (at least 8, R\xB2 shown in the why-line). Exploration sends a small share of small and medium, low-risk tasks to the best new model and counts its outcomes; after 20 it suggests using or retiring it.",
+      policyHelp: "A model with no measured score is not used until you pin or boost it. Provisional: its score is estimated from another benchmark. Exploration: a few easy tasks try the best new model, and after 20 it suggests keeping or dropping it.",
       pins: "Pins and boosts",
-      pinsHelp: "A pin makes a model answer tasks of that level first; a boost adds points to its score. Both show in every why-line.",
+      pinsHelp: "A pin makes a model take tasks of that level first; a boost adds points to its score. Both are shown with each decision.",
       identity: "Model (catalog id)",
       tier: { small: "small", medium: "medium", large: "large" },
       noTier: "no pin",
@@ -960,7 +958,7 @@
       explored: (e) => `${e.identity}: ${e.ok} of ${e.n} ok${e.incumbent !== null ? `, others ${Math.round(e.incumbent * 100)}%` : ""}`,
       verdict: { pending: "collecting", use: "about as good: use it?", retire: "clearly worse: retired" },
       useIt: "Use it (+5)",
-      recent: "Recent routes",
+      recent: "Recent subagent routes",
       noRecent: "No route decisions yet.",
       right: "Right",
       wrong: "Wrong",
@@ -1011,7 +1009,7 @@
       accountsNone: "\u0421 \u0437\u0430\u043F\u0443\u0441\u043A\u0430 \u0410\u0441\u0441\u0438\u0441\u0442\u0435\u043D\u0442\u0430 \u043E\u0440\u043A\u0435\u0441\u0442\u0440\u0430\u0442\u043E\u0440 \u0438\u0445 \u043D\u0435 \u043F\u0435\u0440\u0435\u0434\u0430\u0432\u0430\u043B.",
       flatRate: "\u0444\u0438\u043A\u0441\u0438\u0440\u043E\u0432\u0430\u043D\u043D\u044B\u0439 \u0442\u0430\u0440\u0438\u0444",
       plansSmall: "\u0414\u043B\u044F \u043C\u0430\u043B\u0435\u043D\u044C\u043A\u0438\u0445 \u0437\u0430\u0434\u0430\u0447 \u043F\u0440\u0435\u0434\u043F\u043E\u0447\u0438\u0442\u0430\u0442\u044C \u043F\u043B\u0430\u043D\u044B \u0438 \u043F\u043E\u0434\u043F\u0438\u0441\u043A\u0438",
-      plansWindow: "\u0432 \u043F\u0440\u0435\u0434\u0435\u043B\u0430\u0445, \u0431\u0430\u043B\u043B\u043E\u0432 \u043E\u0442 \u043B\u0443\u0447\u0448\u0435\u0439",
+      plansWindow: "\u0435\u0441\u043B\u0438 \u0435\u0451 \u043E\u0446\u0435\u043D\u043A\u0430 \u0431\u043B\u0438\u0437\u043A\u0430 \u043A \u043B\u0443\u0447\u0448\u0435\u0439 (\u0431\u0430\u043B\u043B\u043E\u0432)",
       quotaBy: "\u041A\u0432\u043E\u0442\u0430 \u0441\u0447\u0438\u0442\u0430\u0435\u0442\u0441\u044F \u043F\u043E",
       quotaKind: { tokens: "\u0442\u043E\u043A\u0435\u043D\u0430\u043C", prompts: "\u0437\u0430\u043F\u0440\u043E\u0441\u0430\u043C", unknown: "\u043D\u0435\u0438\u0437\u0432\u0435\u0441\u0442\u043D\u043E" },
       weights: "\u0412\u0435\u0441\u0430 \u043A\u0432\u043E\u0442\u044B (\u043C\u043E\u0434\u0435\u043B\u044C=\u0432\u0435\u0441, \u2026; 1 \u2014 \u043A\u0430\u043A \u0443 \u0441\u0442\u0430\u0440\u0448\u0435\u0439 \u043C\u043E\u0434\u0435\u043B\u0438 \u043F\u043B\u0430\u043D\u0430)",
@@ -1024,12 +1022,12 @@
       never: "\u041D\u0438\u043A\u043E\u0433\u0434\u0430 \u043D\u0435 \u0437\u0430\u043F\u0443\u0441\u043A\u0430\u0442\u044C \u044D\u0442\u043E\u0442 CLI \u043D\u0430 \u0435\u0433\u043E \u0441\u043E\u0431\u0441\u0442\u0432\u0435\u043D\u043D\u043E\u043C \u0432\u0445\u043E\u0434\u0435",
       neverList: "\u041D\u0438\u043A\u043E\u0433\u0434\u0430:",
       choices: "\u0412\u044B\u0431\u043E\u0440",
-      preferSubs: "\u041F\u0440\u0435\u0434\u043F\u043E\u0447\u0438\u0442\u0430\u0442\u044C \u043F\u043E\u0434\u043F\u0438\u0441\u043A\u0438 \u0441 \u0437\u0430\u043F\u0430\u0441\u043E\u043C \u0431\u043E\u043B\u0435\u0435 \u0434\u0435\u0448\u0451\u0432\u043E\u043C\u0443 API \u0432 \u043F\u0440\u0435\u0434\u0435\u043B\u0430\u0445 \u043E\u043A\u043D\u0430 \u043A\u0430\u0447\u0435\u0441\u0442\u0432\u0430",
+      preferSubs: "\u041F\u0440\u0435\u0434\u043F\u043E\u0447\u0438\u0442\u0430\u0442\u044C \u043F\u043E\u0434\u043F\u0438\u0441\u043A\u0443 \u0441 \u0437\u0430\u043F\u0430\u0441\u043E\u043C \u0431\u043E\u043B\u0435\u0435 \u0434\u0435\u0448\u0451\u0432\u043E\u043C\u0443 API \u043F\u0440\u0438\u043C\u0435\u0440\u043D\u043E \u0442\u043E\u0433\u043E \u0436\u0435 \u043A\u0430\u0447\u0435\u0441\u0442\u0432\u0430",
       newModels: "\u041D\u043E\u0432\u044B\u0435 \u043C\u043E\u0434\u0435\u043B\u0438",
       policy: { wait: "\u0416\u0434\u0430\u0442\u044C \u0438\u0437\u043C\u0435\u0440\u0435\u043D\u043D\u043E\u0439 \u043E\u0446\u0435\u043D\u043A\u0438", provisional: "\u041F\u0440\u0435\u0434\u0432\u0430\u0440\u0438\u0442\u0435\u043B\u044C\u043D\u0430\u044F \u043E\u0446\u0435\u043D\u043A\u0430 (\u043F\u0435\u0440\u0435\u0441\u0447\u0438\u0442\u0430\u043D\u043D\u0430\u044F, \u22125)", explore: "\u041F\u0440\u0435\u0434\u0432\u0430\u0440\u0438\u0442\u0435\u043B\u044C\u043D\u0430\u044F \u0438 \u043F\u0440\u043E\u0431\u0430 \u043D\u0430 5% \u043F\u0440\u043E\u0441\u0442\u044B\u0445 \u0437\u0430\u0434\u0430\u0447" },
-      policyHelp: "\u041C\u043E\u0434\u0435\u043B\u044C \u0431\u0435\u0437 \u0441\u043E\u0431\u0441\u0442\u0432\u0435\u043D\u043D\u043E\u0439 \u0438\u0437\u043C\u0435\u0440\u0435\u043D\u043D\u043E\u0439 \u043E\u0446\u0435\u043D\u043A\u0438 \u043D\u0435 \u0438\u0441\u043F\u043E\u043B\u044C\u0437\u0443\u0435\u0442\u0441\u044F, \u043F\u043E\u043A\u0430 \u0432\u044B \u0435\u0451 \u043D\u0435 \u0437\u0430\u043A\u0440\u0435\u043F\u0438\u0442\u0435 \u0438\u043B\u0438 \u043D\u0435 \u043F\u043E\u0432\u044B\u0441\u0438\u0442\u0435. \u041F\u0440\u0435\u0434\u0432\u0430\u0440\u0438\u0442\u0435\u043B\u044C\u043D\u0430\u044F \u043E\u0446\u0435\u043D\u043A\u0430 \u043F\u0435\u0440\u0435\u0441\u0447\u0438\u0442\u044B\u0432\u0430\u0435\u0442\u0441\u044F \u0438\u0437 \u0434\u0440\u0443\u0433\u043E\u0433\u043E \u0438\u0441\u0442\u043E\u0447\u043D\u0438\u043A\u0430 \u043F\u043E \u043C\u043E\u0434\u0435\u043B\u044F\u043C, \u0438\u0437\u043C\u0435\u0440\u0435\u043D\u043D\u044B\u043C \u0432 \u043E\u0431\u043E\u0438\u0445 (\u043D\u0435 \u043C\u0435\u043D\u044C\u0448\u0435 8; R\xB2 \u043F\u043E\u043A\u0430\u0437\u0430\u043D \u0432 \u043F\u043E\u044F\u0441\u043D\u0435\u043D\u0438\u0438). \u041F\u0440\u043E\u0431\u0430 \u043E\u0442\u043F\u0440\u0430\u0432\u043B\u044F\u0435\u0442 \u043D\u0435\u0431\u043E\u043B\u044C\u0448\u0443\u044E \u0434\u043E\u043B\u044E \u043C\u0430\u043B\u0435\u043D\u044C\u043A\u0438\u0445 \u0438 \u0441\u0440\u0435\u0434\u043D\u0438\u0445 \u0437\u0430\u0434\u0430\u0447 \u0431\u0435\u0437 \u0440\u0438\u0441\u043A\u0430 \u043B\u0443\u0447\u0448\u0435\u0439 \u043D\u043E\u0432\u043E\u0439 \u043C\u043E\u0434\u0435\u043B\u0438 \u0438 \u0441\u0447\u0438\u0442\u0430\u0435\u0442 \u0440\u0435\u0437\u0443\u043B\u044C\u0442\u0430\u0442\u044B; \u043F\u043E\u0441\u043B\u0435 20 \u043F\u0440\u0435\u0434\u043B\u0430\u0433\u0430\u0435\u0442 \u0438\u0441\u043F\u043E\u043B\u044C\u0437\u043E\u0432\u0430\u0442\u044C \u0435\u0451 \u0438\u043B\u0438 \u0443\u0431\u0440\u0430\u0442\u044C.",
+      policyHelp: "\u041C\u043E\u0434\u0435\u043B\u044C \u0431\u0435\u0437 \u0438\u0437\u043C\u0435\u0440\u0435\u043D\u043D\u043E\u0439 \u043E\u0446\u0435\u043D\u043A\u0438 \u043D\u0435 \u0438\u0441\u043F\u043E\u043B\u044C\u0437\u0443\u0435\u0442\u0441\u044F, \u043F\u043E\u043A\u0430 \u0432\u044B \u0435\u0451 \u043D\u0435 \u0437\u0430\u043A\u0440\u0435\u043F\u0438\u0442\u0435 \u0438\u043B\u0438 \u043D\u0435 \u043F\u043E\u0432\u044B\u0441\u0438\u0442\u0435. \u041F\u0440\u0435\u0434\u0432\u0430\u0440\u0438\u0442\u0435\u043B\u044C\u043D\u0430\u044F: \u043E\u0446\u0435\u043D\u043A\u0430 \u0432\u044B\u0432\u043E\u0434\u0438\u0442\u0441\u044F \u0438\u0437 \u0434\u0440\u0443\u0433\u043E\u0433\u043E \u0431\u0435\u043D\u0447\u043C\u0430\u0440\u043A\u0430. \u041F\u0440\u043E\u0431\u0430: \u043D\u0435\u0441\u043A\u043E\u043B\u044C\u043A\u043E \u043F\u0440\u043E\u0441\u0442\u044B\u0445 \u0437\u0430\u0434\u0430\u0447 \u043F\u0440\u043E\u0431\u0443\u044E\u0442 \u043B\u0443\u0447\u0448\u0443\u044E \u043D\u043E\u0432\u0443\u044E \u043C\u043E\u0434\u0435\u043B\u044C, \u0438 \u043F\u043E\u0441\u043B\u0435 20 \u043E\u043D\u0430 \u043F\u0440\u0435\u0434\u043B\u0430\u0433\u0430\u0435\u0442 \u043E\u0441\u0442\u0430\u0432\u0438\u0442\u044C \u0435\u0451 \u0438\u043B\u0438 \u0443\u0431\u0440\u0430\u0442\u044C.",
       pins: "\u0417\u0430\u043A\u0440\u0435\u043F\u043B\u0435\u043D\u0438\u044F \u0438 \u043F\u043E\u0432\u044B\u0448\u0435\u043D\u0438\u044F",
-      pinsHelp: "\u0417\u0430\u043A\u0440\u0435\u043F\u043B\u0451\u043D\u043D\u0430\u044F \u043C\u043E\u0434\u0435\u043B\u044C \u043F\u0435\u0440\u0432\u043E\u0439 \u043F\u043E\u043B\u0443\u0447\u0430\u0435\u0442 \u0437\u0430\u0434\u0430\u0447\u0438 \u0441\u0432\u043E\u0435\u0433\u043E \u0443\u0440\u043E\u0432\u043D\u044F; \u043F\u043E\u0432\u044B\u0448\u0435\u043D\u0438\u0435 \u0434\u043E\u0431\u0430\u0432\u043B\u044F\u0435\u0442 \u0431\u0430\u043B\u043B\u044B \u043A \u0435\u0451 \u043E\u0446\u0435\u043D\u043A\u0435. \u041E\u0431\u0430 \u0432\u0438\u0434\u043D\u044B \u0432 \u043A\u0430\u0436\u0434\u043E\u043C \u043F\u043E\u044F\u0441\u043D\u0435\u043D\u0438\u0438.",
+      pinsHelp: "\u0417\u0430\u043A\u0440\u0435\u043F\u043B\u0451\u043D\u043D\u0430\u044F \u043C\u043E\u0434\u0435\u043B\u044C \u043F\u0435\u0440\u0432\u043E\u0439 \u043F\u043E\u043B\u0443\u0447\u0430\u0435\u0442 \u0437\u0430\u0434\u0430\u0447\u0438 \u0441\u0432\u043E\u0435\u0433\u043E \u0443\u0440\u043E\u0432\u043D\u044F; \u043F\u043E\u0432\u044B\u0448\u0435\u043D\u0438\u0435 \u0434\u043E\u0431\u0430\u0432\u043B\u044F\u0435\u0442 \u0431\u0430\u043B\u043B\u044B \u043A \u0435\u0451 \u043E\u0446\u0435\u043D\u043A\u0435. \u041E\u0431\u0430 \u043F\u043E\u043A\u0430\u0437\u044B\u0432\u0430\u044E\u0442\u0441\u044F \u0443 \u043A\u0430\u0436\u0434\u043E\u0433\u043E \u0440\u0435\u0448\u0435\u043D\u0438\u044F.",
       identity: "\u041C\u043E\u0434\u0435\u043B\u044C (id \u043A\u0430\u0442\u0430\u043B\u043E\u0433\u0430)",
       tier: { small: "\u043C\u0430\u043B\u0435\u043D\u044C\u043A\u0430\u044F", medium: "\u0441\u0440\u0435\u0434\u043D\u044F\u044F", large: "\u0431\u043E\u043B\u044C\u0448\u0430\u044F" },
       noTier: "\u0431\u0435\u0437 \u0437\u0430\u043A\u0440\u0435\u043F\u043B\u0435\u043D\u0438\u044F",
@@ -1042,7 +1040,7 @@
       explored: (e) => `${e.identity}: \u0443\u0441\u043F\u0435\u0448\u043D\u043E ${e.ok} \u0438\u0437 ${e.n}${e.incumbent !== null ? `, \u0443 \u043E\u0441\u0442\u0430\u043B\u044C\u043D\u044B\u0445 ${Math.round(e.incumbent * 100)}%` : ""}`,
       verdict: { pending: "\u0441\u043E\u0431\u0438\u0440\u0430\u044E \u0434\u0430\u043D\u043D\u044B\u0435", use: "\u043F\u0440\u0438\u043C\u0435\u0440\u043D\u043E \u043D\u0435 \u0445\u0443\u0436\u0435: \u0438\u0441\u043F\u043E\u043B\u044C\u0437\u043E\u0432\u0430\u0442\u044C?", retire: "\u044F\u0432\u043D\u043E \u0445\u0443\u0436\u0435: \u0443\u0431\u0440\u0430\u043D\u0430" },
       useIt: "\u0418\u0441\u043F\u043E\u043B\u044C\u0437\u043E\u0432\u0430\u0442\u044C (+5)",
-      recent: "\u041F\u043E\u0441\u043B\u0435\u0434\u043D\u0438\u0435 \u0440\u0435\u0448\u0435\u043D\u0438\u044F route",
+      recent: "\u041F\u043E\u0441\u043B\u0435\u0434\u043D\u0438\u0435 \u043F\u0443\u0442\u0438 \u0441\u0443\u0431\u0430\u0433\u0435\u043D\u0442\u043E\u0432",
       noRecent: "\u0420\u0435\u0448\u0435\u043D\u0438\u0439 \u043F\u043E\u043A\u0430 \u043D\u0435\u0442.",
       right: "\u0412\u0435\u0440\u043D\u043E",
       wrong: "\u041D\u0435\u0432\u0435\u0440\u043D\u043E",
@@ -1428,8 +1426,8 @@
       autoOnHelp: "Picks a model for each turn of OpenCode cards started with Model: Auto.",
       orKey: "OpenRouter key",
       orKeyHelp: "One key for Jev and for Auto's models. Stored by CanvasTTY, never shown again.",
-      orKeySaved: "saved",
-      orKeyMissing: "not saved",
+      orKeySaved: "Saved",
+      orKeyMissing: "Not saved",
       change: "Save",
       prefer: "Prefer",
       prefCheap: "Cheaper",
@@ -1440,6 +1438,7 @@
       dailyCapHelp: "Auto stops for the day when it is spent.",
       today: "Today",
       todayLine: (usd2, calls) => `$${usd2.toFixed(2)} \xB7 ${calls} calls`,
+      todaySpend: (usd2) => `$${usd2.toFixed(2)}`,
       noDecisions: "No turns routed yet.",
       jevOff: "Jev does not judge tasks now (Task triage is Off).",
       jevOn: "Let Jev decide",
@@ -1491,6 +1490,7 @@
       smartNone: "None",
       smartModel: "Ollama model",
       smartAsk: "While learning, also ask the second reviewer",
+      addLocal: "Add a model on your own server\u2026",
       recent: "Recent reviews",
       noRecent: "Nothing reviewed yet.",
       right: "Right",
@@ -1507,8 +1507,8 @@
       autoOnHelp: "\u0412\u044B\u0431\u0438\u0440\u0430\u0435\u0442 \u043C\u043E\u0434\u0435\u043B\u044C \u043D\u0430 \u043A\u0430\u0436\u0434\u044B\u0439 \u0445\u043E\u0434 \u0432 \u043E\u043A\u043D\u0430\u0445 OpenCode, \u0437\u0430\u043F\u0443\u0449\u0435\u043D\u043D\u044B\u0445 \u0441 \xAB\u041C\u043E\u0434\u0435\u043B\u044C: \u0410\u0432\u0442\u043E\xBB.",
       orKey: "\u041A\u043B\u044E\u0447 OpenRouter",
       orKeyHelp: "\u041E\u0434\u0438\u043D \u043A\u043B\u044E\u0447 \u0434\u043B\u044F Jev \u0438 \u0434\u043B\u044F \u043C\u043E\u0434\u0435\u043B\u0435\u0439 \xAB\u0410\u0432\u0442\u043E\xBB. \u0425\u0440\u0430\u043D\u0438\u0442\u0441\u044F \u0432 CanvasTTY \u0438 \u0431\u043E\u043B\u044C\u0448\u0435 \u043D\u0435 \u043F\u043E\u043A\u0430\u0437\u044B\u0432\u0430\u0435\u0442\u0441\u044F.",
-      orKeySaved: "\u0441\u043E\u0445\u0440\u0430\u043D\u0451\u043D",
-      orKeyMissing: "\u043D\u0435 \u0441\u043E\u0445\u0440\u0430\u043D\u0451\u043D",
+      orKeySaved: "\u0421\u043E\u0445\u0440\u0430\u043D\u0451\u043D",
+      orKeyMissing: "\u041D\u0435 \u0441\u043E\u0445\u0440\u0430\u043D\u0451\u043D",
       change: "\u0421\u043E\u0445\u0440\u0430\u043D\u0438\u0442\u044C",
       prefer: "\u041F\u0440\u0435\u0434\u043F\u043E\u0447\u0442\u0435\u043D\u0438\u0435",
       prefCheap: "\u0414\u0435\u0448\u0435\u0432\u043B\u0435",
@@ -1519,6 +1519,7 @@
       dailyCapHelp: "\u041A\u043E\u0433\u0434\u0430 \u043E\u043D \u043F\u043E\u0442\u0440\u0430\u0447\u0435\u043D, \xAB\u0410\u0432\u0442\u043E\xBB \u043E\u0441\u0442\u0430\u043D\u0430\u0432\u043B\u0438\u0432\u0430\u0435\u0442\u0441\u044F \u0434\u043E \u0437\u0430\u0432\u0442\u0440\u0430.",
       today: "\u0421\u0435\u0433\u043E\u0434\u043D\u044F",
       todayLine: (usd2, calls) => `$${usd2.toFixed(2)} \xB7 \u0432\u044B\u0437\u043E\u0432\u043E\u0432: ${calls}`,
+      todaySpend: (usd2) => `$${usd2.toFixed(2)}`,
       noDecisions: "\u0425\u043E\u0434\u043E\u0432 \u043F\u043E\u043A\u0430 \u043D\u0435 \u0431\u044B\u043B\u043E.",
       jevOff: "\u0421\u0435\u0439\u0447\u0430\u0441 Jev \u043D\u0435 \u0440\u0430\u0437\u0431\u0438\u0440\u0430\u0435\u0442 \u0437\u0430\u0434\u0430\u0447\u0438 (\u0440\u0430\u0437\u0431\u043E\u0440 \u0437\u0430\u0434\u0430\u0447\u0438 \u0432\u044B\u043A\u043B\u044E\u0447\u0435\u043D).",
       jevOn: "\u041F\u0443\u0441\u0442\u044C \u0440\u0435\u0448\u0430\u0435\u0442 Jev",
@@ -1570,6 +1571,7 @@
       smartNone: "\u041D\u0435\u0442",
       smartModel: "\u041C\u043E\u0434\u0435\u043B\u044C Ollama",
       smartAsk: "\u0412\u043E \u0432\u0440\u0435\u043C\u044F \u043E\u0431\u0443\u0447\u0435\u043D\u0438\u044F \u0442\u043E\u0436\u0435 \u0441\u043F\u0440\u0430\u0448\u0438\u0432\u0430\u0442\u044C \u0432\u0442\u043E\u0440\u043E\u0433\u043E \u043F\u0440\u043E\u0432\u0435\u0440\u044F\u044E\u0449\u0435\u0433\u043E",
+      addLocal: "\u0414\u043E\u0431\u0430\u0432\u0438\u0442\u044C \u043C\u043E\u0434\u0435\u043B\u044C \u043D\u0430 \u0441\u0432\u043E\u0451\u043C \u0441\u0435\u0440\u0432\u0435\u0440\u0435\u2026",
       recent: "\u041F\u043E\u0441\u043B\u0435\u0434\u043D\u0438\u0435 \u043F\u0440\u043E\u0432\u0435\u0440\u043A\u0438",
       noRecent: "\u041F\u043E\u043A\u0430 \u043D\u0438\u0447\u0435\u0433\u043E \u043D\u0435 \u043F\u0440\u043E\u0432\u0435\u0440\u044F\u043B\u043E\u0441\u044C.",
       right: "\u0412\u0435\u0440\u043D\u043E",
@@ -1590,7 +1592,7 @@
   var status = document.querySelector("#status");
   var PRESETS = [
     { id: "emulated", label: "Ollama", keyed: false, url: "http://127.0.0.1:11434", model: "qwen3.5:9b" },
-    { id: "typesafe", label: "Jev \xB7 TypeSafe", keyed: true, url: null, model: "jev-1.13.0" },
+    { id: "typesafe", label: "Jev (direct)", keyed: true, url: null, model: "jev-1.13.0" },
     { id: "openrouter", label: "Jev \xB7 OpenRouter", keyed: true, url: null, model: "typesafe/jev-1.13" },
     { id: "vercel", label: "Jev \xB7 Vercel", keyed: true, url: null, model: "typesafe-ai/jev" },
     { id: "laya", label: "Laya", keyed: false, url: "http://127.0.0.1:8000", model: "typed-decisions" },
@@ -1675,7 +1677,7 @@
     const head = el2(
       "div",
       { className: "row" },
-      el2("strong", { textContent: `${preset?.label ?? entry.preset} \xB7 ${entry.model ?? ""}` }),
+      el2("strong", { textContent: preset?.label ?? entry.preset, title: entry.model ?? "" }),
       el2("span", { className: "muted", textContent: `${entry.url ?? ""} \u2014 ${info ? t.where[info.target] : ""}` })
     );
     const controls = el2("div", { className: "row" });
@@ -1734,16 +1736,19 @@
     }
     return item;
   }
+  var LOCAL_PRESETS = /* @__PURE__ */ new Set(["emulated", "laya", "eikos", "custom"]);
+  var showLocal = false;
   function addForm() {
     const form = el2("div", { className: "add" });
     const presetSelect = el2("select", { name: "preset" });
-    for (const preset of PRESETS) presetSelect.append(el2("option", { value: preset.id, textContent: preset.label }));
-    const model = el2("input", { name: "model", placeholder: t.model, value: PRESETS[0].model });
-    const url = el2("input", { name: "url", placeholder: t.url, value: PRESETS[0].url ?? "" });
+    const offered = PRESETS.filter((preset) => showLocal || !LOCAL_PRESETS.has(preset.id));
+    for (const preset of offered) presetSelect.append(el2("option", { value: preset.id, textContent: preset.label }));
+    const model = el2("input", { name: "model", placeholder: t.model, value: offered[0].model });
+    const url = el2("input", { name: "url", placeholder: t.url, value: offered[0].url ?? "" });
     const localInput = el2("input", { type: "checkbox", name: "local", checked: true });
     const local = el2("label", { className: "check" }, localInput, ` ${t.local}`);
     const sync = () => {
-      const preset = PRESETS.find((item) => item.id === presetSelect.value);
+      const preset = PRESETS.find((item) => item.id === presetSelect.value) ?? offered[0];
       model.value = preset.model;
       url.value = preset.url ?? "";
       url.disabled = preset.url === null;
@@ -1772,6 +1777,15 @@
       });
     });
     form.append(presetSelect, model, url, add, local);
+    sync();
+    if (!showLocal) {
+      const more = el2("button", { type: "button", className: "link-button", textContent: t.addLocal, name: "add-local" });
+      more.addEventListener("click", () => {
+        showLocal = true;
+        render();
+      });
+      form.append(more);
+    }
     return form;
   }
   function smartSection() {
@@ -1866,11 +1880,12 @@
       });
     });
     const turns = auto.recent.filter((record) => record.kind === "turn").slice(0, 5);
+    const calls = auto.stats.callsToday;
     const today = el2(
       "div",
       {},
-      el2("div", { textContent: t.todayLine(auto.stats.spentToday, auto.stats.requests) }),
-      ...turns.length ? turns.map((record) => el2("div", { className: "muted", textContent: autoStrings.turnLine(record) })) : [el2("div", { className: "muted", textContent: t.noDecisions })]
+      el2("div", { textContent: typeof calls === "number" ? t.todayLine(auto.stats.spentToday, calls) : t.todaySpend(auto.stats.spentToday) }),
+      ...turns.length ? turns.map((record) => el2("div", { className: "muted", textContent: autoStrings.turnLine(record) })) : auto.stats.spentToday > 0 ? [] : [el2("div", { className: "muted", textContent: t.noDecisions })]
     );
     const notes = [];
     if (auto.jevKey && s.modes["task.route"] === "off") {

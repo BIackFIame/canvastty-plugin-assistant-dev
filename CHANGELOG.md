@@ -2,6 +2,7 @@
 
 ## Next
 
+- **Live run 15 / re-audit**: stalled streams end (keep-alive is not progress; a turn deadline) and are counted at an estimate; compound `;`/`&&` commands and OpenCode's edit (with its old text) under the trust chain; today's calls and the last decisions survive a restart; triage badges follow a language switch; plainer Advanced.
 - **Simpler pages** (UI audit 2026-10-19): the Decision models page opens on a short view (Auto on/off, one OpenRouter
   key, Cheaper/Balanced/Better, daily limit, today's spend and last turns) with everything else under Advanced; the
   key sets up Jev and Auto's OpenRouter upstream; no horizontal overflow; data classes by name; one line per control

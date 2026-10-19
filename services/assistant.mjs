@@ -7905,6 +7905,43 @@ function newFileTargets(toolName, toolInput, truncated, cwd) {
   return targets.every(nothingAt) ? targets : null;
 }
 var MAX_SESSIONS = 512;
+function splitCompound(command) {
+  const parts = [];
+  let current = "";
+  let quote = null;
+  for (let i = 0; i < command.length; i++) {
+    const c = command[i];
+    if (quote) {
+      if (c === quote) quote = null;
+      else if (quote === '"' && /[$`\\!]/u.test(c)) return null;
+      current += c;
+      continue;
+    }
+    if (c === '"' || c === "'") {
+      quote = c;
+      current += c;
+      continue;
+    }
+    if (c === ";") {
+      parts.push(current);
+      current = "";
+      continue;
+    }
+    if (c === "&") {
+      if (command[i + 1] !== "&") return null;
+      i++;
+      parts.push(current);
+      current = "";
+      continue;
+    }
+    if (/[|<>`$()\\\n\r{}]/u.test(c)) return null;
+    current += c;
+  }
+  if (quote) return null;
+  parts.push(current);
+  const trimmed = parts.map((part) => part.trim());
+  return trimmed.length <= 8 && trimmed.every(Boolean) ? trimmed : null;
+}
 function targetOf(request, action) {
   const raw = record(request.input);
   const path = raw ? [raw.file_path, raw.filePath, raw.path].find((value) => typeof value === "string" && value.length > 0) : void 0;
@@ -7932,9 +7969,11 @@ function ownFileResult(request, state, action) {
     const parts = text6.split(from);
     if (parts.length < 2) return null;
     if (edit.replace_all === true || edit.replaceAll === true) return parts.join(to);
+    if (edit.replace_all !== void 0 && typeof edit.replace_all !== "boolean" || edit.replaceAll !== void 0 && typeof edit.replaceAll !== "boolean") return null;
     return parts.length === 2 ? parts.join(to) : null;
   };
-  if (name === "Edit") return (() => {
+  const hasOld = typeof (raw.old_string ?? raw.oldString) === "string" && typeof (raw.new_string ?? raw.newString) === "string";
+  if (name === "Edit" || name === "edit" && hasOld) return (() => {
     const result = apply(current, raw);
     return result === null ? null : { abs, content: result };
   })();
@@ -8380,6 +8419,11 @@ var ReviewService = class {
         this.rememberVerdict(request.sessionId, summary, mode, { ...verdict, act: "allow", outcome: "allow", by: "assistant", reason: "trust-chain-inspect" }, "allow");
         return { verdict: "allow", reason: "CanvasTTY Assistant: allowed by the trust chain: the person asked its orchestrator for this task, and this only looks at files inside the project" };
       }
+      const compound = !verdict.act && !signal.aborted ? await this.compoundChain(request, state, verdict, action, signal) : null;
+      if (compound) {
+        this.rememberVerdict(request.sessionId, summary, mode, { ...verdict, act: "allow", outcome: "allow", by: "assistant", reason: "trust-chain-compound" }, "allow");
+        return { verdict: "allow", reason: `CanvasTTY Assistant: allowed by the trust chain: the person asked its orchestrator for this task, and each of its ${compound} commands is allowed on its own (read-only, inspection or its tests)` };
+      }
       const tested = !verdict.act && !signal.aborted ? await this.testChain(request, state, rules, facts, verdict, action, signal) : null;
       if (tested) {
         this.rememberVerdict(request.sessionId, summary, mode, { ...verdict, act: "allow", outcome: "allow", by: "assistant", reason: "trust-chain-test" }, "allow");
@@ -8495,6 +8539,46 @@ var ReviewService = class {
     const git = this.options.git === null ? null : this.options.git ?? defaultGit;
     const checked = await verifyTestRun({ command: action.command, cwd: action.commandCwd ?? request.agentCwd ?? request.cwd, root: request.cwd, reviewed: state.reviewed, git, signal });
     return checked.ok ? checked : null;
+  }
+  /**
+   * A compound command under the trust chain: only `;` and `&&` between plain commands (splitCompound refuses pipes,
+   * redirects, subshells, expansion and backgrounding). Allowed only when every part is allowed on its own: by
+   * tier 1's read-only list, by the inspection rule, or by the test rule, each part's facts computed alone and the
+   * review's answers for the whole command applied to each. A `cd` is never a part that passes, so no part runs
+   * somewhere else. Returns the number of parts.
+   */
+  async compoundChain(request, state, verdict, action, signal) {
+    if (this.options.trustChain?.() !== true || action.kind !== "execute" || !action.command || action.inputTruncated) return null;
+    if (!state.subagent || !state.parent || state.suspect || this.circuit.personOnly(request.sessionId)) return null;
+    const above = this.sessions.get(state.parent);
+    if (!above || above.subagent || !this.ownTexts(above).length) return null;
+    if (verdict.outcome === "deny" || verdict.modelDenied) return null;
+    const parts = splitCompound(action.command);
+    if (!parts || parts.length < 2) return null;
+    const git = this.options.git === null ? null : this.options.git ?? defaultGit;
+    const home = this.options.home ?? homedir2();
+    const cwd = action.commandCwd ?? request.agentCwd ?? request.cwd;
+    for (const part of parts) {
+      const partAction = { ...action, command: part, commandCwd: cwd };
+      const facts = await computeCommandFacts({
+        action: partAction,
+        root: request.cwd,
+        sessionId: request.sessionId,
+        requestTypedByPerson: false,
+        tracker: this.tracker,
+        git,
+        home,
+        agentRoots: [join6(home, ".claude")],
+        signal: AbortSignal.any([signal, AbortSignal.timeout(REVIEW_LIMITS.factsMs)])
+      });
+      const rules = tier1(facts, { cwd });
+      if (rules.verdict === "allow") continue;
+      if (rules.verdict) return null;
+      if (await this.inspectionChain(request, state, rules, facts, verdict, partAction)) continue;
+      if (await this.testChain(request, state, rules, facts, verdict, partAction, signal)) continue;
+      return null;
+    }
+    return parts.length;
   }
   async ladder(request, state, personRequest, facts, rules, content, signal, contentVisible = false) {
     const settings = this.options.settings();
@@ -12211,7 +12295,9 @@ var TokenStore = class {
 };
 
 // src/auto/router.ts
-var ROUTER_TIMEOUTS = { jevMs: 2500, headersMs: 6e4, firstChunkMs: 6e4, idleMs: 9e4, totalMs: 15 * 6e4, memberMs: 18e4 };
+var ROUTER_TIMEOUTS = { jevMs: 2500, headersMs: 6e4, firstChunkMs: 6e4, idleMs: 9e4, totalMs: 15 * 6e4, memberMs: 18e4, turnMs: 12e4, turnXhighMs: 24e4 };
+var LONG_EFFORTS = /* @__PURE__ */ new Set(["xhigh", "max", "ultra"]);
+var meaningful = (text6) => text6.split("\n").some((line) => line.trim() !== "" && !line.startsWith(":"));
 var ROUTER_LIMITS = Object.freeze({ bodyBytes: 32 * 1048576, perCard: 16, total: 64, attempts: 6, conversations: 1024, leaseMs: 30 * 6e4, recent: 50, logBytes: 512 * 1024, outcomes: 512 });
 var COOLDOWN_MS = Object.freeze({ transient: 3e4, quota: 3e5, missing: 9e5, auth: 9e5, maxRetryAfter: 24 * 36e5 });
 var HttpError = class extends Error {
@@ -12242,6 +12328,8 @@ function percentile3(values, p2) {
 var Spend = class {
   day = "";
   total = 0;
+  /** Paid calls today (kept with the spend, so "today" survives a restart). */
+  calls = 0;
   held = 0;
   cards = /* @__PURE__ */ new Map();
   file;
@@ -12254,6 +12342,7 @@ var Spend = class {
       if (saved.day === this.dayKey() && typeof saved.total === "number" && saved.total >= 0) {
         this.day = saved.day;
         this.total = saved.total;
+        if (Number.isInteger(saved.calls) && saved.calls >= 0) this.calls = saved.calls;
         if (saved.cards && typeof saved.cards === "object") {
           for (const [id, usd2] of Object.entries(saved.cards)) if (typeof usd2 === "number" && usd2 >= 0) this.cards.set(id, { spent: usd2, held: 0 });
         }
@@ -12270,6 +12359,7 @@ var Spend = class {
     if (key !== this.day) {
       this.day = key;
       this.total = 0;
+      this.calls = 0;
       this.held = 0;
       for (const card of this.cards.values()) {
         card.spent = 0;
@@ -12287,6 +12377,10 @@ var Spend = class {
   today() {
     this.roll();
     return this.total;
+  }
+  callsToday() {
+    this.roll();
+    return this.calls;
   }
   ofCard(id) {
     this.roll();
@@ -12318,6 +12412,7 @@ var Spend = class {
         free();
         const usd3 = cost ?? estimate2;
         this.total += usd3;
+        this.calls++;
         card.spent += usd3;
         this.save();
       },
@@ -12331,7 +12426,7 @@ var Spend = class {
   save() {
     if (!this.file) return;
     try {
-      writeFileSync2(`${this.file}.tmp`, JSON.stringify({ day: this.day, total: this.total, cards: Object.fromEntries([...this.cards].map(([id, card]) => [id, card.spent])) }), { mode: 384 });
+      writeFileSync2(`${this.file}.tmp`, JSON.stringify({ day: this.day, total: this.total, calls: this.calls, cards: Object.fromEntries([...this.cards].map(([id, card]) => [id, card.spent])) }), { mode: 384 });
       renameSync3(`${this.file}.tmp`, this.file);
     } catch {
     }
@@ -12340,6 +12435,8 @@ var Spend = class {
 var UsageReader = class {
   rest = "";
   usage = { in: null, out: null, cost: null };
+  /** Characters of answer text, reasoning and tool arguments streamed (for an estimate when usage never comes). */
+  streamedChars = 0;
   push(text6) {
     const lines = (this.rest + text6).split("\n");
     this.rest = lines.pop() ?? "";
@@ -12359,11 +12456,23 @@ var UsageReader = class {
     if (typeof u.cost === "number" && Number.isFinite(u.cost) && u.cost >= 0) this.usage.cost = u.cost;
   }
   line(line) {
-    if (!line.startsWith("data:") || !line.includes('"usage"')) return;
+    if (!line.startsWith("data:")) return;
+    const data = line.slice(5).trim();
+    if (!data || data === "[DONE]") return;
+    let value;
     try {
-      this.json(JSON.parse(line.slice(5).trim()));
+      value = JSON.parse(data);
     } catch {
+      return;
     }
+    for (const choice of Array.isArray(value?.choices) ? value.choices : []) {
+      const delta = choice?.delta ?? {};
+      for (const key of ["content", "reasoning", "reasoning_content"]) if (typeof delta[key] === "string") this.streamedChars += delta[key].length;
+      if (Array.isArray(delta.tool_calls)) {
+        for (const call of delta.tool_calls) if (typeof call?.function?.arguments === "string") this.streamedChars += call.function.arguments.length;
+      }
+    }
+    if (data.includes('"usage"')) this.json(value);
   }
 };
 var AutoRouter = class {
@@ -12410,6 +12519,22 @@ var AutoRouter = class {
     this.salt = this.loadSalt();
     this.spend = new Spend(deps.directory, this.now);
     this.loadOutcomes();
+    this.loadRecent();
+  }
+  /** The last decisions from the log (no text in it), so the page shows them after a restart too. */
+  loadRecent() {
+    if (!this.deps.directory) return;
+    try {
+      const lines = readFileSync7(join13(this.deps.directory, "decisions.jsonl"), "utf8").trim().split("\n").slice(-ROUTER_LIMITS.recent);
+      for (const line of lines.reverse()) {
+        try {
+          const record4 = JSON.parse(line);
+          if (record4 && typeof record4.at === "number" && typeof record4.kind === "string") this.recentRecords.push(record4);
+        } catch {
+        }
+      }
+    } catch {
+    }
   }
   outcomesFile() {
     return this.deps.directory ? join13(this.deps.directory, "fanout-outcomes.json") : null;
@@ -12570,7 +12695,7 @@ var AutoRouter = class {
     return [...this.recentRecords];
   }
   statsView() {
-    return { ...this.stats, hosts: [...this.hosts], spentToday: Math.round(this.spend.today() * 1e6) / 1e6, listening: !!this.server, cards: this.tokens.size };
+    return { ...this.stats, hosts: [...this.hosts], spentToday: Math.round(this.spend.today() * 1e6) / 1e6, callsToday: this.spend.callsToday(), listening: !!this.server, cards: this.tokens.size };
   }
   // ---------------------------------------------------------------------------------------------------------------
   // Requests
@@ -12997,26 +13122,47 @@ var AutoRouter = class {
         take(first.value);
         response.write(first.value);
         let failed = false;
-        for (; ; ) {
+        let stalled = null;
+        const idle = () => {
           clearTimeout(timer);
-          timer = setTimeout(() => attempt.abort(), stream ? this.timeouts.idleMs : this.timeouts.totalMs);
-          let next;
-          try {
-            next = await reader.read();
-          } catch {
-            failed = true;
-            break;
+          timer = setTimeout(() => {
+            stalled ??= "idle";
+            attempt.abort();
+          }, stream ? this.timeouts.idleMs : this.timeouts.totalMs);
+        };
+        idle();
+        const turnLimit = entry.effort && LONG_EFFORTS.has(entry.effort) ? this.timeouts.turnXhighMs : this.timeouts.turnMs;
+        const deadline = setTimeout(() => {
+          stalled ??= "deadline";
+          attempt.abort();
+        }, stream ? turnLimit : this.timeouts.totalMs);
+        try {
+          for (; ; ) {
+            let next;
+            try {
+              next = await reader.read();
+            } catch {
+              failed = true;
+              break;
+            }
+            if (next.done) break;
+            if (stalled) {
+              failed = true;
+              break;
+            }
+            take(next.value);
+            if (!stream || meaningful(Buffer.from(next.value).toString("utf8"))) idle();
+            if (!response.write(next.value)) await new Promise((resolve9) => {
+              response.once("drain", resolve9);
+              response.once("close", resolve9);
+            });
+            if (response.destroyed) {
+              failed = true;
+              break;
+            }
           }
-          if (next.done) break;
-          take(next.value);
-          if (!response.write(next.value)) await new Promise((resolve9) => {
-            response.once("drain", resolve9);
-            response.once("close", resolve9);
-          });
-          if (response.destroyed) {
-            failed = true;
-            break;
-          }
+        } finally {
+          clearTimeout(deadline);
         }
         if (stream) usage.end();
         else {
@@ -13028,15 +13174,24 @@ var AutoRouter = class {
         record4.tokensIn = usage.usage.in;
         record4.tokensOut = usage.usage.out;
         this.sawOutput(grant.sessionId, usage.usage.out);
-        const cost = this.costOf(entry, usage.usage);
+        let cost = this.costOf(entry, usage.usage);
+        if (cost === null && (entry.priceIn !== null || entry.priceOut !== null)) {
+          cost = (payload.length / 4 * (entry.priceIn ?? 0) + usage.streamedChars / 4 * (entry.priceOut ?? 0)) / 1e6;
+          record4.costEstimated = true;
+          record4.tokensOut ??= Math.ceil(usage.streamedChars / 4);
+        }
         record4.costUsd = cost;
         reservation.commit(cost);
         if (failed && !controller.signal.aborted && !response.destroyed) {
-          response.write(stream ? `data: ${JSON.stringify({ error: { message: "Auto (Jev): the upstream stopped in the middle of the answer.", type: "canvastty_auto", code: "upstream_interrupted" } })}
+          const message = stalled === "deadline" ? "Auto (Jev): the answer took longer than this turn may take; it was ended." : stalled === "idle" ? "Auto (Jev): the upstream sent nothing new for too long; the answer was ended." : "Auto (Jev): the upstream stopped in the middle of the answer.";
+          response.write(stream ? `data: ${JSON.stringify({ error: { message, type: "canvastty_auto", code: stalled === "deadline" ? "turn_deadline" : stalled === "idle" ? "upstream_idle" : "upstream_interrupted" } })}
+
+data: [DONE]
 
 ` : "");
-          record4.status = 502;
-          record4.reason ||= "interrupted";
+          record4.status = stalled === "deadline" ? 504 : 502;
+          if (stalled) record4.reason = stalled === "deadline" ? "turn_deadline" : "upstream_idle";
+          else record4.reason ||= "interrupted";
         } else record4.status = controller.signal.aborted ? 499 : 200;
         response.end();
         return;
@@ -15168,6 +15323,8 @@ var Assistant = class {
   routing;
   /** Each card's effective data class, so a subagent's can be clamped to its parent's. */
   classes = /* @__PURE__ */ new Map();
+  /** Each card's triage advice, so its badge can be written again in another language. */
+  triaged = /* @__PURE__ */ new Map();
   constructor(options) {
     this.host = options.host;
     this.settingsReadable = options.settingsUnavailable !== true;
@@ -15281,6 +15438,7 @@ var Assistant = class {
     this.harness.setLocale(locale);
     this.auto.setLocale(locale);
     this.review.setLocale(locale);
+    for (const [sessionId, advice] of this.triaged) void this.harness.setBadge(sessionId, "triage", triageBadge(advice, this.harness.strings));
     return locale;
   }
   /** A card's effective data class (its launch's, else the default). */
@@ -15328,6 +15486,7 @@ var Assistant = class {
       this.sessions.delete(session.id);
       this.review.forget(session.id);
       this.classes.delete(session.id);
+      this.triaged.delete(session.id);
       this.auto.sessionClosed(session.id);
       return;
     }
@@ -15408,6 +15567,9 @@ var Assistant = class {
       return;
     }
     this.review.noteTriage(sessionId, advice.advice.reviewStrict);
+    this.triaged.delete(sessionId);
+    this.triaged.set(sessionId, advice.advice);
+    while (this.triaged.size > 512) this.triaged.delete(this.triaged.keys().next().value);
     await this.harness.setBadge(sessionId, "triage", triageBadge(advice.advice, this.harness.strings));
   }
   /** task.route + the policy. `kind` says why there is no advice (off, learning, no answer). */
