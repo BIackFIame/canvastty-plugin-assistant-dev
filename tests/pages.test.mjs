@@ -433,3 +433,45 @@ test('decision models page: "Where agents run" — plans with windows and aliase
   const shape = value => typeof value === 'function' ? 'fn' : value && typeof value === 'object' ? Object.fromEntries(Object.keys(value).sort().map(key => [key, shape(value[key])])) : typeof value;
   assert.deepEqual(shape(ROUTE_PAGE_STRINGS.ru), shape(ROUTE_PAGE_STRINGS.en));
 });
+
+test('decision models page: several models on hard turns — consensus Off/Auto/Always (Auto by default), K, best of N off by default, cap per turn; fan-outs in recent decisions; ru/en', async () => {
+  const { DEFAULT_ASSISTANT_SETTINGS } = await import('../src/shared/settings.ts');
+  const at = Date.UTC(2026, 9, 19, 9, 0, 0);
+  const record = (extra) => ({ at, session: 'abcd1234', conversation: 'c', turn: 't', kind: 'turn', source: 'jev', tier: 'large', taskType: 'research', difficulty: 'large', confidence: 0.05, why: 'best_score', upstream: 'or', model: 'a/strong', effort: null, score: 70, scoreSource: 'Artificial Analysis v4.3.2', priceIn: 5, priceOut: 25, attempts: 1, failovers: [], status: 200, reason: 'jev', ttfbMs: 300, totalMs: 900, tokensIn: 10, tokensOut: 2, costUsd: 0.0008, tradeoff: null, ...extra });
+  const drafts = [{ upstream: 'or', model: 'a/strong', effort: null, status: 'text', http: 200, ms: 10, costUsd: 0.0002 }, { upstream: 'or', model: 'b/swift', effort: null, status: 'text', http: 200, ms: 10, costUsd: 0.0002 }, { upstream: 'or', model: 'c/steady', effort: null, status: 'timeout', http: 200, ms: 10, costUsd: null }];
+  const auto = {
+    settings: { upstreams: [], preference: 'balanced', cheaperFallback: false, decider: 'jev', dailyUsdCap: 1, perCardUsdCap: 0.4, catalog: { autoRefresh: true, refreshHours: 168 } },
+    readable: true, keys: {},
+    recent: [record({ strategy: 'consensus', strategyWhy: 'consensus_pays', fanOut: { kind: 'consensus', estimateUsd: 0.28, drafts, judge: { upstream: 'or', model: 'a/strong' }, outcome: 'merged' } })],
+    stats: { requests: 4, turns: 1, continuations: 0, small: 0, jevAsked: 1, jevAnswered: 1, rules: 0, leaseReuses: 0, failovers: 0, fanOuts: 1, merged: 1, fanOutToolCalls: 0, fanOutDegraded: 0, judgeFailed: 0, hosts: [], spentToday: 0.0008, listening: true, cards: 1 }
+  };
+  const ui = page('settings/assistant.js', {
+    state: { settings: DEFAULT_ASSISTANT_SETTINGS, status: { enabled: false, backends: [] }, slots: {}, checks: {}, recent: [] },
+    'auto.state': auto, 'auto.save': ({ settings }) => settings
+  }, { secrets: { set: async () => undefined, delete: async () => undefined } });
+  await settle();
+  ui.context('en', 'sage');
+  const text = ui.app.text();
+  assert.match(text, /Several models on hard turns/u);
+  assert.match(text, /Consensus Off Auto: only when it pays Always for hard turns/u);
+  assert.match(text, /consensus, merged, 2 of 3 drafts/u);
+  assert.match(text, /Several models: 1 turns, 1 merged/u);
+  const all = ui.app.all();
+  const byName = name => all.find(node => node.name === name);
+  assert.equal(byName('auto-consensus').value ?? 'auto', 'auto', 'an older service (no strategy): the defaults');
+  assert.equal(byName('auto-best-of-n').checked, false, 'best of N is off unless turned on');
+  byName('auto-consensus').value = 'always';
+  for (const listener of byName('auto-consensus').listeners.change) listener();
+  await settle();
+  assert.deepEqual(ui.requests.filter(r => r.method === 'auto.save').at(-1).params.settings.strategy, { consensus: 'always', k: 3, bestOfN: false, turnUsdCap: 1 });
+  byName('auto-turn-cap').value = '0.5';
+  byName('auto-turn-cap-save').click();
+  await settle();
+  assert.equal(ui.requests.filter(r => r.method === 'auto.save').at(-1).params.settings.strategy.turnUsdCap, 0.5);
+  ui.context('ru', 'night');
+  const ru = ui.app.text();
+  assert.match(ru, /Несколько моделей на сложных ходах/u);
+  assert.match(ru, /консенсус, сведено, черновиков: 2 из 3/u);
+  assert.match(ru, /Лучший из N|лучший из N/u);
+  assert.doesNotMatch(ru, /Several models|Consensus|merged|drafts|best of N|per turn/u, 'no English left in the strategy rows');
+});
