@@ -2,6 +2,8 @@
 
 ## Next
 
+- **Trust chain: inspection and own files** (live run 14): plain read-only inspection inside the project, and rewrites
+  of a file the card wrote whole earlier and nobody changed since, reviewed as the whole resulting file.
 - **Trust chain for tests** (live run 13): with the trust chain on, a subagent may run a plain known test runner when
   every file it runs or imports was allowed whole in this card (same content now) or is committed and unchanged.
 - **Several models on hard turns** (Model: Auto (Jev), request level): consensus Off / Auto (default, only when its

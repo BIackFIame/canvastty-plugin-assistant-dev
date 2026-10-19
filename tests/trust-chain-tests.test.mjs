@@ -194,3 +194,127 @@ test('pure: runner parsing, import reading, pytest with conftest', async () => {
   writeFileSync(join(project, 'pytest.ini'), '[pytest]\naddopts = -p evil\n');
   assert.equal((await verify(reviewed)).ok, false, 'pytest options or plugins in its config');
 });
+
+// ---------------------------------------------------------------------------------------------------------------
+// Live run 14: inspection, and rewriting the card's own file
+// ---------------------------------------------------------------------------------------------------------------
+
+/** Run 14's answer for `ls -ld "<abs>/code"`: read_only, serves 0.46 ("not asked for"), effect_hidden 0.12. */
+const LS_ANSWERS = answersOf(0.46, 0.03, { effect_hidden: 0.12 });
+
+test('live run 14: plain inspection inside the project is allowed under the trust chain; anything else is not', async () => {
+  const { project, code, review, write, run } = setup({ commandAnswers: LS_ANSWERS });
+  await write('slugify.mjs', SLUGIFY);
+  const allowed = [`ls -ld "${code}"`, 'ls -la', 'pwd', 'cat slugify.mjs', 'head -n 5 slugify.mjs', 'tail -3 slugify.mjs', 'wc -l slugify.mjs', 'git status --short', 'git diff --stat', 'git log --oneline -5', `ls '${project}'`];
+  for (const command of allowed) {
+    const answer = await run(command);
+    assert.equal(answer?.verdict, 'allow', `${command}: ${JSON.stringify(answer)}`);
+  }
+  assert.ok(review.recent().some(entry => entry.reason === 'trust-chain-inspect'), 'the log says why');
+  writeFileSync(join(project, '.env'), 'X=1\n');
+  for (const command of ['cat ../.env', 'ls ../..', `cat ${join(base, 'home')}/x`, 'ls /etc', 'cat slugify.mjs > out.txt', 'cat slugify.mjs | head', 'ls *.mjs', 'ls $HOME', 'cat "$(echo x)"', 'git -c core.pager=less log',
+    'git log --output=x', 'git diff --ext-diff', 'git log --show-signature', 'git push', 'cat ../.git/config', 'ls ../.git', 'LS_COLORS=1 ls', 'rm slugify.mjs', 'cat', 'head -c 5 slugify.mjs', 'find . -name x']) {
+    const answer = await run(command);
+    // (Tier 1's own read-only list may allow some on its own, as before; the chain adds none of these.)
+    assert.ok(answer?.verdict !== 'allow' || review.recent()[0].reason !== 'trust-chain-inspect', command);
+  }
+  // A repository config that would run a program on diff or log: git is refused there.
+  writeFileSync(join(project, '.git', 'config'), `${'[core]\n\tbare = false\n'}[diff]\n\texternal = /tmp/x\n`);
+  const diff = await run('git diff --stat');
+  assert.ok(diff?.verdict !== 'allow' || review.recent()[0].reason !== 'trust-chain-inspect', 'not through the chain (tier 1 has its own list)');
+  assert.notEqual((await run('git log --oneline -5'))?.verdict === 'allow' && review.recent()[0].reason === 'trust-chain-inspect', true);
+  // With another risk above 0.1, or the switch off: as before.
+  const risky = setup({ commandAnswers: answersOf(0.46, 0.03, { effect_hidden: 0.12, exfiltration: 0.3 }) });
+  assert.notEqual((await risky.run(`ls -ld "${risky.code}"`))?.verdict, 'allow', 'tier 1 refuses quotes, so the model and the chain decide: a risk above 0.1');
+  const off = setup({ on: false, commandAnswers: LS_ANSWERS });
+  assert.notEqual((await off.run(`ls -ld "${off.code}"`))?.verdict, 'allow');
+});
+
+/** The rewrite as a whole-file Write (CanvasTTY core c82a5ff4 sends OpenCode's write as `Write`), or Claude's Edit. */
+function rewrite(ctx, tool, file, input) {
+  const path = join(ctx.code, file);
+  return ctx.review.decide({ event: 'pre-tool', sessionId: 'c13', provider: 'opencode', role: 'agent', cwd: ctx.project, agentCwd: ctx.code, canAsk: false,
+    tool: { name: tool, kind: 'edit', command: null, paths: [path] }, input: { file_path: path, ...input }, truncated: false }, 10_000).then(answer => {
+    if (answer?.verdict === 'allow') writeFileSync(path, input.content ?? '');
+    return answer;
+  });
+}
+/** Run 14's answers for the rewrite: serves 0.97, effect_hidden 0.21, others ≤ 0.06 → verify, no second reviewer. */
+function verifyEngineSetup(extra = {}) {
+  const ctx = setup(extra);
+  return ctx;
+}
+
+test('live run 14: the subagent rewrites its own test file (unchanged since its reviewed write): allowed as trust-chain-own-file', async () => {
+  const ctx = verifyEngineSetup();
+  await ctx.write('slugify.mjs', SLUGIFY);
+  await ctx.write('slugify.test.mjs', SLUG_TEST);
+  const fixed = SLUG_TEST.replace("' Hello World '", "' Hello  World '");
+  const answer = await rewrite(ctx, 'Write', 'slugify.test.mjs', { content: fixed });
+  assert.equal(answer?.verdict, 'allow', JSON.stringify(answer));
+  assert.match(answer.reason, /rewrites a file this card wrote earlier/u);
+  assert.equal(ctx.review.recent()[0].reason, 'trust-chain-own-file');
+  // The new content is what counts now: the test command over it passes again, and a second rewrite too.
+  assert.equal((await ctx.run('node --test slugify.test.mjs'))?.verdict, 'allow');
+  assert.equal((await rewrite(ctx, 'Write', 'slugify.test.mjs', { content: `${fixed}// again\n` }))?.verdict, 'allow');
+});
+
+test('own-file rewrite: Claude\'s Edit is reviewed as the whole resulting file; an ambiguous bridge edit, a changed, foreign or protected file is not allowed', async () => {
+  {
+    const ctx = setup();
+    await ctx.write('slugify.mjs', SLUGIFY);
+    await ctx.write('slugify.test.mjs', SLUG_TEST);
+    const path = join(ctx.code, 'slugify.test.mjs');
+    const answer = await ctx.review.decide({ event: 'pre-tool', sessionId: 'c13', provider: 'claude', role: 'agent', cwd: ctx.project, agentCwd: ctx.code, canAsk: false,
+      tool: { name: 'Edit', kind: 'edit', command: null, paths: [path] }, input: { file_path: path, old_string: "'basic'", new_string: "'basic case'" }, truncated: false }, 10_000);
+    assert.equal(answer?.verdict, 'allow', JSON.stringify(answer));
+    assert.equal(ctx.review.recent()[0].reason, 'trust-chain-own-file');
+    writeFileSync(path, SLUG_TEST.replace("'basic'", "'basic case'"));
+    assert.equal((await ctx.run('node --test slugify.test.mjs'))?.verdict, 'allow', 'the recorded hash is the resulting file');
+    // An old string that is not there (or twice): nothing to compute, not allowed.
+    const missing = await ctx.review.decide({ event: 'pre-tool', sessionId: 'c13', provider: 'claude', role: 'agent', cwd: ctx.project, agentCwd: ctx.code, canAsk: false,
+      tool: { name: 'Edit', kind: 'edit', command: null, paths: [path] }, input: { file_path: path, old_string: 'nowhere', new_string: 'x' }, truncated: false }, 10_000);
+    assert.notEqual(missing?.verdict, 'allow');
+  }
+  {
+    const ctx = setup();
+    await ctx.write('slugify.test.mjs', SLUG_TEST);
+    // OpenCode's bridge shape on an existing file: write or partial edit cannot be told apart.
+    assert.notEqual((await rewrite(ctx, 'edit', 'slugify.test.mjs', { content: SLUG_TEST }))?.verdict, 'allow');
+  }
+  {
+    const ctx = setup();
+    await ctx.write('slugify.test.mjs', SLUG_TEST);
+    writeFileSync(join(ctx.code, 'slugify.test.mjs'), `${SLUG_TEST}// someone else\n`);
+    assert.notEqual((await rewrite(ctx, 'Write', 'slugify.test.mjs', { content: SLUG_TEST }))?.verdict, 'allow', 'changed by someone else since review');
+  }
+  {
+    const ctx = setup();
+    writeFileSync(join(ctx.code, 'other.mjs'), 'export const x = 1;\n');
+    assert.notEqual((await rewrite(ctx, 'Write', 'other.mjs', { content: 'export const x = 2;\n' }))?.verdict, 'allow', 'not written by this card');
+  }
+  {
+    const ctx = setup();
+    mkdirSync(join(ctx.project, '.github', 'workflows'), { recursive: true });
+    const path = join(ctx.project, '.github', 'workflows', 'ci.yml');
+    const first = await ctx.review.decide({ event: 'pre-tool', sessionId: 'c13', provider: 'opencode', role: 'agent', cwd: ctx.project, agentCwd: ctx.code, canAsk: false,
+      tool: { name: 'Write', kind: 'edit', command: null, paths: [path] }, input: { file_path: path, content: 'on: push\n' }, truncated: false }, 10_000);
+    if (first?.verdict === 'allow') writeFileSync(path, 'on: push\n');
+    const again = await ctx.review.decide({ event: 'pre-tool', sessionId: 'c13', provider: 'opencode', role: 'agent', cwd: ctx.project, agentCwd: ctx.code, canAsk: false,
+      tool: { name: 'Write', kind: 'edit', command: null, paths: [path] }, input: { file_path: path, content: 'on: [push, pull_request]\n' }, truncated: false }, 10_000);
+    assert.notEqual(again?.verdict === 'allow' && ctx.review.recent()[0].reason === 'trust-chain-own-file', true, 'a protected path never goes through the chain');
+  }
+  {
+    const ctx = setup({ commandAnswers: undefined });
+    await ctx.write('slugify.test.mjs', SLUG_TEST);
+    const other = new ReviewService({ engine: engine(), settings: () => ({ ...structuredClone(DEFAULT_ASSISTANT_SETTINGS), enabled: true }), git: defaultGit, home, trustChain: () => true });
+    other.noteLaunch('orch13', { task: PERSON, dataClass: null, triage: false, role: 'orchestrator' });
+    other.noteLaunch('c99', { task: null, dataClass: null, triage: false, role: 'subagent', parentSessionId: 'orch13' });
+    other.noteTurn('c99', CHILD, { role: 'subagent', parentSessionId: 'orch13' });
+    const path = join(ctx.code, 'slugify.test.mjs');
+    const answer = await other.decide({ event: 'pre-tool', sessionId: 'c99', provider: 'opencode', role: 'agent', cwd: ctx.project, agentCwd: ctx.code, canAsk: false,
+      tool: { name: 'Write', kind: 'edit', command: null, paths: [path] }, input: { file_path: path, content: `${SLUG_TEST}// x\n` }, truncated: false }, 10_000);
+    assert.notEqual(answer?.reason ?? '', /rewrites a file this card wrote/u.source, 'another card did not write it');
+    assert.ok(!other.recent().some(entry => entry.reason === 'trust-chain-own-file'));
+  }
+});
