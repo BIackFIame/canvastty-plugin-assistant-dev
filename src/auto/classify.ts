@@ -98,7 +98,7 @@ export function candidates(settings: AutoRoutingSettings, tier: AutoTier, option
     for (const model of upstream.models) {
       if (!model.tier || options.coolingDown(upstream.id, model.id)) continue;
       entries.push({ key: `${upstream.id}|${model.id}|`, upstream, model: model.id, effort: null, sendEffort: false, tier: model.tier, listed: true, fromList: false, excluded: false,
-        priceIn: model.priceIn ?? null, priceOut: model.priceOut ?? null, priceSource: 'person', context: model.context ?? null, output: model.output ?? null, known: false, measuredEfforts: [], scores: {} });
+        priceIn: model.priceIn ?? null, priceOut: model.priceOut ?? null, priceSource: 'person', context: model.context ?? null, output: model.output ?? null, known: false, measuredEfforts: [], scores: {}, speed: null });
     }
   }
   return manualOrder(entries, tier, { preference: settings.preference, cheaperFallback: settings.cheaperFallback, ...(options.cheapest ? { cheapest: true } : {}) })
