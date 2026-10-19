@@ -4,7 +4,8 @@ import { createServer, type IncomingMessage, type Server, type ServerResponse } 
 import type { AddressInfo } from 'node:net';
 import { join } from 'node:path';
 import type { DataClassMode } from '../shared/settings.ts';
-import type { TaskType } from './catalog/scoring.ts';
+import { callSeconds, type TaskType } from './catalog/scoring.ts';
+import { chooseStrategy, DRAFT_TOKENS, judgeBody, mentionsToolCall, parseAnswer, type ParsedAnswer, type RouteOutcome, type StrategyDecision, type StrategyKind } from './consensus.ts';
 import { latestUserText, requestKeys, requestKind, rulesDifficulty, upstreamAllowed, type RequestKind } from './classify.ts';
 import type { Inventory, InventoryEntry } from './inventory.ts';
 import { plan, turnView, type Level, type SelectionReason, type TurnDecision, type TurnView } from './select.ts';
@@ -21,6 +22,12 @@ import { hashToken, TokenStore, type LaunchGrant } from './tokens.ts';
  * reaches the CLI it moves to the next candidate on 404/408/409/425/429/5xx, a connect error or a timeout, and cools
  * that model or upstream down; after it, an upstream failure ends the stream with an error and nothing is replayed.
  * Per-card and per-day caps are reserved before a call. The log keeps keyed hashes, models and numbers — never text.
+ *
+ * Hard text turns may fan out (consensus.ts decides): K drafts buffered in parallel, then a judge's answer streamed to
+ * the CLI. A tool call in any draft makes the turn agentic: the single choice's own answer is passed through as it
+ * came, the other drafts are stopped, and that conversation is not fanned out again. A failed or late draft is
+ * dropped (one left: it is the answer; none: the single path); a failed judge leaves the best draft as the answer.
+ * The whole fan-out is reserved against the caps before it starts.
  */
 
 export type DecisionSource = 'jev' | 'rules' | 'lease' | 'small';
@@ -42,15 +49,29 @@ export interface RouterDeps {
   turn?(text: string, grant: LaunchGrant): void;
   /** The card's model badge changed (only on a change). */
   badge?(sessionId: string, model: { model: string; tier: Level; source: DecisionSource } | null): void;
+  /** At most this many calls at once on a subscription-like (flat-rate) upstream; null: no such cap. */
+  parallelCap?(upstream: AutoUpstream): number | null;
   log?(level: 'info' | 'warn', message: string): void;
   transport?: typeof fetch;
   now?: () => number;
   timeouts?: Partial<RouterTimeouts>;
 }
 
-export interface RouterTimeouts { jevMs: number; headersMs: number; firstChunkMs: number; idleMs: number; totalMs: number }
-export const ROUTER_TIMEOUTS: RouterTimeouts = { jevMs: 2_500, headersMs: 60_000, firstChunkMs: 60_000, idleMs: 90_000, totalMs: 15 * 60_000 };
-export const ROUTER_LIMITS = Object.freeze({ bodyBytes: 32 * 1_048_576, perCard: 16, total: 64, attempts: 6, conversations: 1_024, leaseMs: 30 * 60_000, recent: 50, logBytes: 512 * 1_024 });
+/** `memberMs`: the whole time one buffered draft of a fan-out may take; a later one is dropped from the merge. */
+export interface RouterTimeouts { jevMs: number; headersMs: number; firstChunkMs: number; idleMs: number; totalMs: number; memberMs: number }
+export const ROUTER_TIMEOUTS: RouterTimeouts = { jevMs: 2_500, headersMs: 60_000, firstChunkMs: 60_000, idleMs: 90_000, totalMs: 15 * 60_000, memberMs: 180_000 };
+export const ROUTER_LIMITS = Object.freeze({ bodyBytes: 32 * 1_048_576, perCard: 16, total: 64, attempts: 6, conversations: 1_024, leaseMs: 30 * 60_000, recent: 50, logBytes: 512 * 1_024, outcomes: 512 });
+/** One draft of a fan-out, as recorded (no text). */
+export interface DraftRecord { upstream: string; model: string; effort: string | null; status: 'text' | 'tool_calls' | 'failed' | 'timeout' | 'stopped' | 'capped'; http: number | null; ms: number; costUsd: number | null }
+export type FanOutOutcome = 'merged' | 'picked' | 'tool_calls' | 'one_draft' | 'no_draft' | 'judge_failed';
+export interface FanOutRecord {
+  kind: Exclude<StrategyKind, 'single'>;
+  estimateUsd: number;
+  drafts: DraftRecord[];
+  judge: { upstream: string; model: string } | null;
+  outcome: FanOutOutcome | null;
+}
+
 const COOLDOWN_MS = Object.freeze({ transient: 30_000, quota: 300_000, missing: 900_000, auth: 900_000, maxRetryAfter: 24 * 3_600_000 });
 
 export interface DecisionRecord {
@@ -93,11 +114,19 @@ export interface DecisionRecord {
   tokensIn: number | null;
   tokensOut: number | null;
   costUsd: number | null;
+  /** single / consensus / best-of-n, why (consensus.ts reasons), and the expected-value terms when computed. */
+  strategy?: StrategyKind;
+  strategyWhy?: string | null;
+  ev?: StrategyDecision['ev'];
+  /** The fan-out's drafts, judge and outcome (null: none). */
+  fanOut?: FanOutRecord | null;
 }
 
 export interface RouterStats {
   requests: number; turns: number; continuations: number; small: number;
   jevAsked: number; jevAnswered: number; rules: number; leaseReuses: number; failovers: number;
+  /** Fan-outs started, and how they ended. */
+  fanOuts: number; merged: number; fanOutToolCalls: number; fanOutDegraded: number; judgeFailed: number;
   /** Hosts the router sent a request to (no paths). */
   hosts: string[];
 }
@@ -239,7 +268,13 @@ export class AutoRouter {
   private readonly mainConversation = new Map<string, string>();
   private readonly recentRecords: DecisionRecord[] = [];
   private readonly hosts = new Set<string>();
-  readonly stats: Omit<RouterStats, 'hosts'> = { requests: 0, turns: 0, continuations: 0, small: 0, jevAsked: 0, jevAnswered: 0, rules: 0, leaseReuses: 0, failovers: 0 };
+  /** Conversations (keyed hashes) where a fan-out met a tool call: their turns stay single. */
+  private readonly agentic = new Set<string>();
+  /** Calls running now per upstream (for subscription-like upstreams' parallel cap). */
+  private readonly upstreamActive = new Map<string, number>();
+  /** Per-route fan-out outcomes (route key → counts), kept in `fanout-outcomes.json`. */
+  private readonly outcomes = new Map<string, RouteOutcome>();
+  readonly stats: Omit<RouterStats, 'hosts'> = { requests: 0, turns: 0, continuations: 0, small: 0, jevAsked: 0, jevAnswered: 0, rules: 0, leaseReuses: 0, failovers: 0, fanOuts: 0, merged: 0, fanOutToolCalls: 0, fanOutDegraded: 0, judgeFailed: 0 };
 
   constructor(deps: RouterDeps) {
     this.deps = deps;
@@ -250,7 +285,34 @@ export class AutoRouter {
     this.tokens = new TokenStore(deps.directory, this.now);
     this.salt = this.loadSalt();
     this.spend = new Spend(deps.directory, this.now);
+    this.loadOutcomes();
   }
+
+  private outcomesFile(): string | null { return this.deps.directory ? join(this.deps.directory, 'fanout-outcomes.json') : null; }
+  private loadOutcomes(): void {
+    try {
+      const saved = JSON.parse(readFileSync(this.outcomesFile()!, 'utf8')) as Record<string, unknown>;
+      const count = (value: unknown): number => Number.isInteger(value) && (value as number) >= 0 ? value as number : 0;
+      for (const [key, raw] of Object.entries(saved).slice(0, ROUTER_LIMITS.outcomes)) {
+        if (!raw || typeof raw !== 'object' || key.length > 300) continue;
+        const r = raw as Record<string, unknown>;
+        this.outcomes.set(key, { n: count(r.n), text: count(r.text), toolCalls: count(r.toolCalls), failed: count(r.failed), timeout: count(r.timeout) });
+      }
+    } catch { /* none yet */ }
+  }
+  private noteOutcome(key: string, status: DraftRecord['status']): void {
+    if (status === 'stopped' || status === 'capped') return;
+    const o = this.outcomes.get(key) ?? { n: 0, text: 0, toolCalls: 0, failed: 0, timeout: 0 };
+    o.n++;
+    if (status === 'text') o.text++; else if (status === 'tool_calls') o.toolCalls++; else if (status === 'timeout') o.timeout++; else o.failed++;
+    this.outcomes.delete(key); this.outcomes.set(key, o);
+    while (this.outcomes.size > ROUTER_LIMITS.outcomes) this.outcomes.delete(this.outcomes.keys().next().value!);
+    const file = this.outcomesFile();
+    if (!file) return;
+    try { writeFileSync(`${file}.tmp`, JSON.stringify(Object.fromEntries(this.outcomes)), { mode: 0o600 }); renameSync(`${file}.tmp`, file); } catch { /* memory only */ }
+  }
+  /** Fan-out outcomes per route (route key → counts). */
+  routeOutcomes(): Record<string, RouteOutcome> { return Object.fromEntries([...this.outcomes].map(([key, value]) => [key, { ...value }])); }
 
   private loadSalt(): Buffer {
     const file = this.deps.directory ? join(this.deps.directory, 'salt') : null;
@@ -463,7 +525,8 @@ export class AutoRouter {
     const record: DecisionRecord = {
       at: started, session: grant.sessionId.slice(0, 8), conversation: keys.conversation, turn: keys.turn, kind, source: 'small', tier: null,
       taskType: null, difficulty: null, confidence: null, why: null, tradeoff: null, upstream: null, model: null, effort: null, score: null, scoreSource: null, priceIn: null, priceOut: null,
-      attempts: 0, failovers: [], status: 0, reason: '', ttfbMs: null, totalMs: 0, tokensIn: null, tokensOut: null, costUsd: null
+      attempts: 0, failovers: [], status: 0, reason: '', ttfbMs: null, totalMs: 0, tokensIn: null, tokensOut: null, costUsd: null,
+      strategy: 'single', strategyWhy: null, ev: null, fanOut: null
     };
     try {
       // The decision: small calls the cheapest model; a continuation keeps its turn's choice; a new turn asks once.
@@ -508,6 +571,22 @@ export class AutoRouter {
       record.tier = request.kind === 'small' ? 'small' : request.view.level;
       const list = chosen.list;
       if (!list.length) throw new HttpError(503, 'no_model', 'Auto (Jev): no allowed model is available now (all are off, excluded, cooling down or not allowed for this card\'s data class).');
+      if (request.kind === 'turn' && kind === 'turn') {
+        const typical = this.typicalOutput(grant.sessionId, body.max_tokens);
+        const decision = chooseStrategy({
+          plan: chosen, view: request.view, role: grant.role, agentic: this.agentic.has(keys.conversation), settings: settings.strategy, preference: settings.preference,
+          estimate: entry => this.estimate(entry, raw.length, body.max_tokens, grant.sessionId),
+          seconds: entry => callSeconds(entry.speed, typical),
+          busy: upstream => this.upstreamActive.get(upstream.id) ?? 0,
+          parallelCap: upstream => this.deps.parallelCap?.(upstream) ?? null,
+          outcome: key => this.outcomes.get(key)
+        });
+        record.strategyWhy = decision.reason; record.ev = decision.ev;
+        if (decision.kind !== 'single') {
+          await this.fanOut(decision, list, body, raw.length, grant, response, controller, record, keys.conversation, chosen.scoredAs);
+          return;
+        }
+      }
       await this.forward(list.slice(0, ROUTER_LIMITS.attempts), body, grant, response, controller, record, kind, keys.conversation, chosen.scoredAs);
     } catch (error) {
       if (error instanceof HttpError) {
@@ -535,10 +614,15 @@ export class AutoRouter {
    */
   estimate(entry: InventoryEntry, bodyBytes: number, maxTokens: unknown, sessionId?: string): number {
     const limit = typeof maxTokens === 'number' && maxTokens > 0 ? Math.min(maxTokens, 32_768) : entry.output ?? DEFAULT_OUTPUT;
+    const output = Math.min(limit, Math.max(1, this.typicalOutput(sessionId, undefined)));
+    return ((bodyBytes / 4) * (entry.priceIn ?? 0) + output * (entry.priceOut ?? 0)) / 1e6;
+  }
+
+  /** The card's p90 output tokens (4k until 3 calls were seen), bounded by max_tokens when given. */
+  private typicalOutput(sessionId: string | undefined, maxTokens: unknown): number {
     const seen = sessionId ? this.outputs.get(sessionId) ?? [] : [];
     const typical = seen.length >= OUTPUT_SAMPLES_MIN ? percentile(seen, 0.9) : COLD_OUTPUT_TOKENS;
-    const output = Math.min(limit, Math.max(1, typical));
-    return ((bodyBytes / 4) * (entry.priceIn ?? 0) + output * (entry.priceOut ?? 0)) / 1e6;
+    return typeof maxTokens === 'number' && maxTokens > 0 ? Math.min(typical, maxTokens) : typical;
   }
 
   /** The output tokens a finished call reported, for this card's next reservations. */
@@ -594,6 +678,7 @@ export class AutoRouter {
       let timer: ReturnType<typeof setTimeout> | undefined = setTimeout(() => attempt.abort(), stream ? this.timeouts.headersMs : this.timeouts.totalMs);
       let sent = false;
       const usage = new UsageReader();
+      this.busyUpstream(candidate.upstream.id, 1);
       try {
         const url = `${candidate.upstream.baseUrl}/chat/completions`;
         this.hosts.add(new URL(url).host);
@@ -690,10 +775,232 @@ export class AutoRouter {
         clearTimeout(timer);
         controller.signal.removeEventListener('abort', relay);
         if (!sent) attempt.abort();
+        this.busyUpstream(candidate.upstream.id, -1);
       }
     }
     if (capped && record.attempts === 0) throw capped;
     throw new HttpError(lastStatus === 429 ? 429 : 503, lastCode, `Auto (Jev): no allowed model answered (last: ${lastCode}). It tries again on the next call.`);
+  }
+
+  private busyUpstream(id: string, delta: number): void {
+    const next = (this.upstreamActive.get(id) ?? 0) + delta;
+    if (next > 0) this.upstreamActive.set(id, next); else this.upstreamActive.delete(id);
+  }
+
+  /** The cooldown an upstream answer earns (the same classes as `forward`). */
+  private coolFor(entry: InventoryEntry, status: number, retryAfter: string | null, detail: string): void {
+    const model = `${entry.upstream.id}|${entry.model}`;
+    if (status === 401 || status === 403) this.cool(entry.upstream.id, COOLDOWN_MS.auth);
+    else if (status === 400 && UNKNOWN_MODEL.test(detail)) this.cool(model, COOLDOWN_MS.missing);
+    else if (status === 429) this.cool(model, retryAfterMs(retryAfter, this.now()) ?? COOLDOWN_MS.quota);
+    else if (status === 404) this.cool(model, COOLDOWN_MS.missing);
+    else if (RETRYABLE.has(status)) this.cool(model, COOLDOWN_MS.transient);
+  }
+
+  /**
+   * One draft of a fan-out: the CLI's own request to one model, buffered whole (nothing reaches the CLI). `stop`
+   * aborts it on purpose (another draft called a tool); the deadline (`memberMs`) and the usual header, first-chunk
+   * and idle timeouts drop a late one. `onToolCall` fires once when its stream starts a tool call.
+   */
+  private async draft(entry: InventoryEntry, body: Record<string, unknown>, stop: AbortSignal, onToolCall: () => void): Promise<{ record: DraftRecord; bytes: Buffer | null; contentType: string | null; parsed: ParsedAnswer | null }> {
+    const started = this.now();
+    const record: DraftRecord = { upstream: entry.upstream.id, model: entry.model, effort: entry.effort, status: 'failed', http: null, ms: 0, costUsd: null };
+    const done = (status: DraftRecord['status'], extra: { bytes?: Buffer | null; contentType?: string | null; parsed?: ParsedAnswer | null } = {}) => {
+      record.status = status; record.ms = this.now() - started;
+      return { record, bytes: extra.bytes ?? null, contentType: extra.contentType ?? null, parsed: extra.parsed ?? null };
+    };
+    const key = entry.upstream.key === 'none' ? null : await this.deps.key(entry.upstream).catch(() => null);
+    if (entry.upstream.key !== 'none' && !key) { this.cool(entry.upstream.id, COOLDOWN_MS.auth); return done('failed'); }
+    const effort = entry.sendEffort && entry.effort && body.reasoning === undefined && body.reasoning_effort === undefined ? { reasoning: { effort: entry.effort } } : {};
+    const stream = body.stream === true;
+    const attempt = new AbortController();
+    const relay = (): void => attempt.abort();
+    stop.addEventListener('abort', relay, { once: true });
+    let late = false;
+    const deadline = setTimeout(() => { late = true; attempt.abort(); }, this.timeouts.memberMs);
+    let step: ReturnType<typeof setTimeout> | undefined = setTimeout(() => { late = true; attempt.abort(); }, stream ? this.timeouts.headersMs : this.timeouts.memberMs);
+    const url = `${entry.upstream.baseUrl}/chat/completions`;
+    this.hosts.add(new URL(url).host);
+    this.busyUpstream(entry.upstream.id, 1);
+    const chunks: Buffer[] = [];
+    try {
+      let upstream: Response;
+      try {
+        upstream = await this.transport(url, { method: 'POST', body: Buffer.from(JSON.stringify({ ...body, model: entry.model, ...effort }), 'utf8'), signal: attempt.signal, redirect: 'error',
+          headers: { 'content-type': 'application/json', accept: stream ? 'text/event-stream' : 'application/json', ...(key ? { authorization: `Bearer ${key}` } : {}) } });
+      } catch {
+        if (stop.aborted && !late) return done('stopped');
+        this.cool(late ? `${entry.upstream.id}|${entry.model}` : entry.upstream.id, COOLDOWN_MS.transient);
+        return done(late ? 'timeout' : 'failed');
+      }
+      record.http = upstream.status;
+      if (!upstream.ok) {
+        const detail = await upstream.text().then(text => upstreamMessage(text), () => '');
+        this.coolFor(entry, upstream.status, upstream.headers.get('retry-after'), detail);
+        return done('failed');
+      }
+      const reader = upstream.body?.getReader();
+      if (!reader) return done('failed');
+      const decoder = new TextDecoder();
+      let tail = '';
+      let first = true;
+      let called = false;
+      for (;;) {
+        clearTimeout(step);
+        step = setTimeout(() => { late = true; attempt.abort(); }, stream ? (first ? this.timeouts.firstChunkMs : this.timeouts.idleMs) : this.timeouts.memberMs);
+        let next: ReadableStreamReadResult<Uint8Array>;
+        try { next = await reader.read(); } catch {
+          if (stop.aborted && !late) return done('stopped');
+          if (late) this.cool(`${entry.upstream.id}|${entry.model}`, COOLDOWN_MS.transient);
+          return done(late ? 'timeout' : 'failed');
+        }
+        if (next.done) break;
+        first = false;
+        chunks.push(Buffer.from(next.value));
+        // A tool call may be split across chunks: look at the last bit of the previous one too.
+        const text = decoder.decode(next.value, { stream: true });
+        if (!called && mentionsToolCall(tail + text)) { called = true; onToolCall(); }
+        tail = text.slice(-64);
+      }
+      const bytes = Buffer.concat(chunks);
+      const parsed = parseAnswer(bytes.toString('utf8'));
+      record.costUsd = this.costOf(entry, parsed.usage);
+      const status = parsed.toolCalls ? 'tool_calls' : parsed.text.trim() ? 'text' : 'failed';
+      return done(status, { bytes, contentType: upstream.headers.get('content-type'), parsed });
+    } finally {
+      clearTimeout(deadline); clearTimeout(step);
+      stop.removeEventListener('abort', relay);
+      attempt.abort();
+      this.busyUpstream(entry.upstream.id, -1);
+    }
+  }
+
+  /** A buffered draft becomes the answer, byte for byte. */
+  private replay(entry: InventoryEntry, answer: { bytes: Buffer | null; contentType: string | null; parsed: ParsedAnswer | null }, body: Record<string, unknown>, response: ServerResponse, grant: LaunchGrant, record: DecisionRecord, conversation: string, scoredAs: TaskType | null): void {
+    record.upstream = entry.upstream.id; record.model = entry.model; record.effort = entry.effort;
+    record.priceIn = entry.priceIn; record.priceOut = entry.priceOut;
+    const score = scoredAs ? entry.scores[scoredAs] : undefined;
+    record.score = score?.value ?? null; record.scoreSource = score ? `${score.label}${scoredAs !== record.taskType ? ` (${scoredAs})` : ''}${score.historical ? ', old' : ''}` : null;
+    record.tokensIn = answer.parsed?.usage.in ?? null; record.tokensOut = answer.parsed?.usage.out ?? null;
+    record.ttfbMs = this.now() - record.at;
+    const lease = this.leases.get(conversation);
+    if (lease) lease.model = entry.key;
+    this.showModel(grant.sessionId, entry.model, record.difficulty ?? 'large', record.source);
+    response.writeHead(200, { 'content-type': answer.contentType ?? (body.stream === true ? 'text/event-stream' : 'application/json'), 'cache-control': 'no-cache' });
+    response.end(answer.bytes ?? Buffer.alloc(0));
+    record.status = 200;
+  }
+
+  /**
+   * A fan-out: every draft and the judge are reserved against the caps first (a draft that does not fit is left out;
+   * the single choice not fitting, or the judge, ends the fan-out before anything is sent). The drafts run in
+   * parallel, buffered. Then: a tool call anywhere → the single choice's answer as it came (the others are stopped);
+   * no draft → the single path; one → it; two or more → the judge's answer, streamed (a failed judge → the best draft).
+   */
+  private async fanOut(decision: StrategyDecision, list: InventoryEntry[], body: Record<string, unknown>, bodyBytes: number, grant: LaunchGrant, response: ServerResponse, controller: AbortController, record: DecisionRecord, conversation: string, scoredAs: TaskType | null): Promise<void> {
+    const settings = this.deps.settings();
+    const caps = { daily: settings.dailyUsdCap, perCard: settings.perCardUsdCap };
+    const kind = decision.kind as FanOutRecord['kind'];
+    const fan: FanOutRecord = { kind, estimateUsd: decision.estimateUsd, drafts: [], judge: null, outcome: null };
+    record.fanOut = fan; record.strategy = kind;
+    const single = (why: string): Promise<void> => {
+      record.strategy = 'single'; record.strategyWhy = why; record.fanOut = null;
+      return this.forward(list.slice(0, ROUTER_LIMITS.attempts), body, grant, response, controller, record, 'turn', conversation, scoredAs);
+    };
+    // Reserve: the judge first (it must fit, or there is no merge), then the drafts, the single choice first.
+    const judgeHold = (() => {
+      const judge = decision.judges[0]!;
+      const usd = this.estimate(judge, bodyBytes, body.max_tokens, grant.sessionId) + (decision.members.length * DRAFT_TOKENS * (judge.priceIn ?? 0)) / 1e6;
+      try { return this.spend.reserve(grant.sessionId, usd, caps); } catch { return null; }
+    })();
+    if (!judgeHold) return single('judge_over_cap');
+    const members: Array<{ entry: InventoryEntry; hold: ReturnType<Spend['reserve']> }> = [];
+    for (const entry of decision.members) {
+      try { members.push({ entry, hold: this.spend.reserve(grant.sessionId, this.estimate(entry, bodyBytes, body.max_tokens, grant.sessionId), caps) }); }
+      catch {
+        if (entry === decision.members[0]) { judgeHold.release(); for (const m of members) m.hold.release(); return single('primary_over_cap'); }
+        fan.drafts.push({ upstream: entry.upstream.id, model: entry.model, effort: entry.effort, status: 'capped', http: null, ms: 0, costUsd: null });
+      }
+    }
+    if (members.length < 2) { judgeHold.release(); for (const m of members) m.hold.release(); return single('drafts_over_cap'); }
+    this.stats.fanOuts++;
+    // A tool call in one draft stops the other drafts, never the single choice (its answer is the one passed through)
+    // nor the draft that called the tool. The CLI going away stops them all.
+    const stops = members.map(() => new AbortController());
+    const relay = (): void => { for (const stop of stops) stop.abort(); };
+    controller.signal.addEventListener('abort', relay, { once: true });
+    let results: Awaited<ReturnType<AutoRouter['draft']>>[];
+    try {
+      results = await Promise.all(members.map(({ entry }, index) => this.draft(entry, body, stops[index]!.signal, () => { stops.forEach((stop, other) => { if (other !== 0 && other !== index) stop.abort(); }); })));
+    } finally {
+      controller.signal.removeEventListener('abort', relay);
+    }
+    let draftCost = 0;
+    results.forEach((result, index) => {
+      const { entry, hold } = members[index]!;
+      // A draft that produced an answer (or was stopped mid-answer) is paid; one refused before answering is not.
+      if (result.bytes || result.record.status === 'stopped' || result.record.status === 'timeout') { hold.commit(result.record.costUsd); draftCost += result.record.costUsd ?? 0; }
+      else hold.release();
+      if (result.parsed) this.sawOutput(grant.sessionId, result.parsed.usage.out);
+      fan.drafts.push(result.record);
+      this.noteOutcome(entry.key, result.record.status);
+    });
+    const finish = (): void => { record.costUsd = (record.costUsd ?? 0) + draftCost; };
+    if (controller.signal.aborted) { judgeHold.release(); finish(); throw new HttpError(499, 'aborted', 'The call was cancelled.'); }
+    const answered = results.map((result, index) => ({ result, entry: members[index]!.entry }));
+    // Agentic after all: the single choice's own answer, unchanged (else the first draft that called a tool).
+    if (answered.some(({ result }) => result.record.status === 'tool_calls')) {
+      judgeHold.release();
+      this.agentic.add(conversation);
+      while (this.agentic.size > ROUTER_LIMITS.conversations) this.agentic.delete(this.agentic.keys().next().value!);
+      this.stats.fanOutToolCalls++;
+      fan.outcome = 'tool_calls';
+      const primary = answered[0]!;
+      const chosen = primary.result.bytes && (primary.result.record.status === 'text' || primary.result.record.status === 'tool_calls') ? primary : answered.find(({ result }) => result.record.status === 'tool_calls')!;
+      this.replay(chosen.entry, chosen.result, body, response, grant, record, conversation, scoredAs);
+      record.costUsd = draftCost;
+      return;
+    }
+    const texts = answered.filter(({ result }) => result.record.status === 'text');
+    if (!texts.length) {
+      judgeHold.release();
+      this.stats.fanOutDegraded++;
+      fan.outcome = 'no_draft';
+      // The single path, without the drafts that just failed (they cool down too).
+      const failed = new Set(members.map(m => m.entry));
+      try { await this.forward(list.filter(entry => !failed.has(entry)).slice(0, ROUTER_LIMITS.attempts), body, grant, response, controller, record, 'turn', conversation, scoredAs); }
+      finally { finish(); }
+      return;
+    }
+    if (texts.length === 1) {
+      judgeHold.release();
+      this.stats.fanOutDegraded++;
+      fan.outcome = 'one_draft';
+      this.replay(texts[0]!.entry, texts[0]!.result, body, response, grant, record, conversation, scoredAs);
+      record.costUsd = draftCost;
+      return;
+    }
+    // The judge: the CLI's request plus the drafts, streamed to the CLI with the usual failover between judges.
+    judgeHold.release();
+    const judged = judgeBody(body, texts.map(({ result }) => result.parsed!.text), kind);
+    try {
+      await this.forward(decision.judges.slice(0, ROUTER_LIMITS.attempts), judged, grant, response, controller, record, 'turn', conversation, scoredAs);
+      fan.judge = record.upstream && record.model ? { upstream: record.upstream, model: record.model } : null;
+      fan.outcome = kind === 'best-of-n' ? 'picked' : 'merged';
+      this.stats.merged++;
+      finish();
+    } catch (error) {
+      if (error instanceof HttpError && error.status === 499) { finish(); throw error; }
+      if (response.headersSent) { finish(); throw error; }
+      // No judge answered (or none fits the cap now): the best-scored draft that answered, as it came.
+      this.stats.judgeFailed++;
+      fan.outcome = 'judge_failed';
+      record.reason = 'judge_failed';
+      const value = (entry: InventoryEntry): number => scoredAs ? entry.scores[scoredAs]?.value ?? -1 : -1;
+      const best = [...texts].sort((a, b) => value(b.entry) - value(a.entry))[0]!;
+      record.costUsd = draftCost;
+      this.replay(best.entry, best.result, body, response, grant, record, conversation, scoredAs);
+    }
   }
 
   private showModel(sessionId: string, model: string, level: Level, source: DecisionSource): void {
