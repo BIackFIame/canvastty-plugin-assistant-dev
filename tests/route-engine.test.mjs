@@ -376,11 +376,15 @@ test('on a plan, cost is the quota a model uses and its time: GLM-5.3-flash beat
   const flash = small.top.planCost;
   // 1.2 × the tokens at a sixth of the token price: about a fifth of the quota GLM-5.3 would use.
   assert.equal(flash.quota, Math.round(1.2 * ((0.1 + 0.4 * 3) / (0.6 + 2.2 * 3)) * 1_000) / 1_000);
-  assert.match(whyLine(small.top, small, NOW), /flat-rate plan, unpriced: no cost per task within the plan's limits; ~22% of the plan quota glm-5-3 would use · 3\.0 points below the best, allowed 8/u);
-  // Speeds known (the person's figures): flash 4× the output speed, so about 3.3× sooner with 1.2× the tokens.
+  // Speeds from the bundled Artificial Analysis rows (both at max, the documented default on api.z.ai): flash streams
+  // at the same ~84 tokens/s with 1.2× the tokens, so it is a bit slower, and still wins on quota.
+  assert.match(whyLine(small.top, small, NOW), /flat-rate plan, unpriced: no cost per task within the plan's limits; ~22% of the plan quota glm-5-3 would use, ~0\.9× as fast \(Artificial Analysis speeds\) · 3\.0 points below the best, allowed 8/u);
+  assert.equal(flash.speedFrom, 'measured');
+  // Speeds known (the person's figures win): flash 4× the output speed, so about 3.3× sooner with 1.2× the tokens.
   const timed = run('chat', 'small', { speeds: { 'glm-5-3': 50, 'glm-5-3-flash': 200 } });
   assert.equal(timed.top.planCost.faster, 3.3);
-  assert.match(whyLine(timed.top, timed, NOW), /~3\.3× faster/u);
+  assert.equal(timed.top.planCost.speedFrom, 'person');
+  assert.match(whyLine(timed.top, timed, NOW), /~3\.3× faster ·/u);
   // Coding, medium: flash is 8.7 points below (window 5) — outside, so GLM-5.3.
   assert.equal(run('coding', 'medium').top.accountId, 'glm-53');
   // Research, large: flash is 3.0 below and inside the window of 3, but large tasks stay quality-first.
@@ -435,4 +439,49 @@ test('live run 10: "prefer plans for small tasks" (on by default) sends a confid
   assert.equal(run(turnView({ difficulty: 'simple', strong: false }, 'rules', 'fix a typo in the readme', { role: 'subagent' })).top.kind, 'auto', 'a small task from word rules is not "confidently" small');
   assert.equal(validateRouteSettings({ ...declared(), preferPlansSmall: undefined }).preferPlansSmall, true, 'older saves: on');
   assert.throws(() => validateRouteSettings({ ...declared(), planWindowSmall: 99 }), /plan window/u);
+});
+
+test('plan time from measured speeds: a flash model 4× as fast and ~5% worse wins on a plan; an unknown speed is neutral, never guessed', () => {
+  const withSpeeds = (speeds) => {
+    const cat = catalog({ prices: { 'z-ai/glm-5.3': [0.6, 2.2], 'z-ai/glm-5.3-flash': [0.1, 0.4] } });
+    cat.benchmarks = cat.benchmarks.map(row => {
+      if (row.source.kind !== 'artificial-analysis' || row.reasoningEffort !== 'max' || !(row.modelId in speeds)) return row;
+      const { speed, ...rest } = row;
+      return speeds[row.modelId] ? { ...rest, speed: speeds[row.modelId] } : rest;
+    });
+    return { cat, idx: new BenchmarkIndex(cat) };
+  };
+  const rows = accountRowsFrom([
+    { provider: 'opencode', accountId: 'glm-53', account: 'GLM 5.3 · Z.AI Coding Plan', model: 'glm-5.3', endpoint: 'api.z.ai', state: 'ready', launchOptions: { 'canvastty-accounts': { account: 'glm-53', effort: 'default', trustFolder: false } } },
+    { provider: 'opencode', accountId: 'glm-flash', account: 'GLM flash', model: 'glm-5.3-flash', endpoint: 'api.z.ai', state: 'ready', launchOptions: { 'canvastty-accounts': { account: 'glm-flash', effort: 'default', trustFolder: false } } }
+  ]);
+  const p = providersFrom(providers({ installed: ['opencode'] }));
+  const run = (speeds, extra = {}) => {
+    const { cat, idx } = withSpeeds(speeds);
+    return decide(ctx({ catalog: cat, index: idx, providers: p.list, providersGiven: true, accountRows: rows, callerProvider: 'opencode', auto: null, view: view('chat', 'small'),
+      settings: declared({ plans: [], flat: ['host:api.z.ai'], trust: { 'host:api.z.ai': 'D2' }, ...extra }) }));
+  };
+  // Measured: flash streams 4× as fast with the same first-chunk time.
+  const fast = run({ 'glm-5-3': { outputTps: 60, latencyS: 2 }, 'glm-5-3-flash': { outputTps: 240, latencyS: 2 } });
+  assert.equal(fast.top.accountId, 'glm-flash');
+  assert.equal(fast.top.planCost.speedFrom, 'measured');
+  assert.ok(fast.top.planCost.faster > 2 && fast.top.planCost.faster < 4, `latency and 1.2× the tokens keep it under 4× (${fast.top.planCost.faster})`);
+  assert.match(whyLine(fast.top, fast, NOW), /× faster \(Artificial Analysis speeds\)/u);
+  const slowTime = run({ 'glm-5-3': { outputTps: 60, latencyS: 2 }, 'glm-5-3-flash': { outputTps: 15, latencyS: 2 } });
+  assert.ok(slowTime.top.planCost === null || slowTime.groups.flat().find(c => c.accountId === 'glm-flash').planCost.time > 1, 'a slower model takes more time');
+  // "Value speed" is the person's: a lot → time counts as much as quota.
+  const weights = ['low', 'moderate', 'high'].map(valueSpeed => run({ 'glm-5-3': { outputTps: 60, latencyS: 2 }, 'glm-5-3-flash': { outputTps: 15, latencyS: 2 } }, { valueSpeed }).groups.flat().find(c => c.accountId === 'glm-flash').planCost.cost);
+  assert.ok(weights[0] < weights[1] && weights[1] < weights[2], `a slow model costs more the more speed is valued (${weights})`);
+  // Unknown on either side: time 1 (neutral), no "faster" claim, quota alone orders them.
+  for (const speeds of [{ 'glm-5-3': null, 'glm-5-3-flash': { outputTps: 240, latencyS: 2 } }, { 'glm-5-3': { outputTps: 60, latencyS: 2 }, 'glm-5-3-flash': null }]) {
+    const unknown = run(speeds);
+    const flash = unknown.groups.flat().find(c => c.accountId === 'glm-flash');
+    assert.equal(flash.planCost.time, null);
+    assert.equal(flash.planCost.faster, null);
+    assert.equal(flash.planCost.cost, Math.round((flash.planCost.quota + 0.5) * 1_000) / 1_000, 'quota + the neutral time');
+    assert.doesNotMatch(whyLine(flash, unknown, NOW), /faster|as fast/u);
+  }
+  // The person's figure wins over the measurement.
+  const person = run({ 'glm-5-3': { outputTps: 60, latencyS: 2 }, 'glm-5-3-flash': { outputTps: 240, latencyS: 2 } }, { speeds: { 'glm-5-3-flash': 30, 'glm-5-3': 60 } });
+  assert.equal(person.groups.flat().find(c => c.accountId === 'glm-flash').planCost.speedFrom, 'person');
 });

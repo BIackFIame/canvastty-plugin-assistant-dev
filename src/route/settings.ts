@@ -89,7 +89,7 @@ export interface RouteSettings {
   flat: string[];
   /** On plans (subscriptions, coding plans, flat-rate accounts): how much a faster model is worth. */
   valueSpeed: ValueSpeed;
-  /** Output speed per model identity in tokens/s, as the person knows it (no source gives it yet). */
+  /** Output speed per model identity in tokens/s, as the person knows it (wins over Artificial Analysis's measurement). */
   speeds: Record<string, number>;
   /** Quota weight per model identity for flat-rate accounts and plans without their own. */
   quotaWeights: Record<string, number>;
