@@ -500,6 +500,7 @@ export class ReviewService {
   }
 
   recent(): RecentReview[] { return structuredClone(this.recentReviews); }
+  setLocale(locale: 'en' | 'ru'): void { this.options.locale = locale; }
 
   /** «верно / неверно» on the settings page: the person's own label (R11), once per review. */
   feedback(auditId: string, verdict: 'right' | 'wrong'): boolean {

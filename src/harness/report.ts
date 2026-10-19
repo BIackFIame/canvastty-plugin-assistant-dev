@@ -89,8 +89,7 @@ export function reportText(journal: Journal, strings: ServiceStrings, extra: { t
     `${extra.reviewOn ? r.commandsReviewed : r.commandsSeen}: ${journal.commands}${reviewed}`,
     `${r.loops}: ${journal.loops || r.none}`,
     extra.childTitles.length ? `${r.children}: ${extra.childTitles.slice(0, 12).join(', ')}${extra.childTitles.length > 12 ? '…' : ''}` : '',
-    extra.tasks && extra.tasks.total ? `${r.tasks}: ${extra.tasks.done}/${extra.tasks.total}` : '',
-    r.cost
+    extra.tasks && extra.tasks.total ? `${r.tasks}: ${extra.tasks.done}/${extra.tasks.total}` : ''
   ].filter(Boolean);
   return lines.join('\n').slice(0, 1_900);
 }

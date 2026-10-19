@@ -11,6 +11,8 @@ import { DEFAULT_AUTO_SETTINGS, type AutoModel, type AutoRoutingSettings, type A
 import { el } from './common.ts';
 
 export interface AutoState {
+  /** The Jev · OpenRouter key is saved (absent from an older service). */
+  jevKey?: boolean;
   settings: AutoRoutingSettings;
   readable: boolean;
   keys: Record<string, boolean>;
@@ -38,20 +40,40 @@ const OPENROUTER = 'https://openrouter.ai/api/v1';
 const TYPES = ['coding', 'review', 'research', 'writing', 'chat'] as const;
 const PAGE = 40;
 
+/**
+ * The catalog's notes (written by the service in English) as one short phrase in the person's language. A note this
+ * page does not know is shown as it came in English, and as a generic phrase in Russian.
+ */
+export function catalogNote(text: string, locale: 'en' | 'ru'): string {
+  const partial = /returned (\d+) rows \((\d+) known\)/u.exec(text);
+  if (partial) return locale === 'ru' ? `пришло ${partial[1]} строк из ${partial[2]}; прежние оценки сохранены` : `returned ${partial[1]} of ${partial[2]} rows; earlier scores kept`;
+  if (/unavailable; earlier scores keep their age/u.test(text)) return locale === 'ru' ? 'недоступен; прежние оценки сохранены' : 'unavailable; earlier scores kept';
+  if (/unavailable; the earlier list keeps its age/u.test(text)) return locale === 'ru' ? 'недоступен; прежний список сохранён' : 'unavailable; earlier list kept';
+  if (/timed out/u.test(text)) return locale === 'ru' ? 'не успело за отведённое время' : 'timed out';
+  if (/cancelled/u.test(text)) return locale === 'ru' ? 'отменено' : 'cancelled';
+  if (/unavailable|failed/u.test(text)) return locale === 'ru' ? 'источник недоступен' : 'a source is unavailable';
+  return locale === 'ru' ? 'данные источника не подошли' : text;
+}
+
+const AUTO_TYPE_EN: Record<string, string> = { coding: 'coding', review: 'review', research: 'research', writing: 'writing', chat: 'chat' };
+const AUTO_TYPE_RU: Record<string, string> = { coding: 'код', review: 'ревью', research: 'исследование', writing: 'тексты', chat: 'общение' };
+const AUTO_LEVEL_EN: Record<string, string> = { small: 'small', medium: 'medium', large: 'large' };
+const AUTO_LEVEL_RU: Record<string, string> = { small: 'маленький', medium: 'средний', large: 'большой' };
+
 export const AUTO_PAGE_STRINGS = {
   en: {
     title: 'Model: Auto (Jev)',
-    lead: 'For OpenCode cards started with Model: Auto (Jev) (launcher → Advanced → Use CanvasTTY Assistant). A local router on 127.0.0.1, protected by a key per card, picks a model for each new turn from data: Jev (task triage, when it is Suggest or Auto above) says the task type and how hard the turn is, otherwise word rules do; the catalog\'s benchmark score for that type and the price decide among the models you allow. Tool steps keep the turn\'s model; titles use the cheapest one. Prompts go only to the upstream that answers; Jev gets only the latest user text, under the data rules below. Leave the launcher\'s Model at Default and choose no model account.',
+    lead: 'For OpenCode cards started with Model: Auto. Each new turn goes to the model that suits it best for the price, among the models you allow. How it decides: README, "How Auto decides".',
     catalog: 'Catalog', refresh: 'Refresh now', refreshing: 'Refreshing…',
-    catalogLead: 'Public sources read from fixed addresses: models.dev (models, prices, limits), Artificial Analysis and LiveBench (measured scores per model and effort), OpenRouter\'s model list. No task text or key is sent. A score belongs to one exact model and effort; nothing else inherits it, and a model with no row of its own stays unknown. Old scores still count (marked old); prices older than 7 days do not.',
+    catalogLead: 'Public model lists and benchmark scores, read without your key or any task text.',
     sourceName: { 'models.dev': 'models.dev', 'artificial-analysis': 'Artificial Analysis', livebench: 'LiveBench', openrouter: 'OpenRouter models' } as Record<string, string>,
-    source: (s: CatalogStatus['sources'][number], date: (at: number) => string) => `${s.fetchedAt === null ? 'not loaded' : `loaded ${date(s.fetchedAt)}`}${s.version ? `, v${s.version}` : ''}${s.rows ? `, ${s.measured ? `${s.measured} measured of ` : ''}${s.rows} rows` : ''}${s.fetchedAt !== null && s.stale ? ' — old' : ''}${s.error ? ` — ${s.error}` : ''}`,
+    source: (s: CatalogStatus['sources'][number], date: (at: number) => string) => `${s.fetchedAt === null ? 'not loaded' : `loaded ${date(s.fetchedAt)}`}${s.version ? `, v${s.version}` : ''}${s.rows ? `, ${s.measured ? `${s.measured} measured of ` : ''}${s.rows} rows` : ''}${s.fetchedAt !== null && s.stale ? ' — old' : ''}${s.error ? ` — ${catalogNote(s.error, 'en')}` : ''}`,
     bundled: 'Using the scores that ship with the plugin until the first download.',
     next: (date: string) => `Next background refresh: ${date}.`, noNext: 'Background refresh is off (or no upstream is on).',
-    autoRefresh: 'Refresh in the background', every: 'every, hours', lastError: (e: string) => `Last refresh: ${e}.`,
+    autoRefresh: 'Refresh in the background', every: 'every, hours', lastError: (e: string) => `Last refresh: ${catalogNote(e, 'en')}.`,
     upstreams: 'Upstreams', none: 'None yet.', add: 'Add', remove: 'Remove', on: 'On', check: 'Check', checking: 'Checking…',
     preset: { openrouter: 'OpenRouter', 'openai-compatible': 'OpenAI-compatible' } as Record<string, string>,
-    idLabel: 'Name (a-z, 0-9, -)', baseUrl: 'Base URL (…/v1)', trust: 'I trust it with', trustHelp: 'D3 only for a server on this computer.',
+    idLabel: 'Name (a-z, 0-9, -)', baseUrl: 'Base URL (…/v1)', trust: 'I trust it with', trustHelp: 'Secret data only for a server on this computer.',
     keyFrom: 'Key', keyOwn: 'Its own key', keyJev: 'The Jev · OpenRouter key', keyNone: 'No key (a server on this computer)',
     keySet: 'key saved', keyMissing: 'no key', keyPlaceholder: 'Key', saveKey: 'Save key', removeKey: 'Remove key',
     allModels: 'Offer every suitable OpenRouter model (tools, text, a fixed price; no :free variants)',
@@ -63,22 +85,24 @@ export const AUTO_PAGE_STRINGS = {
     effortDefault: 'default', unknown: 'unknown', old: 'old', fromPerson: 'yours', fromList: 'OpenRouter', fromDev: 'models.dev',
     shown: (shown: number, total: number) => `${shown} of ${total} models`, more: 'Show more',
     priceIn: '$/M in', priceOut: '$/M out', addModel: 'Add model', noModels: 'No models: add at least one.',
-    tableHelp: 'Price, context and score come from the catalog (read-only). Untick a model to exclude it. A manual tier makes the model answer turns of that tier first; an effort names the setting it runs at (on OpenRouter Auto sends it).',
+    tableHelp: 'Untick a model to exclude it. Hover a score for its source.',
     checkOk: (listed: number | null, missing: string[]) => `Works${listed !== null ? ` (${listed} models listed)` : ''}.${missing.length ? ` Not listed by it: ${missing.join(', ')}.` : ''}`,
     checkFail: (status: number | null) => status === null ? 'No answer, or no key saved.' : `It answered ${status}.`,
     choices: 'Choices', preference: 'Preference', pref: { cheap: 'Cheap', balanced: 'Balanced', best: 'Best' } as Record<string, string>,
-    prefHelp: 'Each turn takes the cheapest model whose score for its task type is within a few points of the best: Balanced 8 / 5 / 3 points on small / medium / large turns, Cheap 15 / 10 / 5, Best none. Within those points a lower reasoning effort is preferred too, except on large turns. "Small" needs Jev (≥ 0.5 on the two easiest levels; 0.7 for research and review); turns of an orchestrator card are never small. Unknown scores never beat known ones; each decision shows what it gave up.',
-    cheaper: 'Manual tiers: if a tier has no usable model, a cheaper tier may answer (a stronger one is always tried first)',
+    prefHelp: 'Cheaper gives up a little quality for price; Better always takes the best-scored model.',
+    cheaper: 'If a model you pinned to a level is not available, a cheaper level may answer',
     decider: 'Who judges a turn', deciderJev: 'Jev, word rules when it does not answer', deciderRules: 'Word rules only',
-    daily: 'Daily cap, USD', perCard: 'Per card, USD', capsHelp: 'Counted from the cost the upstream reports, or from the catalog\'s prices. 0 stops Auto.',
+    daily: 'Daily cap, USD', perCard: 'Per card, USD', capsHelp: 'Auto stops when a limit is spent. 0 turns it off.',
     save: 'Save',
     strategies: 'Several models on hard turns', consensus: 'Consensus', consensusMode: { off: 'Off', auto: 'Auto: only when it pays', always: 'Always for hard turns' } as Record<string, string>,
     models_k: 'Models in a consensus', bestOfN: 'Compare several models and keep the best answer (best of N)', turnCap: 'At most per turn, USD',
-    strategyHelp: 'Only hard text turns (architecture, design, research, review, writing) of an agent card; never a tool step, a title or an orchestrator. One very strong model answers by default. Consensus asks 2–3 slightly weaker models from different vendors (up to 8 points below the best), then a strong model merges their drafts; on Auto only when its expected value beats the single model: the judge\'s score plus 1.5 points per extra vendor (at most 3), minus its cost (Cheap ×3, Balanced ×1, Best ×0 per doubling) and its wait (when speeds are known). Best of N (off unless you turn it on) compares instead of merging. A draft that calls a tool makes the turn a normal one: the single model\'s answer is used and the others stop. Every draft and the judge are reserved against the caps first; a plan address marked flat-rate takes at most 2 at once.',
+    strategyHelp: 'Only for hard writing and design turns. Auto: only when several models are likely better than one strong model for the price. Best of N stays off unless you turn it on.',
     strategyOf: { single: 'one model', consensus: 'consensus', 'best-of-n': 'best of N' } as Record<string, string>,
     fanOutcome: { merged: 'merged', picked: 'best picked', tool_calls: 'tool call: one model', one_draft: 'one draft left', no_draft: 'no draft: one model', judge_failed: 'judge failed: best draft' } as Record<string, string>,
     drafts: (ok: number, all: number) => `${ok} of ${all} drafts`,
     fanStats: (s: AutoState['stats']) => s.fanOuts ? ` Several models: ${s.fanOuts} turns, ${s.merged} merged, ${s.fanOutToolCalls} turned out to call tools, ${s.fanOutDegraded} with drafts missing, ${s.judgeFailed} judge failures.` : '',
+    classes: { D0: 'Public', D1: 'Internal', D2: 'Confidential', D3: 'Secret' } as Record<string, string>,
+    turnLine: (r: DecisionRecord) => `${r.model ?? '—'} · ${r.taskType ? AUTO_TYPE_EN[r.taskType] ?? r.taskType : '—'}, ${r.difficulty ? AUTO_LEVEL_EN[r.difficulty] ?? r.difficulty : '—'}${r.strategy && r.strategy !== 'single' ? ' · several models' : ''}${r.costUsd !== null ? ` · $${r.costUsd.toFixed(4)}` : ''}`,
     recent: 'Recent decisions', noRecent: 'Nothing routed yet.',
     stats: (s: AutoState['stats']) => `${s.requests} model calls, Jev asked ${s.jevAsked} times (${s.jevAnswered} answered), ${s.leaseReuses} reused a turn's choice, ${s.failovers} failovers; today $${s.spentToday.toFixed(4)}; ${s.listening ? `listening for ${s.cards} card(s)` : 'not listening'}${s.hosts.length ? `; sent to ${s.hosts.join(', ')}` : ''}.`,
     kind: { turn: 'turn', continuation: 'tool step', small: 'title' } as Record<string, string>,
@@ -89,17 +113,17 @@ export const AUTO_PAGE_STRINGS = {
   },
   ru: {
     title: 'Модель: Авто (Jev)',
-    lead: 'Для окон OpenCode, запущенных с моделью «Авто (Jev)» (запуск → Дополнительно → Ассистент CanvasTTY). Локальный маршрутизатор на 127.0.0.1 с ключом на каждое окно на каждом новом ходе выбирает модель по данным: Jev (разбор задачи, когда он в режиме «Подсказки» или «Авто» выше) называет тип задачи и сложность хода, иначе это делают словесные правила; среди разрешённых вами моделей решают оценка бенчмарка для этого типа из каталога и цена. Шаги с инструментами остаются на модели хода, заголовки — на самой дешёвой. Запросы уходят только поставщику, который отвечает; Jev получает только последний текст пользователя по правилам данных ниже. В окне запуска оставьте «Модель» по умолчанию и не выбирайте аккаунт модели.',
+    lead: 'Для окон OpenCode, запущенных с «Модель: Авто». Каждый новый ход получает модель, которая лучше всего подходит по цене, из разрешённых вами. Как это решается — в README, «Как решает Авто».',
     catalog: 'Каталог', refresh: 'Обновить сейчас', refreshing: 'Обновляю…',
-    catalogLead: 'Публичные источники с фиксированных адресов: models.dev (модели, цены, пределы), Artificial Analysis и LiveBench (измеренные оценки по модели и уровню рассуждения), список моделей OpenRouter. Текст задач и ключи не отправляются. Оценка относится к одной точной модели и уровню рассуждения, другим не передаётся; модель без собственной строки остаётся неизвестной. Старые оценки учитываются (с пометкой), цены старше 7 дней — нет.',
+    catalogLead: 'Открытые списки моделей и оценки бенчмарков; читаются без вашего ключа и без текста задач.',
     sourceName: { 'models.dev': 'models.dev', 'artificial-analysis': 'Artificial Analysis', livebench: 'LiveBench', openrouter: 'Модели OpenRouter' } as Record<string, string>,
-    source: (s: CatalogStatus['sources'][number], date: (at: number) => string) => `${s.fetchedAt === null ? 'не загружено' : `загружено ${date(s.fetchedAt)}`}${s.version ? `, v${s.version}` : ''}${s.rows ? (s.measured ? `, измерено ${s.measured} строк из ${s.rows}` : `, строк: ${s.rows}`) : ''}${s.fetchedAt !== null && s.stale ? ' — устарело' : ''}${s.error ? ` — ${s.error}` : ''}`,
+    source: (s: CatalogStatus['sources'][number], date: (at: number) => string) => `${s.fetchedAt === null ? 'не загружено' : `загружено ${date(s.fetchedAt)}`}${s.version ? `, v${s.version}` : ''}${s.rows ? (s.measured ? `, измерено ${s.measured} строк из ${s.rows}` : `, строк: ${s.rows}`) : ''}${s.fetchedAt !== null && s.stale ? ' — устарело' : ''}${s.error ? ` — ${catalogNote(s.error, 'ru')}` : ''}`,
     bundled: 'До первой загрузки используются оценки, поставляемые с плагином.',
     next: (date: string) => `Следующее фоновое обновление: ${date}.`, noNext: 'Фоновое обновление выключено (или нет включённого поставщика).',
-    autoRefresh: 'Обновлять в фоне', every: 'каждые, часов', lastError: (e: string) => `Последнее обновление: ${e}.`,
+    autoRefresh: 'Обновлять в фоне', every: 'каждые, часов', lastError: (e: string) => `Последнее обновление: ${catalogNote(e, 'ru')}.`,
     upstreams: 'Поставщики', none: 'Пока нет.', add: 'Добавить', remove: 'Удалить', on: 'Вкл', check: 'Проверить', checking: 'Проверяю…',
     preset: { openrouter: 'OpenRouter', 'openai-compatible': 'Совместимый с OpenAI' } as Record<string, string>,
-    idLabel: 'Имя (a-z, 0-9, -)', baseUrl: 'Базовый адрес (…/v1)', trust: 'Доверяю до', trustHelp: 'D3 — только серверу на этом компьютере.',
+    idLabel: 'Имя (a-z, 0-9, -)', baseUrl: 'Базовый адрес (…/v1)', trust: 'Доверяю до', trustHelp: 'Секретные данные — только серверу на этом компьютере.',
     keyFrom: 'Ключ', keyOwn: 'Свой ключ', keyJev: 'Ключ Jev · OpenRouter', keyNone: 'Без ключа (сервер на этом компьютере)',
     keySet: 'ключ сохранён', keyMissing: 'нет ключа', keyPlaceholder: 'Ключ', saveKey: 'Сохранить ключ', removeKey: 'Удалить ключ',
     allModels: 'Предлагать все подходящие модели OpenRouter (инструменты, текст, фиксированная цена; без вариантов :free)',
@@ -111,22 +135,24 @@ export const AUTO_PAGE_STRINGS = {
     effortDefault: 'по умолчанию', unknown: 'неизвестно', old: 'старая', fromPerson: 'ваша', fromList: 'OpenRouter', fromDev: 'models.dev',
     shown: (shown: number, total: number) => `${shown} из ${total} моделей`, more: 'Показать ещё',
     priceIn: '$/М вход', priceOut: '$/М выход', addModel: 'Добавить модель', noModels: 'Моделей нет: добавьте хотя бы одну.',
-    tableHelp: 'Цена, контекст и оценка берутся из каталога (только чтение). Снимите отметку, чтобы исключить модель. Ручной уровень даёт модели ходы этого уровня в первую очередь; уровень рассуждения указывает настройку, с которой она работает (на OpenRouter «Авто» его отправляет).',
+    tableHelp: 'Снимите отметку, чтобы исключить модель. Источник оценки — в подсказке.',
     checkOk: (listed: number | null, missing: string[]) => `Работает${listed !== null ? ` (моделей в списке: ${listed})` : ''}.${missing.length ? ` Нет в его списке: ${missing.join(', ')}.` : ''}`,
     checkFail: (status: number | null) => status === null ? 'Нет ответа или не сохранён ключ.' : `Ответ: ${status}.`,
     choices: 'Выбор', preference: 'Предпочтение', pref: { cheap: 'Дешевле', balanced: 'Сбалансированно', best: 'Лучше' } as Record<string, string>,
-    prefHelp: 'Каждый ход получает самую дешёвую модель, чья оценка для его типа задачи не более чем на несколько баллов ниже лучшей: «Сбалансированно» — 8 / 5 / 3 балла на маленьком / среднем / большом ходе, «Дешевле» — 15 / 10 / 5, «Лучше» — нисколько. В этих пределах предпочитается и меньший уровень рассуждения, кроме больших ходов. «Маленький» ход определяет только Jev (≥ 0,5 на двух самых простых уровнях; 0,7 для исследования и ревью); ходы оркестратора маленькими не бывают. Неизвестная оценка никогда не побеждает известную; каждое решение показывает, чем пожертвовало.',
-    cheaper: 'Ручные уровни: если на уровне нет доступной модели, может ответить более дешёвый (сначала всегда пробуется более сильный)',
+    prefHelp: '«Дешевле» уступает немного качества ради цены; «Лучше» всегда берёт модель с лучшей оценкой.',
+    cheaper: 'Если закреплённая за уровнем модель недоступна, может ответить более дешёвый уровень',
     decider: 'Кто оценивает ход', deciderJev: 'Jev, словесные правила, если он не ответил', deciderRules: 'Только словесные правила',
-    daily: 'Предел в день, USD', perCard: 'На окно, USD', capsHelp: 'Считается по стоимости, которую сообщает поставщик, или по ценам каталога. 0 останавливает «Авто».',
+    daily: 'Предел в день, USD', perCard: 'На окно, USD', capsHelp: 'Когда предел потрачен, «Авто» останавливается. 0 выключает его.',
     save: 'Сохранить',
     strategies: 'Несколько моделей на сложных ходах', consensus: 'Консенсус', consensusMode: { off: 'Выключен', auto: 'Авто: только когда окупается', always: 'Всегда на сложных ходах' } as Record<string, string>,
     models_k: 'Моделей в консенсусе', bestOfN: 'Сравнивать несколько моделей и оставлять лучший ответ (лучший из N)', turnCap: 'Не больше за ход, USD',
-    strategyHelp: 'Только сложные текстовые ходы (архитектура, дизайн, исследование, ревью, тексты) окна агента; никогда шаг инструмента, заголовок или оркестратор. По умолчанию отвечает одна очень сильная модель. Консенсус спрашивает 2–3 чуть более слабые модели разных производителей (до 8 баллов ниже лучшей), затем сильная модель сводит их черновики; в режиме «Авто» — только когда ожидаемая польза выше, чем у одной модели: оценка судьи плюс 1,5 балла за каждого другого производителя (не больше 3) минус стоимость («Дешевле» ×3, «Сбалансированно» ×1, «Лучше» ×0 за каждое удвоение) и ожидание (когда скорости известны). «Лучший из N» (выключен, пока вы его не включите) сравнивает вместо сведения. Если черновик вызывает инструмент, ход становится обычным: берётся ответ одной модели, остальные останавливаются. Все черновики и судья сначала резервируются в пределах лимитов; адрес плана с фиксированным тарифом получает не больше 2 запросов одновременно.',
+    strategyHelp: 'Только для сложных ходов с текстом и проектированием. «Авто»: только когда несколько моделей, вероятно, лучше одной сильной за свою цену. «Лучший из N» выключен, пока вы его не включите.',
     strategyOf: { single: 'одна модель', consensus: 'консенсус', 'best-of-n': 'лучший из N' } as Record<string, string>,
     fanOutcome: { merged: 'сведено', picked: 'выбран лучший', tool_calls: 'вызов инструмента: одна модель', one_draft: 'остался один черновик', no_draft: 'нет черновиков: одна модель', judge_failed: 'судья не ответил: лучший черновик' } as Record<string, string>,
     drafts: (ok: number, all: number) => `черновиков: ${ok} из ${all}`,
     fanStats: (s: AutoState['stats']) => s.fanOuts ? ` Несколько моделей: ходов ${s.fanOuts}, сведено ${s.merged}, оказались с инструментами ${s.fanOutToolCalls}, без части черновиков ${s.fanOutDegraded}, отказов судьи ${s.judgeFailed}.` : '',
+    classes: { D0: 'Открытые', D1: 'Внутренние', D2: 'Конфиденциальные', D3: 'Секретные' } as Record<string, string>,
+    turnLine: (r: DecisionRecord) => `${r.model ?? '—'} · ${r.taskType ? AUTO_TYPE_RU[r.taskType] ?? r.taskType : '—'}, ${r.difficulty ? AUTO_LEVEL_RU[r.difficulty] ?? r.difficulty : '—'}${r.strategy && r.strategy !== 'single' ? ' · несколько моделей' : ''}${r.costUsd !== null ? ` · $${r.costUsd.toFixed(4)}` : ''}`,
     recent: 'Последние решения', noRecent: 'Пока ничего не маршрутизировано.',
     stats: (s: AutoState['stats']) => `Вызовов моделей: ${s.requests}, Jev спрошен ${s.jevAsked} раз (ответил ${s.jevAnswered}), решение хода повторно: ${s.leaseReuses}, переключений: ${s.failovers}; сегодня $${s.spentToday.toFixed(4)}; ${s.listening ? `слушает, окон: ${s.cards}` : 'не слушает'}${s.hosts.length ? `; отправлено на ${s.hosts.join(', ')}` : ''}.`,
     kind: { turn: 'ход', continuation: 'шаг инструмента', small: 'заголовок' } as Record<string, string>,
@@ -193,7 +219,7 @@ export function renderAuto(state: AutoState, t: Strings, page: AutoPageHost, vie
   section.append(el('h2', { textContent: t.recent }), el('p', { className: 'muted', textContent: t.stats(state.stats) + t.fanStats(state.stats), dataset: { auto: 'stats' } }));
   const recent = el('ul', { className: 'recent', dataset: { auto: 'recent' } });
   if (!state.recent.length) recent.append(el('li', { className: 'muted', textContent: t.noRecent }));
-  for (const record of state.recent.slice(0, 20)) recent.append(recentRow(record, t));
+  for (const record of state.recent.slice(0, 5)) recent.append(recentRow(record, t));
   section.append(recent);
   return section;
 }
@@ -279,7 +305,7 @@ function upstreamRow(upstream: AutoUpstream, state: AutoState, t: Strings, page:
   const edit = (change: (entry: AutoUpstream) => void): void => save(next => { change(next.upstreams.find(entry => entry.id === upstream.id)!); });
   const item = el('li', { className: 'backend', dataset: { upstream: upstream.id } });
   item.append(el('div', { className: 'row' }, el('strong', { textContent: `${t.preset[upstream.preset] ?? upstream.preset} · ${upstream.id}` }), el('span', { className: 'muted', textContent: upstream.baseUrl })));
-  const trustOptions: Array<[AutoUpstream['trust'], string]> = [['D0', 'D0'], ['D1', 'D1'], ['D2', 'D2'], ...(isLocal(upstream.baseUrl) ? [['D3', 'D3'] as [AutoUpstream['trust'], string]] : [])];
+  const trustOptions: Array<[AutoUpstream['trust'], string]> = (['D0', 'D1', 'D2', ...(isLocal(upstream.baseUrl) ? ['D3'] : [])] as Array<AutoUpstream['trust']>).map(c => [c, t.classes[c] ?? c] as [AutoUpstream['trust'], string]);
   const check = el('button', { type: 'button', textContent: t.check, name: `auto-check-${upstream.id}` });
   check.addEventListener('click', () => {
     view.checks.set(upstream.id, t.checking); page.reload();
@@ -361,7 +387,7 @@ function modelTable(upstream: AutoUpstream, rows: ModelRow[] | null, t: Strings,
   else {
     const table = el('table', { className: 'model-table' });
     const head = el('tr');
-    for (const label of [t.col.use, t.col.model, t.col.context, t.col.price, t.col.score, t.col.efforts, t.col.effort, t.col.tier, t.col.remove]) head.append(el('th', { textContent: label }));
+    for (const label of [t.col.use, t.col.model, t.col.score, t.col.effort, t.col.tier, t.col.remove]) head.append(el('th', { textContent: label }));
     table.append(el('thead', {}, head));
     const body = el('tbody');
     for (const row of matching.slice(0, shownCount)) {
@@ -377,13 +403,17 @@ function modelTable(upstream: AutoUpstream, rows: ModelRow[] | null, t: Strings,
         value => edit(entry => setOverride(entry, row.id, row.fromList, model => { if (value) model.tier = value as AutoTier; else delete model.tier; })));
       const drop = el('button', { type: 'button', textContent: t.remove, name: `auto-drop-${upstream.id}-${row.id}` });
       drop.addEventListener('click', () => edit(entry => { entry.models = entry.models.filter(other => other.id !== row.id); }));
+      // Two lines per model (id; context and price), the score with its source and age in the tooltip: no column
+      // runs off a narrow page.
+      const price = row.priceIn === null && row.priceOut === null ? t.unknown : `$${usd(row.priceIn)} · $${usd(row.priceOut)}`;
+      const scoreCell = el('td', { textContent: score ? `${score.value.toFixed(1)}${score.effort ? ` @${score.effort}` : ''}${score.historical ? ` (${t.old})` : ''}` : t.unknown });
+      if (score || row.measuredEfforts.length) scoreCell.title = [score ? score.label : null, row.measuredEfforts.length ? `${t.col.efforts}: ${row.measuredEfforts.join(', ')}` : null].filter(Boolean).join(' · ');
+      const modelCell = el('td', {}, el('code', { textContent: row.id }), el('div', { className: 'muted', textContent: `${kTokens(row.context)} · ${price}` }));
+      if (priceFrom) modelCell.title = `${t.col.price}: ${priceFrom}`;
       body.append(el('tr', { dataset: { model: row.id } },
         el('td', {}, use),
-        el('td', {}, el('code', { textContent: row.id })),
-        el('td', { textContent: kTokens(row.context) }),
-        el('td', { textContent: row.priceIn === null && row.priceOut === null ? t.unknown : `${usd(row.priceIn)} · ${usd(row.priceOut)}${priceFrom ? ` (${priceFrom})` : ''}` }),
-        el('td', { textContent: score ? `${score.value.toFixed(1)}${score.effort ? ` @${score.effort}` : ''} · ${score.label}${score.historical ? ` · ${t.old}` : ''}` : t.unknown }),
-        el('td', { textContent: row.measuredEfforts.join(', ') || '—' }),
+        modelCell,
+        scoreCell,
         el('td', {}, effortSelect),
         el('td', {}, tierSelect),
         el('td', {}, row.listed && !row.fromList ? drop : '')));

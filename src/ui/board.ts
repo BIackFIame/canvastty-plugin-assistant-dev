@@ -9,12 +9,12 @@ interface View { focus: { board: string | null }; boards: Board[]; titles: Recor
 
 const STRINGS = {
   en: {
-    board: 'Board', none: 'No task board yet. It fills when an orchestrator adds tasks (task_add) or a flow you started adds its roles.',
+    board: 'Board', none: 'No task board yet. It fills when an orchestrator adds tasks or a flow you started adds its roles.',
     empty: 'This board has no tasks.', columns: { todo: 'To do', doing: 'In progress', done: 'Done', blocked: 'Blocked' } as Record<Status, string>,
     assignee: 'Assignee', progress: (done: number, total: number) => `${done} of ${total} done`, fromFlow: 'from a flow'
   },
   ru: {
-    board: 'Доска', none: 'Досок задач пока нет. Доска заполнится, когда оркестратор добавит задачи (task_add) или запущенный вами сценарий добавит свои роли.',
+    board: 'Доска', none: 'Досок задач пока нет. Доска заполнится, когда оркестратор добавит задачи или запущенный вами сценарий добавит свои роли.',
     empty: 'На этой доске нет задач.', columns: { todo: 'Сделать', doing: 'В работе', done: 'Готово', blocked: 'Заблокировано' } as Record<Status, string>,
     assignee: 'Исполнитель', progress: (done: number, total: number) => `готово ${done} из ${total}`, fromFlow: 'из сценария'
   }

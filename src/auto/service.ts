@@ -15,7 +15,7 @@ import { buildInventory, type Inventory, type InventoryEntry } from './inventory
 import { autoRefusal, limitsFor, openCodeContribution } from './launch.ts';
 import { AutoRouter, type DecisionRecord, type RouterDeps, type RouterStats, type TurnDecision } from './router.ts';
 import {
-  JEV_OPENROUTER_SECRET, normalizeAutoSettings, originOf, upstreamSecret, validateAutoSettings,
+  JEV_OPENROUTER_SECRET, normalizeAutoSettings, OPENROUTER_BASE_URL, originOf, upstreamSecret, validateAutoSettings,
   type AutoRoutingSettings, type AutoUpstream
 } from './settings.ts';
 import type { LaunchGrant } from './tokens.ts';
@@ -84,6 +84,8 @@ export type AutoPrepareAnswer = ReturnType<typeof openCodeContribution> | { refu
 export class AutoService {
   settings: AutoRoutingSettings;
   readable: boolean;
+  /** The person (or this service on their key) saved Auto settings at least once. */
+  private everSaved: boolean;
   readonly router: AutoRouter;
   readonly catalog: CatalogStore;
   private readonly options: AutoServiceOptions;
@@ -94,7 +96,7 @@ export class AutoService {
     this.options = options;
     this.readable = options.savedUnavailable !== true;
     this.settings = normalizeAutoSettings(this.readable ? options.saved : null);
-    const strings = AUTO_STRINGS[options.locale];
+    this.everSaved = this.readable && options.saved !== undefined && options.saved !== null;
     this.catalog = new CatalogStore({
       directory: join(options.dataDir, 'auto'), bundled: bundledCatalog,
       ...(options.catalogTransport ? { transport: options.catalogTransport } : {}),
@@ -111,7 +113,7 @@ export class AutoService {
       key: upstream => this.keyFor(upstream),
       ...(options.decide ? { decide: options.decide } : {}),
       ...(options.turn ? { turn: options.turn } : {}),
-      badge: (sessionId, model) => options.publishBadge(sessionId, model ? { text: badgeText(model.model), tone: 'neutral', tooltip: strings.badgeTip(model.tier, model.source) } : null),
+      badge: (sessionId, model) => options.publishBadge(sessionId, model ? { text: badgeText(model.model), tone: 'neutral', tooltip: AUTO_STRINGS[this.options.locale].badgeTip(model.tier, model.source) } : null),
       log: (level, message) => options.host.log(level, message),
       ...(options.parallelCap ? { parallelCap: options.parallelCap } : {}),
       ...(options.transport ? { transport: options.transport } : {}),
@@ -129,7 +131,28 @@ export class AutoService {
     return stored.origin === originOf(upstream.baseUrl) ? stored.value : null;
   }
 
-  loaded(saved: unknown): void { this.settings = normalizeAutoSettings(saved); this.readable = true; this.configureCatalog(); }
+  setLocale(locale: Locale): void { this.options.locale = locale; }
+
+  loaded(saved: unknown): void { this.settings = normalizeAutoSettings(saved); this.readable = true; this.everSaved ||= saved !== undefined && saved !== null; this.configureCatalog(); }
+
+  /** Whether the Jev · OpenRouter key is saved (for OpenRouter's own address). */
+  async jevKey(): Promise<boolean> {
+    const stored = await this.options.readKey(JEV_OPENROUTER_SECRET).catch(() => null);
+    return !!stored && stored.origin === originOf(OPENROUTER_BASE_URL);
+  }
+
+  /**
+   * Auto works with just a key: while Auto's settings were never saved and list no upstream, a saved Jev ·
+   * OpenRouter key adds the OpenRouter upstream on that key (every suitable model, trusted with D1 like a new
+   * upstream on the page). Once anything was saved, the person's list stays as they left it.
+   */
+  async adoptJevKey(): Promise<boolean> {
+    if (!this.readable || this.everSaved || this.settings.upstreams.length || !(await this.jevKey())) return false;
+    const next = structuredClone(this.settings);
+    next.upstreams.push({ id: 'openrouter', preset: 'openrouter', baseUrl: OPENROUTER_BASE_URL, trust: 'D1', key: 'jev', models: [], allModels: true, excluded: [], enabled: true });
+    await this.save(next);
+    return true;
+  }
 
   /** Background refresh only while an upstream is on; OpenRouter's list only when an OpenRouter upstream uses it. */
   private configureCatalog(): void {
@@ -239,10 +262,11 @@ export class AutoService {
   // The decision models page
   // ---------------------------------------------------------------------------------------------------------------
 
-  async state(): Promise<{ settings: AutoRoutingSettings; readable: boolean; keys: Record<string, boolean>; recent: DecisionRecord[]; stats: RouterStats & { spentToday: number; listening: boolean; cards: number }; catalog: CatalogStatus; models: Record<string, ModelRow[]>; waitingForList: string[]; outcomes: Record<string, RouteOutcome> }> {
+  async state(): Promise<{ jevKey: boolean; settings: AutoRoutingSettings; readable: boolean; keys: Record<string, boolean>; recent: DecisionRecord[]; stats: RouterStats & { spentToday: number; listening: boolean; cards: number }; catalog: CatalogStatus; models: Record<string, ModelRow[]>; waitingForList: string[]; outcomes: Record<string, RouteOutcome> }> {
+    await this.adoptJevKey().catch(() => false);
     const keys: Record<string, boolean> = {};
     for (const upstream of this.settings.upstreams) keys[upstream.id] = upstream.key === 'none' ? true : !!(await this.keyFor(upstream).catch(() => null));
-    return { settings: this.settings, readable: this.readable, keys, recent: this.router.recent(), stats: this.router.statsView(), catalog: this.catalog.status(), models: this.modelRows(), waitingForList: this.inventory().waitingForList, outcomes: this.router.routeOutcomes() };
+    return { jevKey: await this.jevKey(), settings: this.settings, readable: this.readable, keys, recent: this.router.recent(), stats: this.router.statsView(), catalog: this.catalog.status(), models: this.modelRows(), waitingForList: this.inventory().waitingForList, outcomes: this.router.routeOutcomes() };
   }
 
   async save(value: unknown): Promise<AutoRoutingSettings> {
@@ -250,6 +274,7 @@ export class AutoService {
     const next = validateAutoSettings(value);
     await this.options.host.callHost('storage.set', { key: AUTO_STORAGE_KEY, value: next });
     this.settings = next;
+    this.everSaved = true;
     this.configureCatalog();
     this.options.host.emit('settings', null);
     return next;

@@ -3,6 +3,8 @@
 (() => {
   // src/ui/common.ts
   var host = window.CanvasTTYPlugin;
+  var SERVICE = "assistant";
+  var lastLocale = null;
   function applyAppearance(appearance) {
     const locale = appearance.locale === "ru" ? "ru" : "en";
     const root2 = document.documentElement;
@@ -10,6 +12,10 @@
     root2.dataset.palette = appearance.palette === "lilac" || appearance.palette === "night" ? appearance.palette : "sage";
     const scale = typeof appearance.uiScale === "number" ? appearance.uiScale : typeof appearance.scale === "number" ? appearance.scale : null;
     if (scale !== null && Number.isFinite(scale) && scale >= 0.5 && scale <= 3) root2.style?.setProperty("--ui-scale", String(scale));
+    if (locale !== lastLocale) {
+      lastLocale = locale;
+      void host?.service?.request(SERVICE, "locale", { locale })?.catch?.(() => void 0);
+    }
     return locale;
   }
   function el(tag, props = {}, ...children) {
@@ -19,6 +25,36 @@
     if (dataset) Object.assign(node.dataset, dataset);
     for (const child of children) if (child !== null && child !== false) node.append(child);
     return node;
+  }
+  function segmented(name, value, options, onChange) {
+    const group = el("div", { className: "segmented", role: "radiogroup" });
+    group.setAttribute("aria-label", name);
+    for (const [option, label] of options) {
+      const button = el("button", { type: "button", textContent: label, className: option === value ? "is-on" : "", dataset: { value: option } });
+      button.setAttribute("role", "radio");
+      button.setAttribute("aria-checked", String(option === value));
+      button.addEventListener("click", () => {
+        if (option !== value) onChange(option);
+      });
+      group.append(button);
+    }
+    return group;
+  }
+  function toggle(name, checked, label, onChange) {
+    const input = el("input", { type: "checkbox", checked, name, className: "switch__input" });
+    input.addEventListener("change", () => onChange(input.checked));
+    const wrap = el("label", { className: "switch" }, input, el("span", { className: "switch__track" }));
+    wrap.setAttribute("aria-label", label);
+    return wrap;
+  }
+  function settingRow(label, help, control) {
+    const helpNode = typeof help === "string" ? el("div", { className: "setting-row__help", textContent: help }) : el("div", { className: "setting-row__help" }, help);
+    return el(
+      "div",
+      { className: "setting-row" },
+      el("div", { className: "setting-row__copy" }, el("div", { className: "setting-row__label", textContent: label }), helpNode),
+      el("div", { className: "setting-row__control" }, control)
+    );
   }
   var deferred = false;
   function whenIdle(refresh) {
@@ -226,22 +262,36 @@
   var OPENROUTER = "https://openrouter.ai/api/v1";
   var TYPES = ["coding", "review", "research", "writing", "chat"];
   var PAGE = 40;
+  function catalogNote(text, locale) {
+    const partial = /returned (\d+) rows \((\d+) known\)/u.exec(text);
+    if (partial) return locale === "ru" ? `\u043F\u0440\u0438\u0448\u043B\u043E ${partial[1]} \u0441\u0442\u0440\u043E\u043A \u0438\u0437 ${partial[2]}; \u043F\u0440\u0435\u0436\u043D\u0438\u0435 \u043E\u0446\u0435\u043D\u043A\u0438 \u0441\u043E\u0445\u0440\u0430\u043D\u0435\u043D\u044B` : `returned ${partial[1]} of ${partial[2]} rows; earlier scores kept`;
+    if (/unavailable; earlier scores keep their age/u.test(text)) return locale === "ru" ? "\u043D\u0435\u0434\u043E\u0441\u0442\u0443\u043F\u0435\u043D; \u043F\u0440\u0435\u0436\u043D\u0438\u0435 \u043E\u0446\u0435\u043D\u043A\u0438 \u0441\u043E\u0445\u0440\u0430\u043D\u0435\u043D\u044B" : "unavailable; earlier scores kept";
+    if (/unavailable; the earlier list keeps its age/u.test(text)) return locale === "ru" ? "\u043D\u0435\u0434\u043E\u0441\u0442\u0443\u043F\u0435\u043D; \u043F\u0440\u0435\u0436\u043D\u0438\u0439 \u0441\u043F\u0438\u0441\u043E\u043A \u0441\u043E\u0445\u0440\u0430\u043D\u0451\u043D" : "unavailable; earlier list kept";
+    if (/timed out/u.test(text)) return locale === "ru" ? "\u043D\u0435 \u0443\u0441\u043F\u0435\u043B\u043E \u0437\u0430 \u043E\u0442\u0432\u0435\u0434\u0451\u043D\u043D\u043E\u0435 \u0432\u0440\u0435\u043C\u044F" : "timed out";
+    if (/cancelled/u.test(text)) return locale === "ru" ? "\u043E\u0442\u043C\u0435\u043D\u0435\u043D\u043E" : "cancelled";
+    if (/unavailable|failed/u.test(text)) return locale === "ru" ? "\u0438\u0441\u0442\u043E\u0447\u043D\u0438\u043A \u043D\u0435\u0434\u043E\u0441\u0442\u0443\u043F\u0435\u043D" : "a source is unavailable";
+    return locale === "ru" ? "\u0434\u0430\u043D\u043D\u044B\u0435 \u0438\u0441\u0442\u043E\u0447\u043D\u0438\u043A\u0430 \u043D\u0435 \u043F\u043E\u0434\u043E\u0448\u043B\u0438" : text;
+  }
+  var AUTO_TYPE_EN = { coding: "coding", review: "review", research: "research", writing: "writing", chat: "chat" };
+  var AUTO_TYPE_RU = { coding: "\u043A\u043E\u0434", review: "\u0440\u0435\u0432\u044C\u044E", research: "\u0438\u0441\u0441\u043B\u0435\u0434\u043E\u0432\u0430\u043D\u0438\u0435", writing: "\u0442\u0435\u043A\u0441\u0442\u044B", chat: "\u043E\u0431\u0449\u0435\u043D\u0438\u0435" };
+  var AUTO_LEVEL_EN = { small: "small", medium: "medium", large: "large" };
+  var AUTO_LEVEL_RU = { small: "\u043C\u0430\u043B\u0435\u043D\u044C\u043A\u0438\u0439", medium: "\u0441\u0440\u0435\u0434\u043D\u0438\u0439", large: "\u0431\u043E\u043B\u044C\u0448\u043E\u0439" };
   var AUTO_PAGE_STRINGS = {
     en: {
       title: "Model: Auto (Jev)",
-      lead: "For OpenCode cards started with Model: Auto (Jev) (launcher \u2192 Advanced \u2192 Use CanvasTTY Assistant). A local router on 127.0.0.1, protected by a key per card, picks a model for each new turn from data: Jev (task triage, when it is Suggest or Auto above) says the task type and how hard the turn is, otherwise word rules do; the catalog's benchmark score for that type and the price decide among the models you allow. Tool steps keep the turn's model; titles use the cheapest one. Prompts go only to the upstream that answers; Jev gets only the latest user text, under the data rules below. Leave the launcher's Model at Default and choose no model account.",
+      lead: 'For OpenCode cards started with Model: Auto. Each new turn goes to the model that suits it best for the price, among the models you allow. How it decides: README, "How Auto decides".',
       catalog: "Catalog",
       refresh: "Refresh now",
       refreshing: "Refreshing\u2026",
-      catalogLead: "Public sources read from fixed addresses: models.dev (models, prices, limits), Artificial Analysis and LiveBench (measured scores per model and effort), OpenRouter's model list. No task text or key is sent. A score belongs to one exact model and effort; nothing else inherits it, and a model with no row of its own stays unknown. Old scores still count (marked old); prices older than 7 days do not.",
+      catalogLead: "Public model lists and benchmark scores, read without your key or any task text.",
       sourceName: { "models.dev": "models.dev", "artificial-analysis": "Artificial Analysis", livebench: "LiveBench", openrouter: "OpenRouter models" },
-      source: (s, date) => `${s.fetchedAt === null ? "not loaded" : `loaded ${date(s.fetchedAt)}`}${s.version ? `, v${s.version}` : ""}${s.rows ? `, ${s.measured ? `${s.measured} measured of ` : ""}${s.rows} rows` : ""}${s.fetchedAt !== null && s.stale ? " \u2014 old" : ""}${s.error ? ` \u2014 ${s.error}` : ""}`,
+      source: (s, date) => `${s.fetchedAt === null ? "not loaded" : `loaded ${date(s.fetchedAt)}`}${s.version ? `, v${s.version}` : ""}${s.rows ? `, ${s.measured ? `${s.measured} measured of ` : ""}${s.rows} rows` : ""}${s.fetchedAt !== null && s.stale ? " \u2014 old" : ""}${s.error ? ` \u2014 ${catalogNote(s.error, "en")}` : ""}`,
       bundled: "Using the scores that ship with the plugin until the first download.",
       next: (date) => `Next background refresh: ${date}.`,
       noNext: "Background refresh is off (or no upstream is on).",
       autoRefresh: "Refresh in the background",
       every: "every, hours",
-      lastError: (e) => `Last refresh: ${e}.`,
+      lastError: (e) => `Last refresh: ${catalogNote(e, "en")}.`,
       upstreams: "Upstreams",
       none: "None yet.",
       add: "Add",
@@ -253,7 +303,7 @@
       idLabel: "Name (a-z, 0-9, -)",
       baseUrl: "Base URL (\u2026/v1)",
       trust: "I trust it with",
-      trustHelp: "D3 only for a server on this computer.",
+      trustHelp: "Secret data only for a server on this computer.",
       keyFrom: "Key",
       keyOwn: "Its own key",
       keyJev: "The Jev \xB7 OpenRouter key",
@@ -285,20 +335,20 @@
       priceOut: "$/M out",
       addModel: "Add model",
       noModels: "No models: add at least one.",
-      tableHelp: "Price, context and score come from the catalog (read-only). Untick a model to exclude it. A manual tier makes the model answer turns of that tier first; an effort names the setting it runs at (on OpenRouter Auto sends it).",
+      tableHelp: "Untick a model to exclude it. Hover a score for its source.",
       checkOk: (listed, missing) => `Works${listed !== null ? ` (${listed} models listed)` : ""}.${missing.length ? ` Not listed by it: ${missing.join(", ")}.` : ""}`,
       checkFail: (status2) => status2 === null ? "No answer, or no key saved." : `It answered ${status2}.`,
       choices: "Choices",
       preference: "Preference",
       pref: { cheap: "Cheap", balanced: "Balanced", best: "Best" },
-      prefHelp: 'Each turn takes the cheapest model whose score for its task type is within a few points of the best: Balanced 8 / 5 / 3 points on small / medium / large turns, Cheap 15 / 10 / 5, Best none. Within those points a lower reasoning effort is preferred too, except on large turns. "Small" needs Jev (\u2265 0.5 on the two easiest levels; 0.7 for research and review); turns of an orchestrator card are never small. Unknown scores never beat known ones; each decision shows what it gave up.',
-      cheaper: "Manual tiers: if a tier has no usable model, a cheaper tier may answer (a stronger one is always tried first)",
+      prefHelp: "Cheaper gives up a little quality for price; Better always takes the best-scored model.",
+      cheaper: "If a model you pinned to a level is not available, a cheaper level may answer",
       decider: "Who judges a turn",
       deciderJev: "Jev, word rules when it does not answer",
       deciderRules: "Word rules only",
       daily: "Daily cap, USD",
       perCard: "Per card, USD",
-      capsHelp: "Counted from the cost the upstream reports, or from the catalog's prices. 0 stops Auto.",
+      capsHelp: "Auto stops when a limit is spent. 0 turns it off.",
       save: "Save",
       strategies: "Several models on hard turns",
       consensus: "Consensus",
@@ -306,11 +356,13 @@
       models_k: "Models in a consensus",
       bestOfN: "Compare several models and keep the best answer (best of N)",
       turnCap: "At most per turn, USD",
-      strategyHelp: "Only hard text turns (architecture, design, research, review, writing) of an agent card; never a tool step, a title or an orchestrator. One very strong model answers by default. Consensus asks 2\u20133 slightly weaker models from different vendors (up to 8 points below the best), then a strong model merges their drafts; on Auto only when its expected value beats the single model: the judge's score plus 1.5 points per extra vendor (at most 3), minus its cost (Cheap \xD73, Balanced \xD71, Best \xD70 per doubling) and its wait (when speeds are known). Best of N (off unless you turn it on) compares instead of merging. A draft that calls a tool makes the turn a normal one: the single model's answer is used and the others stop. Every draft and the judge are reserved against the caps first; a plan address marked flat-rate takes at most 2 at once.",
+      strategyHelp: "Only for hard writing and design turns. Auto: only when several models are likely better than one strong model for the price. Best of N stays off unless you turn it on.",
       strategyOf: { single: "one model", consensus: "consensus", "best-of-n": "best of N" },
       fanOutcome: { merged: "merged", picked: "best picked", tool_calls: "tool call: one model", one_draft: "one draft left", no_draft: "no draft: one model", judge_failed: "judge failed: best draft" },
       drafts: (ok, all) => `${ok} of ${all} drafts`,
       fanStats: (s) => s.fanOuts ? ` Several models: ${s.fanOuts} turns, ${s.merged} merged, ${s.fanOutToolCalls} turned out to call tools, ${s.fanOutDegraded} with drafts missing, ${s.judgeFailed} judge failures.` : "",
+      classes: { D0: "Public", D1: "Internal", D2: "Confidential", D3: "Secret" },
+      turnLine: (r) => `${r.model ?? "\u2014"} \xB7 ${r.taskType ? AUTO_TYPE_EN[r.taskType] ?? r.taskType : "\u2014"}, ${r.difficulty ? AUTO_LEVEL_EN[r.difficulty] ?? r.difficulty : "\u2014"}${r.strategy && r.strategy !== "single" ? " \xB7 several models" : ""}${r.costUsd !== null ? ` \xB7 $${r.costUsd.toFixed(4)}` : ""}`,
       recent: "Recent decisions",
       noRecent: "Nothing routed yet.",
       stats: (s) => `${s.requests} model calls, Jev asked ${s.jevAsked} times (${s.jevAnswered} answered), ${s.leaseReuses} reused a turn's choice, ${s.failovers} failovers; today $${s.spentToday.toFixed(4)}; ${s.listening ? `listening for ${s.cards} card(s)` : "not listening"}${s.hosts.length ? `; sent to ${s.hosts.join(", ")}` : ""}.`,
@@ -322,19 +374,19 @@
     },
     ru: {
       title: "\u041C\u043E\u0434\u0435\u043B\u044C: \u0410\u0432\u0442\u043E (Jev)",
-      lead: "\u0414\u043B\u044F \u043E\u043A\u043E\u043D OpenCode, \u0437\u0430\u043F\u0443\u0449\u0435\u043D\u043D\u044B\u0445 \u0441 \u043C\u043E\u0434\u0435\u043B\u044C\u044E \xAB\u0410\u0432\u0442\u043E (Jev)\xBB (\u0437\u0430\u043F\u0443\u0441\u043A \u2192 \u0414\u043E\u043F\u043E\u043B\u043D\u0438\u0442\u0435\u043B\u044C\u043D\u043E \u2192 \u0410\u0441\u0441\u0438\u0441\u0442\u0435\u043D\u0442 CanvasTTY). \u041B\u043E\u043A\u0430\u043B\u044C\u043D\u044B\u0439 \u043C\u0430\u0440\u0448\u0440\u0443\u0442\u0438\u0437\u0430\u0442\u043E\u0440 \u043D\u0430 127.0.0.1 \u0441 \u043A\u043B\u044E\u0447\u043E\u043C \u043D\u0430 \u043A\u0430\u0436\u0434\u043E\u0435 \u043E\u043A\u043D\u043E \u043D\u0430 \u043A\u0430\u0436\u0434\u043E\u043C \u043D\u043E\u0432\u043E\u043C \u0445\u043E\u0434\u0435 \u0432\u044B\u0431\u0438\u0440\u0430\u0435\u0442 \u043C\u043E\u0434\u0435\u043B\u044C \u043F\u043E \u0434\u0430\u043D\u043D\u044B\u043C: Jev (\u0440\u0430\u0437\u0431\u043E\u0440 \u0437\u0430\u0434\u0430\u0447\u0438, \u043A\u043E\u0433\u0434\u0430 \u043E\u043D \u0432 \u0440\u0435\u0436\u0438\u043C\u0435 \xAB\u041F\u043E\u0434\u0441\u043A\u0430\u0437\u043A\u0438\xBB \u0438\u043B\u0438 \xAB\u0410\u0432\u0442\u043E\xBB \u0432\u044B\u0448\u0435) \u043D\u0430\u0437\u044B\u0432\u0430\u0435\u0442 \u0442\u0438\u043F \u0437\u0430\u0434\u0430\u0447\u0438 \u0438 \u0441\u043B\u043E\u0436\u043D\u043E\u0441\u0442\u044C \u0445\u043E\u0434\u0430, \u0438\u043D\u0430\u0447\u0435 \u044D\u0442\u043E \u0434\u0435\u043B\u0430\u044E\u0442 \u0441\u043B\u043E\u0432\u0435\u0441\u043D\u044B\u0435 \u043F\u0440\u0430\u0432\u0438\u043B\u0430; \u0441\u0440\u0435\u0434\u0438 \u0440\u0430\u0437\u0440\u0435\u0448\u0451\u043D\u043D\u044B\u0445 \u0432\u0430\u043C\u0438 \u043C\u043E\u0434\u0435\u043B\u0435\u0439 \u0440\u0435\u0448\u0430\u044E\u0442 \u043E\u0446\u0435\u043D\u043A\u0430 \u0431\u0435\u043D\u0447\u043C\u0430\u0440\u043A\u0430 \u0434\u043B\u044F \u044D\u0442\u043E\u0433\u043E \u0442\u0438\u043F\u0430 \u0438\u0437 \u043A\u0430\u0442\u0430\u043B\u043E\u0433\u0430 \u0438 \u0446\u0435\u043D\u0430. \u0428\u0430\u0433\u0438 \u0441 \u0438\u043D\u0441\u0442\u0440\u0443\u043C\u0435\u043D\u0442\u0430\u043C\u0438 \u043E\u0441\u0442\u0430\u044E\u0442\u0441\u044F \u043D\u0430 \u043C\u043E\u0434\u0435\u043B\u0438 \u0445\u043E\u0434\u0430, \u0437\u0430\u0433\u043E\u043B\u043E\u0432\u043A\u0438 \u2014 \u043D\u0430 \u0441\u0430\u043C\u043E\u0439 \u0434\u0435\u0448\u0451\u0432\u043E\u0439. \u0417\u0430\u043F\u0440\u043E\u0441\u044B \u0443\u0445\u043E\u0434\u044F\u0442 \u0442\u043E\u043B\u044C\u043A\u043E \u043F\u043E\u0441\u0442\u0430\u0432\u0449\u0438\u043A\u0443, \u043A\u043E\u0442\u043E\u0440\u044B\u0439 \u043E\u0442\u0432\u0435\u0447\u0430\u0435\u0442; Jev \u043F\u043E\u043B\u0443\u0447\u0430\u0435\u0442 \u0442\u043E\u043B\u044C\u043A\u043E \u043F\u043E\u0441\u043B\u0435\u0434\u043D\u0438\u0439 \u0442\u0435\u043A\u0441\u0442 \u043F\u043E\u043B\u044C\u0437\u043E\u0432\u0430\u0442\u0435\u043B\u044F \u043F\u043E \u043F\u0440\u0430\u0432\u0438\u043B\u0430\u043C \u0434\u0430\u043D\u043D\u044B\u0445 \u043D\u0438\u0436\u0435. \u0412 \u043E\u043A\u043D\u0435 \u0437\u0430\u043F\u0443\u0441\u043A\u0430 \u043E\u0441\u0442\u0430\u0432\u044C\u0442\u0435 \xAB\u041C\u043E\u0434\u0435\u043B\u044C\xBB \u043F\u043E \u0443\u043C\u043E\u043B\u0447\u0430\u043D\u0438\u044E \u0438 \u043D\u0435 \u0432\u044B\u0431\u0438\u0440\u0430\u0439\u0442\u0435 \u0430\u043A\u043A\u0430\u0443\u043D\u0442 \u043C\u043E\u0434\u0435\u043B\u0438.",
+      lead: "\u0414\u043B\u044F \u043E\u043A\u043E\u043D OpenCode, \u0437\u0430\u043F\u0443\u0449\u0435\u043D\u043D\u044B\u0445 \u0441 \xAB\u041C\u043E\u0434\u0435\u043B\u044C: \u0410\u0432\u0442\u043E\xBB. \u041A\u0430\u0436\u0434\u044B\u0439 \u043D\u043E\u0432\u044B\u0439 \u0445\u043E\u0434 \u043F\u043E\u043B\u0443\u0447\u0430\u0435\u0442 \u043C\u043E\u0434\u0435\u043B\u044C, \u043A\u043E\u0442\u043E\u0440\u0430\u044F \u043B\u0443\u0447\u0448\u0435 \u0432\u0441\u0435\u0433\u043E \u043F\u043E\u0434\u0445\u043E\u0434\u0438\u0442 \u043F\u043E \u0446\u0435\u043D\u0435, \u0438\u0437 \u0440\u0430\u0437\u0440\u0435\u0448\u0451\u043D\u043D\u044B\u0445 \u0432\u0430\u043C\u0438. \u041A\u0430\u043A \u044D\u0442\u043E \u0440\u0435\u0448\u0430\u0435\u0442\u0441\u044F \u2014 \u0432 README, \xAB\u041A\u0430\u043A \u0440\u0435\u0448\u0430\u0435\u0442 \u0410\u0432\u0442\u043E\xBB.",
       catalog: "\u041A\u0430\u0442\u0430\u043B\u043E\u0433",
       refresh: "\u041E\u0431\u043D\u043E\u0432\u0438\u0442\u044C \u0441\u0435\u0439\u0447\u0430\u0441",
       refreshing: "\u041E\u0431\u043D\u043E\u0432\u043B\u044F\u044E\u2026",
-      catalogLead: "\u041F\u0443\u0431\u043B\u0438\u0447\u043D\u044B\u0435 \u0438\u0441\u0442\u043E\u0447\u043D\u0438\u043A\u0438 \u0441 \u0444\u0438\u043A\u0441\u0438\u0440\u043E\u0432\u0430\u043D\u043D\u044B\u0445 \u0430\u0434\u0440\u0435\u0441\u043E\u0432: models.dev (\u043C\u043E\u0434\u0435\u043B\u0438, \u0446\u0435\u043D\u044B, \u043F\u0440\u0435\u0434\u0435\u043B\u044B), Artificial Analysis \u0438 LiveBench (\u0438\u0437\u043C\u0435\u0440\u0435\u043D\u043D\u044B\u0435 \u043E\u0446\u0435\u043D\u043A\u0438 \u043F\u043E \u043C\u043E\u0434\u0435\u043B\u0438 \u0438 \u0443\u0440\u043E\u0432\u043D\u044E \u0440\u0430\u0441\u0441\u0443\u0436\u0434\u0435\u043D\u0438\u044F), \u0441\u043F\u0438\u0441\u043E\u043A \u043C\u043E\u0434\u0435\u043B\u0435\u0439 OpenRouter. \u0422\u0435\u043A\u0441\u0442 \u0437\u0430\u0434\u0430\u0447 \u0438 \u043A\u043B\u044E\u0447\u0438 \u043D\u0435 \u043E\u0442\u043F\u0440\u0430\u0432\u043B\u044F\u044E\u0442\u0441\u044F. \u041E\u0446\u0435\u043D\u043A\u0430 \u043E\u0442\u043D\u043E\u0441\u0438\u0442\u0441\u044F \u043A \u043E\u0434\u043D\u043E\u0439 \u0442\u043E\u0447\u043D\u043E\u0439 \u043C\u043E\u0434\u0435\u043B\u0438 \u0438 \u0443\u0440\u043E\u0432\u043D\u044E \u0440\u0430\u0441\u0441\u0443\u0436\u0434\u0435\u043D\u0438\u044F, \u0434\u0440\u0443\u0433\u0438\u043C \u043D\u0435 \u043F\u0435\u0440\u0435\u0434\u0430\u0451\u0442\u0441\u044F; \u043C\u043E\u0434\u0435\u043B\u044C \u0431\u0435\u0437 \u0441\u043E\u0431\u0441\u0442\u0432\u0435\u043D\u043D\u043E\u0439 \u0441\u0442\u0440\u043E\u043A\u0438 \u043E\u0441\u0442\u0430\u0451\u0442\u0441\u044F \u043D\u0435\u0438\u0437\u0432\u0435\u0441\u0442\u043D\u043E\u0439. \u0421\u0442\u0430\u0440\u044B\u0435 \u043E\u0446\u0435\u043D\u043A\u0438 \u0443\u0447\u0438\u0442\u044B\u0432\u0430\u044E\u0442\u0441\u044F (\u0441 \u043F\u043E\u043C\u0435\u0442\u043A\u043E\u0439), \u0446\u0435\u043D\u044B \u0441\u0442\u0430\u0440\u0448\u0435 7 \u0434\u043D\u0435\u0439 \u2014 \u043D\u0435\u0442.",
+      catalogLead: "\u041E\u0442\u043A\u0440\u044B\u0442\u044B\u0435 \u0441\u043F\u0438\u0441\u043A\u0438 \u043C\u043E\u0434\u0435\u043B\u0435\u0439 \u0438 \u043E\u0446\u0435\u043D\u043A\u0438 \u0431\u0435\u043D\u0447\u043C\u0430\u0440\u043A\u043E\u0432; \u0447\u0438\u0442\u0430\u044E\u0442\u0441\u044F \u0431\u0435\u0437 \u0432\u0430\u0448\u0435\u0433\u043E \u043A\u043B\u044E\u0447\u0430 \u0438 \u0431\u0435\u0437 \u0442\u0435\u043A\u0441\u0442\u0430 \u0437\u0430\u0434\u0430\u0447.",
       sourceName: { "models.dev": "models.dev", "artificial-analysis": "Artificial Analysis", livebench: "LiveBench", openrouter: "\u041C\u043E\u0434\u0435\u043B\u0438 OpenRouter" },
-      source: (s, date) => `${s.fetchedAt === null ? "\u043D\u0435 \u0437\u0430\u0433\u0440\u0443\u0436\u0435\u043D\u043E" : `\u0437\u0430\u0433\u0440\u0443\u0436\u0435\u043D\u043E ${date(s.fetchedAt)}`}${s.version ? `, v${s.version}` : ""}${s.rows ? s.measured ? `, \u0438\u0437\u043C\u0435\u0440\u0435\u043D\u043E ${s.measured} \u0441\u0442\u0440\u043E\u043A \u0438\u0437 ${s.rows}` : `, \u0441\u0442\u0440\u043E\u043A: ${s.rows}` : ""}${s.fetchedAt !== null && s.stale ? " \u2014 \u0443\u0441\u0442\u0430\u0440\u0435\u043B\u043E" : ""}${s.error ? ` \u2014 ${s.error}` : ""}`,
+      source: (s, date) => `${s.fetchedAt === null ? "\u043D\u0435 \u0437\u0430\u0433\u0440\u0443\u0436\u0435\u043D\u043E" : `\u0437\u0430\u0433\u0440\u0443\u0436\u0435\u043D\u043E ${date(s.fetchedAt)}`}${s.version ? `, v${s.version}` : ""}${s.rows ? s.measured ? `, \u0438\u0437\u043C\u0435\u0440\u0435\u043D\u043E ${s.measured} \u0441\u0442\u0440\u043E\u043A \u0438\u0437 ${s.rows}` : `, \u0441\u0442\u0440\u043E\u043A: ${s.rows}` : ""}${s.fetchedAt !== null && s.stale ? " \u2014 \u0443\u0441\u0442\u0430\u0440\u0435\u043B\u043E" : ""}${s.error ? ` \u2014 ${catalogNote(s.error, "ru")}` : ""}`,
       bundled: "\u0414\u043E \u043F\u0435\u0440\u0432\u043E\u0439 \u0437\u0430\u0433\u0440\u0443\u0437\u043A\u0438 \u0438\u0441\u043F\u043E\u043B\u044C\u0437\u0443\u044E\u0442\u0441\u044F \u043E\u0446\u0435\u043D\u043A\u0438, \u043F\u043E\u0441\u0442\u0430\u0432\u043B\u044F\u0435\u043C\u044B\u0435 \u0441 \u043F\u043B\u0430\u0433\u0438\u043D\u043E\u043C.",
       next: (date) => `\u0421\u043B\u0435\u0434\u0443\u044E\u0449\u0435\u0435 \u0444\u043E\u043D\u043E\u0432\u043E\u0435 \u043E\u0431\u043D\u043E\u0432\u043B\u0435\u043D\u0438\u0435: ${date}.`,
       noNext: "\u0424\u043E\u043D\u043E\u0432\u043E\u0435 \u043E\u0431\u043D\u043E\u0432\u043B\u0435\u043D\u0438\u0435 \u0432\u044B\u043A\u043B\u044E\u0447\u0435\u043D\u043E (\u0438\u043B\u0438 \u043D\u0435\u0442 \u0432\u043A\u043B\u044E\u0447\u0451\u043D\u043D\u043E\u0433\u043E \u043F\u043E\u0441\u0442\u0430\u0432\u0449\u0438\u043A\u0430).",
       autoRefresh: "\u041E\u0431\u043D\u043E\u0432\u043B\u044F\u0442\u044C \u0432 \u0444\u043E\u043D\u0435",
       every: "\u043A\u0430\u0436\u0434\u044B\u0435, \u0447\u0430\u0441\u043E\u0432",
-      lastError: (e) => `\u041F\u043E\u0441\u043B\u0435\u0434\u043D\u0435\u0435 \u043E\u0431\u043D\u043E\u0432\u043B\u0435\u043D\u0438\u0435: ${e}.`,
+      lastError: (e) => `\u041F\u043E\u0441\u043B\u0435\u0434\u043D\u0435\u0435 \u043E\u0431\u043D\u043E\u0432\u043B\u0435\u043D\u0438\u0435: ${catalogNote(e, "ru")}.`,
       upstreams: "\u041F\u043E\u0441\u0442\u0430\u0432\u0449\u0438\u043A\u0438",
       none: "\u041F\u043E\u043A\u0430 \u043D\u0435\u0442.",
       add: "\u0414\u043E\u0431\u0430\u0432\u0438\u0442\u044C",
@@ -346,7 +398,7 @@
       idLabel: "\u0418\u043C\u044F (a-z, 0-9, -)",
       baseUrl: "\u0411\u0430\u0437\u043E\u0432\u044B\u0439 \u0430\u0434\u0440\u0435\u0441 (\u2026/v1)",
       trust: "\u0414\u043E\u0432\u0435\u0440\u044F\u044E \u0434\u043E",
-      trustHelp: "D3 \u2014 \u0442\u043E\u043B\u044C\u043A\u043E \u0441\u0435\u0440\u0432\u0435\u0440\u0443 \u043D\u0430 \u044D\u0442\u043E\u043C \u043A\u043E\u043C\u043F\u044C\u044E\u0442\u0435\u0440\u0435.",
+      trustHelp: "\u0421\u0435\u043A\u0440\u0435\u0442\u043D\u044B\u0435 \u0434\u0430\u043D\u043D\u044B\u0435 \u2014 \u0442\u043E\u043B\u044C\u043A\u043E \u0441\u0435\u0440\u0432\u0435\u0440\u0443 \u043D\u0430 \u044D\u0442\u043E\u043C \u043A\u043E\u043C\u043F\u044C\u044E\u0442\u0435\u0440\u0435.",
       keyFrom: "\u041A\u043B\u044E\u0447",
       keyOwn: "\u0421\u0432\u043E\u0439 \u043A\u043B\u044E\u0447",
       keyJev: "\u041A\u043B\u044E\u0447 Jev \xB7 OpenRouter",
@@ -378,20 +430,20 @@
       priceOut: "$/\u041C \u0432\u044B\u0445\u043E\u0434",
       addModel: "\u0414\u043E\u0431\u0430\u0432\u0438\u0442\u044C \u043C\u043E\u0434\u0435\u043B\u044C",
       noModels: "\u041C\u043E\u0434\u0435\u043B\u0435\u0439 \u043D\u0435\u0442: \u0434\u043E\u0431\u0430\u0432\u044C\u0442\u0435 \u0445\u043E\u0442\u044F \u0431\u044B \u043E\u0434\u043D\u0443.",
-      tableHelp: "\u0426\u0435\u043D\u0430, \u043A\u043E\u043D\u0442\u0435\u043A\u0441\u0442 \u0438 \u043E\u0446\u0435\u043D\u043A\u0430 \u0431\u0435\u0440\u0443\u0442\u0441\u044F \u0438\u0437 \u043A\u0430\u0442\u0430\u043B\u043E\u0433\u0430 (\u0442\u043E\u043B\u044C\u043A\u043E \u0447\u0442\u0435\u043D\u0438\u0435). \u0421\u043D\u0438\u043C\u0438\u0442\u0435 \u043E\u0442\u043C\u0435\u0442\u043A\u0443, \u0447\u0442\u043E\u0431\u044B \u0438\u0441\u043A\u043B\u044E\u0447\u0438\u0442\u044C \u043C\u043E\u0434\u0435\u043B\u044C. \u0420\u0443\u0447\u043D\u043E\u0439 \u0443\u0440\u043E\u0432\u0435\u043D\u044C \u0434\u0430\u0451\u0442 \u043C\u043E\u0434\u0435\u043B\u0438 \u0445\u043E\u0434\u044B \u044D\u0442\u043E\u0433\u043E \u0443\u0440\u043E\u0432\u043D\u044F \u0432 \u043F\u0435\u0440\u0432\u0443\u044E \u043E\u0447\u0435\u0440\u0435\u0434\u044C; \u0443\u0440\u043E\u0432\u0435\u043D\u044C \u0440\u0430\u0441\u0441\u0443\u0436\u0434\u0435\u043D\u0438\u044F \u0443\u043A\u0430\u0437\u044B\u0432\u0430\u0435\u0442 \u043D\u0430\u0441\u0442\u0440\u043E\u0439\u043A\u0443, \u0441 \u043A\u043E\u0442\u043E\u0440\u043E\u0439 \u043E\u043D\u0430 \u0440\u0430\u0431\u043E\u0442\u0430\u0435\u0442 (\u043D\u0430 OpenRouter \xAB\u0410\u0432\u0442\u043E\xBB \u0435\u0433\u043E \u043E\u0442\u043F\u0440\u0430\u0432\u043B\u044F\u0435\u0442).",
+      tableHelp: "\u0421\u043D\u0438\u043C\u0438\u0442\u0435 \u043E\u0442\u043C\u0435\u0442\u043A\u0443, \u0447\u0442\u043E\u0431\u044B \u0438\u0441\u043A\u043B\u044E\u0447\u0438\u0442\u044C \u043C\u043E\u0434\u0435\u043B\u044C. \u0418\u0441\u0442\u043E\u0447\u043D\u0438\u043A \u043E\u0446\u0435\u043D\u043A\u0438 \u2014 \u0432 \u043F\u043E\u0434\u0441\u043A\u0430\u0437\u043A\u0435.",
       checkOk: (listed, missing) => `\u0420\u0430\u0431\u043E\u0442\u0430\u0435\u0442${listed !== null ? ` (\u043C\u043E\u0434\u0435\u043B\u0435\u0439 \u0432 \u0441\u043F\u0438\u0441\u043A\u0435: ${listed})` : ""}.${missing.length ? ` \u041D\u0435\u0442 \u0432 \u0435\u0433\u043E \u0441\u043F\u0438\u0441\u043A\u0435: ${missing.join(", ")}.` : ""}`,
       checkFail: (status2) => status2 === null ? "\u041D\u0435\u0442 \u043E\u0442\u0432\u0435\u0442\u0430 \u0438\u043B\u0438 \u043D\u0435 \u0441\u043E\u0445\u0440\u0430\u043D\u0451\u043D \u043A\u043B\u044E\u0447." : `\u041E\u0442\u0432\u0435\u0442: ${status2}.`,
       choices: "\u0412\u044B\u0431\u043E\u0440",
       preference: "\u041F\u0440\u0435\u0434\u043F\u043E\u0447\u0442\u0435\u043D\u0438\u0435",
       pref: { cheap: "\u0414\u0435\u0448\u0435\u0432\u043B\u0435", balanced: "\u0421\u0431\u0430\u043B\u0430\u043D\u0441\u0438\u0440\u043E\u0432\u0430\u043D\u043D\u043E", best: "\u041B\u0443\u0447\u0448\u0435" },
-      prefHelp: "\u041A\u0430\u0436\u0434\u044B\u0439 \u0445\u043E\u0434 \u043F\u043E\u043B\u0443\u0447\u0430\u0435\u0442 \u0441\u0430\u043C\u0443\u044E \u0434\u0435\u0448\u0451\u0432\u0443\u044E \u043C\u043E\u0434\u0435\u043B\u044C, \u0447\u044C\u044F \u043E\u0446\u0435\u043D\u043A\u0430 \u0434\u043B\u044F \u0435\u0433\u043E \u0442\u0438\u043F\u0430 \u0437\u0430\u0434\u0430\u0447\u0438 \u043D\u0435 \u0431\u043E\u043B\u0435\u0435 \u0447\u0435\u043C \u043D\u0430 \u043D\u0435\u0441\u043A\u043E\u043B\u044C\u043A\u043E \u0431\u0430\u043B\u043B\u043E\u0432 \u043D\u0438\u0436\u0435 \u043B\u0443\u0447\u0448\u0435\u0439: \xAB\u0421\u0431\u0430\u043B\u0430\u043D\u0441\u0438\u0440\u043E\u0432\u0430\u043D\u043D\u043E\xBB \u2014 8 / 5 / 3 \u0431\u0430\u043B\u043B\u0430 \u043D\u0430 \u043C\u0430\u043B\u0435\u043D\u044C\u043A\u043E\u043C / \u0441\u0440\u0435\u0434\u043D\u0435\u043C / \u0431\u043E\u043B\u044C\u0448\u043E\u043C \u0445\u043E\u0434\u0435, \xAB\u0414\u0435\u0448\u0435\u0432\u043B\u0435\xBB \u2014 15 / 10 / 5, \xAB\u041B\u0443\u0447\u0448\u0435\xBB \u2014 \u043D\u0438\u0441\u043A\u043E\u043B\u044C\u043A\u043E. \u0412 \u044D\u0442\u0438\u0445 \u043F\u0440\u0435\u0434\u0435\u043B\u0430\u0445 \u043F\u0440\u0435\u0434\u043F\u043E\u0447\u0438\u0442\u0430\u0435\u0442\u0441\u044F \u0438 \u043C\u0435\u043D\u044C\u0448\u0438\u0439 \u0443\u0440\u043E\u0432\u0435\u043D\u044C \u0440\u0430\u0441\u0441\u0443\u0436\u0434\u0435\u043D\u0438\u044F, \u043A\u0440\u043E\u043C\u0435 \u0431\u043E\u043B\u044C\u0448\u0438\u0445 \u0445\u043E\u0434\u043E\u0432. \xAB\u041C\u0430\u043B\u0435\u043D\u044C\u043A\u0438\u0439\xBB \u0445\u043E\u0434 \u043E\u043F\u0440\u0435\u0434\u0435\u043B\u044F\u0435\u0442 \u0442\u043E\u043B\u044C\u043A\u043E Jev (\u2265 0,5 \u043D\u0430 \u0434\u0432\u0443\u0445 \u0441\u0430\u043C\u044B\u0445 \u043F\u0440\u043E\u0441\u0442\u044B\u0445 \u0443\u0440\u043E\u0432\u043D\u044F\u0445; 0,7 \u0434\u043B\u044F \u0438\u0441\u0441\u043B\u0435\u0434\u043E\u0432\u0430\u043D\u0438\u044F \u0438 \u0440\u0435\u0432\u044C\u044E); \u0445\u043E\u0434\u044B \u043E\u0440\u043A\u0435\u0441\u0442\u0440\u0430\u0442\u043E\u0440\u0430 \u043C\u0430\u043B\u0435\u043D\u044C\u043A\u0438\u043C\u0438 \u043D\u0435 \u0431\u044B\u0432\u0430\u044E\u0442. \u041D\u0435\u0438\u0437\u0432\u0435\u0441\u0442\u043D\u0430\u044F \u043E\u0446\u0435\u043D\u043A\u0430 \u043D\u0438\u043A\u043E\u0433\u0434\u0430 \u043D\u0435 \u043F\u043E\u0431\u0435\u0436\u0434\u0430\u0435\u0442 \u0438\u0437\u0432\u0435\u0441\u0442\u043D\u0443\u044E; \u043A\u0430\u0436\u0434\u043E\u0435 \u0440\u0435\u0448\u0435\u043D\u0438\u0435 \u043F\u043E\u043A\u0430\u0437\u044B\u0432\u0430\u0435\u0442, \u0447\u0435\u043C \u043F\u043E\u0436\u0435\u0440\u0442\u0432\u043E\u0432\u0430\u043B\u043E.",
-      cheaper: "\u0420\u0443\u0447\u043D\u044B\u0435 \u0443\u0440\u043E\u0432\u043D\u0438: \u0435\u0441\u043B\u0438 \u043D\u0430 \u0443\u0440\u043E\u0432\u043D\u0435 \u043D\u0435\u0442 \u0434\u043E\u0441\u0442\u0443\u043F\u043D\u043E\u0439 \u043C\u043E\u0434\u0435\u043B\u0438, \u043C\u043E\u0436\u0435\u0442 \u043E\u0442\u0432\u0435\u0442\u0438\u0442\u044C \u0431\u043E\u043B\u0435\u0435 \u0434\u0435\u0448\u0451\u0432\u044B\u0439 (\u0441\u043D\u0430\u0447\u0430\u043B\u0430 \u0432\u0441\u0435\u0433\u0434\u0430 \u043F\u0440\u043E\u0431\u0443\u0435\u0442\u0441\u044F \u0431\u043E\u043B\u0435\u0435 \u0441\u0438\u043B\u044C\u043D\u044B\u0439)",
+      prefHelp: "\xAB\u0414\u0435\u0448\u0435\u0432\u043B\u0435\xBB \u0443\u0441\u0442\u0443\u043F\u0430\u0435\u0442 \u043D\u0435\u043C\u043D\u043E\u0433\u043E \u043A\u0430\u0447\u0435\u0441\u0442\u0432\u0430 \u0440\u0430\u0434\u0438 \u0446\u0435\u043D\u044B; \xAB\u041B\u0443\u0447\u0448\u0435\xBB \u0432\u0441\u0435\u0433\u0434\u0430 \u0431\u0435\u0440\u0451\u0442 \u043C\u043E\u0434\u0435\u043B\u044C \u0441 \u043B\u0443\u0447\u0448\u0435\u0439 \u043E\u0446\u0435\u043D\u043A\u043E\u0439.",
+      cheaper: "\u0415\u0441\u043B\u0438 \u0437\u0430\u043A\u0440\u0435\u043F\u043B\u0451\u043D\u043D\u0430\u044F \u0437\u0430 \u0443\u0440\u043E\u0432\u043D\u0435\u043C \u043C\u043E\u0434\u0435\u043B\u044C \u043D\u0435\u0434\u043E\u0441\u0442\u0443\u043F\u043D\u0430, \u043C\u043E\u0436\u0435\u0442 \u043E\u0442\u0432\u0435\u0442\u0438\u0442\u044C \u0431\u043E\u043B\u0435\u0435 \u0434\u0435\u0448\u0451\u0432\u044B\u0439 \u0443\u0440\u043E\u0432\u0435\u043D\u044C",
       decider: "\u041A\u0442\u043E \u043E\u0446\u0435\u043D\u0438\u0432\u0430\u0435\u0442 \u0445\u043E\u0434",
       deciderJev: "Jev, \u0441\u043B\u043E\u0432\u0435\u0441\u043D\u044B\u0435 \u043F\u0440\u0430\u0432\u0438\u043B\u0430, \u0435\u0441\u043B\u0438 \u043E\u043D \u043D\u0435 \u043E\u0442\u0432\u0435\u0442\u0438\u043B",
       deciderRules: "\u0422\u043E\u043B\u044C\u043A\u043E \u0441\u043B\u043E\u0432\u0435\u0441\u043D\u044B\u0435 \u043F\u0440\u0430\u0432\u0438\u043B\u0430",
       daily: "\u041F\u0440\u0435\u0434\u0435\u043B \u0432 \u0434\u0435\u043D\u044C, USD",
       perCard: "\u041D\u0430 \u043E\u043A\u043D\u043E, USD",
-      capsHelp: "\u0421\u0447\u0438\u0442\u0430\u0435\u0442\u0441\u044F \u043F\u043E \u0441\u0442\u043E\u0438\u043C\u043E\u0441\u0442\u0438, \u043A\u043E\u0442\u043E\u0440\u0443\u044E \u0441\u043E\u043E\u0431\u0449\u0430\u0435\u0442 \u043F\u043E\u0441\u0442\u0430\u0432\u0449\u0438\u043A, \u0438\u043B\u0438 \u043F\u043E \u0446\u0435\u043D\u0430\u043C \u043A\u0430\u0442\u0430\u043B\u043E\u0433\u0430. 0 \u043E\u0441\u0442\u0430\u043D\u0430\u0432\u043B\u0438\u0432\u0430\u0435\u0442 \xAB\u0410\u0432\u0442\u043E\xBB.",
+      capsHelp: "\u041A\u043E\u0433\u0434\u0430 \u043F\u0440\u0435\u0434\u0435\u043B \u043F\u043E\u0442\u0440\u0430\u0447\u0435\u043D, \xAB\u0410\u0432\u0442\u043E\xBB \u043E\u0441\u0442\u0430\u043D\u0430\u0432\u043B\u0438\u0432\u0430\u0435\u0442\u0441\u044F. 0 \u0432\u044B\u043A\u043B\u044E\u0447\u0430\u0435\u0442 \u0435\u0433\u043E.",
       save: "\u0421\u043E\u0445\u0440\u0430\u043D\u0438\u0442\u044C",
       strategies: "\u041D\u0435\u0441\u043A\u043E\u043B\u044C\u043A\u043E \u043C\u043E\u0434\u0435\u043B\u0435\u0439 \u043D\u0430 \u0441\u043B\u043E\u0436\u043D\u044B\u0445 \u0445\u043E\u0434\u0430\u0445",
       consensus: "\u041A\u043E\u043D\u0441\u0435\u043D\u0441\u0443\u0441",
@@ -399,11 +451,13 @@
       models_k: "\u041C\u043E\u0434\u0435\u043B\u0435\u0439 \u0432 \u043A\u043E\u043D\u0441\u0435\u043D\u0441\u0443\u0441\u0435",
       bestOfN: "\u0421\u0440\u0430\u0432\u043D\u0438\u0432\u0430\u0442\u044C \u043D\u0435\u0441\u043A\u043E\u043B\u044C\u043A\u043E \u043C\u043E\u0434\u0435\u043B\u0435\u0439 \u0438 \u043E\u0441\u0442\u0430\u0432\u043B\u044F\u0442\u044C \u043B\u0443\u0447\u0448\u0438\u0439 \u043E\u0442\u0432\u0435\u0442 (\u043B\u0443\u0447\u0448\u0438\u0439 \u0438\u0437 N)",
       turnCap: "\u041D\u0435 \u0431\u043E\u043B\u044C\u0448\u0435 \u0437\u0430 \u0445\u043E\u0434, USD",
-      strategyHelp: "\u0422\u043E\u043B\u044C\u043A\u043E \u0441\u043B\u043E\u0436\u043D\u044B\u0435 \u0442\u0435\u043A\u0441\u0442\u043E\u0432\u044B\u0435 \u0445\u043E\u0434\u044B (\u0430\u0440\u0445\u0438\u0442\u0435\u043A\u0442\u0443\u0440\u0430, \u0434\u0438\u0437\u0430\u0439\u043D, \u0438\u0441\u0441\u043B\u0435\u0434\u043E\u0432\u0430\u043D\u0438\u0435, \u0440\u0435\u0432\u044C\u044E, \u0442\u0435\u043A\u0441\u0442\u044B) \u043E\u043A\u043D\u0430 \u0430\u0433\u0435\u043D\u0442\u0430; \u043D\u0438\u043A\u043E\u0433\u0434\u0430 \u0448\u0430\u0433 \u0438\u043D\u0441\u0442\u0440\u0443\u043C\u0435\u043D\u0442\u0430, \u0437\u0430\u0433\u043E\u043B\u043E\u0432\u043E\u043A \u0438\u043B\u0438 \u043E\u0440\u043A\u0435\u0441\u0442\u0440\u0430\u0442\u043E\u0440. \u041F\u043E \u0443\u043C\u043E\u043B\u0447\u0430\u043D\u0438\u044E \u043E\u0442\u0432\u0435\u0447\u0430\u0435\u0442 \u043E\u0434\u043D\u0430 \u043E\u0447\u0435\u043D\u044C \u0441\u0438\u043B\u044C\u043D\u0430\u044F \u043C\u043E\u0434\u0435\u043B\u044C. \u041A\u043E\u043D\u0441\u0435\u043D\u0441\u0443\u0441 \u0441\u043F\u0440\u0430\u0448\u0438\u0432\u0430\u0435\u0442 2\u20133 \u0447\u0443\u0442\u044C \u0431\u043E\u043B\u0435\u0435 \u0441\u043B\u0430\u0431\u044B\u0435 \u043C\u043E\u0434\u0435\u043B\u0438 \u0440\u0430\u0437\u043D\u044B\u0445 \u043F\u0440\u043E\u0438\u0437\u0432\u043E\u0434\u0438\u0442\u0435\u043B\u0435\u0439 (\u0434\u043E 8 \u0431\u0430\u043B\u043B\u043E\u0432 \u043D\u0438\u0436\u0435 \u043B\u0443\u0447\u0448\u0435\u0439), \u0437\u0430\u0442\u0435\u043C \u0441\u0438\u043B\u044C\u043D\u0430\u044F \u043C\u043E\u0434\u0435\u043B\u044C \u0441\u0432\u043E\u0434\u0438\u0442 \u0438\u0445 \u0447\u0435\u0440\u043D\u043E\u0432\u0438\u043A\u0438; \u0432 \u0440\u0435\u0436\u0438\u043C\u0435 \xAB\u0410\u0432\u0442\u043E\xBB \u2014 \u0442\u043E\u043B\u044C\u043A\u043E \u043A\u043E\u0433\u0434\u0430 \u043E\u0436\u0438\u0434\u0430\u0435\u043C\u0430\u044F \u043F\u043E\u043B\u044C\u0437\u0430 \u0432\u044B\u0448\u0435, \u0447\u0435\u043C \u0443 \u043E\u0434\u043D\u043E\u0439 \u043C\u043E\u0434\u0435\u043B\u0438: \u043E\u0446\u0435\u043D\u043A\u0430 \u0441\u0443\u0434\u044C\u0438 \u043F\u043B\u044E\u0441 1,5 \u0431\u0430\u043B\u043B\u0430 \u0437\u0430 \u043A\u0430\u0436\u0434\u043E\u0433\u043E \u0434\u0440\u0443\u0433\u043E\u0433\u043E \u043F\u0440\u043E\u0438\u0437\u0432\u043E\u0434\u0438\u0442\u0435\u043B\u044F (\u043D\u0435 \u0431\u043E\u043B\u044C\u0448\u0435 3) \u043C\u0438\u043D\u0443\u0441 \u0441\u0442\u043E\u0438\u043C\u043E\u0441\u0442\u044C (\xAB\u0414\u0435\u0448\u0435\u0432\u043B\u0435\xBB \xD73, \xAB\u0421\u0431\u0430\u043B\u0430\u043D\u0441\u0438\u0440\u043E\u0432\u0430\u043D\u043D\u043E\xBB \xD71, \xAB\u041B\u0443\u0447\u0448\u0435\xBB \xD70 \u0437\u0430 \u043A\u0430\u0436\u0434\u043E\u0435 \u0443\u0434\u0432\u043E\u0435\u043D\u0438\u0435) \u0438 \u043E\u0436\u0438\u0434\u0430\u043D\u0438\u0435 (\u043A\u043E\u0433\u0434\u0430 \u0441\u043A\u043E\u0440\u043E\u0441\u0442\u0438 \u0438\u0437\u0432\u0435\u0441\u0442\u043D\u044B). \xAB\u041B\u0443\u0447\u0448\u0438\u0439 \u0438\u0437 N\xBB (\u0432\u044B\u043A\u043B\u044E\u0447\u0435\u043D, \u043F\u043E\u043A\u0430 \u0432\u044B \u0435\u0433\u043E \u043D\u0435 \u0432\u043A\u043B\u044E\u0447\u0438\u0442\u0435) \u0441\u0440\u0430\u0432\u043D\u0438\u0432\u0430\u0435\u0442 \u0432\u043C\u0435\u0441\u0442\u043E \u0441\u0432\u0435\u0434\u0435\u043D\u0438\u044F. \u0415\u0441\u043B\u0438 \u0447\u0435\u0440\u043D\u043E\u0432\u0438\u043A \u0432\u044B\u0437\u044B\u0432\u0430\u0435\u0442 \u0438\u043D\u0441\u0442\u0440\u0443\u043C\u0435\u043D\u0442, \u0445\u043E\u0434 \u0441\u0442\u0430\u043D\u043E\u0432\u0438\u0442\u0441\u044F \u043E\u0431\u044B\u0447\u043D\u044B\u043C: \u0431\u0435\u0440\u0451\u0442\u0441\u044F \u043E\u0442\u0432\u0435\u0442 \u043E\u0434\u043D\u043E\u0439 \u043C\u043E\u0434\u0435\u043B\u0438, \u043E\u0441\u0442\u0430\u043B\u044C\u043D\u044B\u0435 \u043E\u0441\u0442\u0430\u043D\u0430\u0432\u043B\u0438\u0432\u0430\u044E\u0442\u0441\u044F. \u0412\u0441\u0435 \u0447\u0435\u0440\u043D\u043E\u0432\u0438\u043A\u0438 \u0438 \u0441\u0443\u0434\u044C\u044F \u0441\u043D\u0430\u0447\u0430\u043B\u0430 \u0440\u0435\u0437\u0435\u0440\u0432\u0438\u0440\u0443\u044E\u0442\u0441\u044F \u0432 \u043F\u0440\u0435\u0434\u0435\u043B\u0430\u0445 \u043B\u0438\u043C\u0438\u0442\u043E\u0432; \u0430\u0434\u0440\u0435\u0441 \u043F\u043B\u0430\u043D\u0430 \u0441 \u0444\u0438\u043A\u0441\u0438\u0440\u043E\u0432\u0430\u043D\u043D\u044B\u043C \u0442\u0430\u0440\u0438\u0444\u043E\u043C \u043F\u043E\u043B\u0443\u0447\u0430\u0435\u0442 \u043D\u0435 \u0431\u043E\u043B\u044C\u0448\u0435 2 \u0437\u0430\u043F\u0440\u043E\u0441\u043E\u0432 \u043E\u0434\u043D\u043E\u0432\u0440\u0435\u043C\u0435\u043D\u043D\u043E.",
+      strategyHelp: "\u0422\u043E\u043B\u044C\u043A\u043E \u0434\u043B\u044F \u0441\u043B\u043E\u0436\u043D\u044B\u0445 \u0445\u043E\u0434\u043E\u0432 \u0441 \u0442\u0435\u043A\u0441\u0442\u043E\u043C \u0438 \u043F\u0440\u043E\u0435\u043A\u0442\u0438\u0440\u043E\u0432\u0430\u043D\u0438\u0435\u043C. \xAB\u0410\u0432\u0442\u043E\xBB: \u0442\u043E\u043B\u044C\u043A\u043E \u043A\u043E\u0433\u0434\u0430 \u043D\u0435\u0441\u043A\u043E\u043B\u044C\u043A\u043E \u043C\u043E\u0434\u0435\u043B\u0435\u0439, \u0432\u0435\u0440\u043E\u044F\u0442\u043D\u043E, \u043B\u0443\u0447\u0448\u0435 \u043E\u0434\u043D\u043E\u0439 \u0441\u0438\u043B\u044C\u043D\u043E\u0439 \u0437\u0430 \u0441\u0432\u043E\u044E \u0446\u0435\u043D\u0443. \xAB\u041B\u0443\u0447\u0448\u0438\u0439 \u0438\u0437 N\xBB \u0432\u044B\u043A\u043B\u044E\u0447\u0435\u043D, \u043F\u043E\u043A\u0430 \u0432\u044B \u0435\u0433\u043E \u043D\u0435 \u0432\u043A\u043B\u044E\u0447\u0438\u0442\u0435.",
       strategyOf: { single: "\u043E\u0434\u043D\u0430 \u043C\u043E\u0434\u0435\u043B\u044C", consensus: "\u043A\u043E\u043D\u0441\u0435\u043D\u0441\u0443\u0441", "best-of-n": "\u043B\u0443\u0447\u0448\u0438\u0439 \u0438\u0437 N" },
       fanOutcome: { merged: "\u0441\u0432\u0435\u0434\u0435\u043D\u043E", picked: "\u0432\u044B\u0431\u0440\u0430\u043D \u043B\u0443\u0447\u0448\u0438\u0439", tool_calls: "\u0432\u044B\u0437\u043E\u0432 \u0438\u043D\u0441\u0442\u0440\u0443\u043C\u0435\u043D\u0442\u0430: \u043E\u0434\u043D\u0430 \u043C\u043E\u0434\u0435\u043B\u044C", one_draft: "\u043E\u0441\u0442\u0430\u043B\u0441\u044F \u043E\u0434\u0438\u043D \u0447\u0435\u0440\u043D\u043E\u0432\u0438\u043A", no_draft: "\u043D\u0435\u0442 \u0447\u0435\u0440\u043D\u043E\u0432\u0438\u043A\u043E\u0432: \u043E\u0434\u043D\u0430 \u043C\u043E\u0434\u0435\u043B\u044C", judge_failed: "\u0441\u0443\u0434\u044C\u044F \u043D\u0435 \u043E\u0442\u0432\u0435\u0442\u0438\u043B: \u043B\u0443\u0447\u0448\u0438\u0439 \u0447\u0435\u0440\u043D\u043E\u0432\u0438\u043A" },
       drafts: (ok, all) => `\u0447\u0435\u0440\u043D\u043E\u0432\u0438\u043A\u043E\u0432: ${ok} \u0438\u0437 ${all}`,
       fanStats: (s) => s.fanOuts ? ` \u041D\u0435\u0441\u043A\u043E\u043B\u044C\u043A\u043E \u043C\u043E\u0434\u0435\u043B\u0435\u0439: \u0445\u043E\u0434\u043E\u0432 ${s.fanOuts}, \u0441\u0432\u0435\u0434\u0435\u043D\u043E ${s.merged}, \u043E\u043A\u0430\u0437\u0430\u043B\u0438\u0441\u044C \u0441 \u0438\u043D\u0441\u0442\u0440\u0443\u043C\u0435\u043D\u0442\u0430\u043C\u0438 ${s.fanOutToolCalls}, \u0431\u0435\u0437 \u0447\u0430\u0441\u0442\u0438 \u0447\u0435\u0440\u043D\u043E\u0432\u0438\u043A\u043E\u0432 ${s.fanOutDegraded}, \u043E\u0442\u043A\u0430\u0437\u043E\u0432 \u0441\u0443\u0434\u044C\u0438 ${s.judgeFailed}.` : "",
+      classes: { D0: "\u041E\u0442\u043A\u0440\u044B\u0442\u044B\u0435", D1: "\u0412\u043D\u0443\u0442\u0440\u0435\u043D\u043D\u0438\u0435", D2: "\u041A\u043E\u043D\u0444\u0438\u0434\u0435\u043D\u0446\u0438\u0430\u043B\u044C\u043D\u044B\u0435", D3: "\u0421\u0435\u043A\u0440\u0435\u0442\u043D\u044B\u0435" },
+      turnLine: (r) => `${r.model ?? "\u2014"} \xB7 ${r.taskType ? AUTO_TYPE_RU[r.taskType] ?? r.taskType : "\u2014"}, ${r.difficulty ? AUTO_LEVEL_RU[r.difficulty] ?? r.difficulty : "\u2014"}${r.strategy && r.strategy !== "single" ? " \xB7 \u043D\u0435\u0441\u043A\u043E\u043B\u044C\u043A\u043E \u043C\u043E\u0434\u0435\u043B\u0435\u0439" : ""}${r.costUsd !== null ? ` \xB7 $${r.costUsd.toFixed(4)}` : ""}`,
       recent: "\u041F\u043E\u0441\u043B\u0435\u0434\u043D\u0438\u0435 \u0440\u0435\u0448\u0435\u043D\u0438\u044F",
       noRecent: "\u041F\u043E\u043A\u0430 \u043D\u0438\u0447\u0435\u0433\u043E \u043D\u0435 \u043C\u0430\u0440\u0448\u0440\u0443\u0442\u0438\u0437\u0438\u0440\u043E\u0432\u0430\u043D\u043E.",
       stats: (s) => `\u0412\u044B\u0437\u043E\u0432\u043E\u0432 \u043C\u043E\u0434\u0435\u043B\u0435\u0439: ${s.requests}, Jev \u0441\u043F\u0440\u043E\u0448\u0435\u043D ${s.jevAsked} \u0440\u0430\u0437 (\u043E\u0442\u0432\u0435\u0442\u0438\u043B ${s.jevAnswered}), \u0440\u0435\u0448\u0435\u043D\u0438\u0435 \u0445\u043E\u0434\u0430 \u043F\u043E\u0432\u0442\u043E\u0440\u043D\u043E: ${s.leaseReuses}, \u043F\u0435\u0440\u0435\u043A\u043B\u044E\u0447\u0435\u043D\u0438\u0439: ${s.failovers}; \u0441\u0435\u0433\u043E\u0434\u043D\u044F $${s.spentToday.toFixed(4)}; ${s.listening ? `\u0441\u043B\u0443\u0448\u0430\u0435\u0442, \u043E\u043A\u043E\u043D: ${s.cards}` : "\u043D\u0435 \u0441\u043B\u0443\u0448\u0430\u0435\u0442"}${s.hosts.length ? `; \u043E\u0442\u043F\u0440\u0430\u0432\u043B\u0435\u043D\u043E \u043D\u0430 ${s.hosts.join(", ")}` : ""}.`,
@@ -475,7 +529,7 @@
     section.append(el("h2", { textContent: t2.recent }), el("p", { className: "muted", textContent: t2.stats(state2.stats) + t2.fanStats(state2.stats), dataset: { auto: "stats" } }));
     const recent = el("ul", { className: "recent", dataset: { auto: "recent" } });
     if (!state2.recent.length) recent.append(el("li", { className: "muted", textContent: t2.noRecent }));
-    for (const record of state2.recent.slice(0, 20)) recent.append(recentRow(record, t2));
+    for (const record of state2.recent.slice(0, 5)) recent.append(recentRow(record, t2));
     section.append(recent);
     return section;
   }
@@ -586,7 +640,7 @@
     });
     const item = el("li", { className: "backend", dataset: { upstream: upstream.id } });
     item.append(el("div", { className: "row" }, el("strong", { textContent: `${t2.preset[upstream.preset] ?? upstream.preset} \xB7 ${upstream.id}` }), el("span", { className: "muted", textContent: upstream.baseUrl })));
-    const trustOptions = [["D0", "D0"], ["D1", "D1"], ["D2", "D2"], ...isLocal(upstream.baseUrl) ? [["D3", "D3"]] : []];
+    const trustOptions = ["D0", "D1", "D2", ...isLocal(upstream.baseUrl) ? ["D3"] : []].map((c) => [c, t2.classes[c] ?? c]);
     const check = el("button", { type: "button", textContent: t2.check, name: `auto-check-${upstream.id}` });
     check.addEventListener("click", () => {
       view.checks.set(upstream.id, t2.checking);
@@ -715,7 +769,7 @@
     else {
       const table = el("table", { className: "model-table" });
       const head = el("tr");
-      for (const label of [t2.col.use, t2.col.model, t2.col.context, t2.col.price, t2.col.score, t2.col.efforts, t2.col.effort, t2.col.tier, t2.col.remove]) head.append(el("th", { textContent: label }));
+      for (const label of [t2.col.use, t2.col.model, t2.col.score, t2.col.effort, t2.col.tier, t2.col.remove]) head.append(el("th", { textContent: label }));
       table.append(el("thead", {}, head));
       const body = el("tbody");
       for (const row2 of matching.slice(0, shownCount)) {
@@ -748,15 +802,17 @@
         drop.addEventListener("click", () => edit((entry) => {
           entry.models = entry.models.filter((other) => other.id !== row2.id);
         }));
+        const price = row2.priceIn === null && row2.priceOut === null ? t2.unknown : `$${usd(row2.priceIn)} \xB7 $${usd(row2.priceOut)}`;
+        const scoreCell = el("td", { textContent: score ? `${score.value.toFixed(1)}${score.effort ? ` @${score.effort}` : ""}${score.historical ? ` (${t2.old})` : ""}` : t2.unknown });
+        if (score || row2.measuredEfforts.length) scoreCell.title = [score ? score.label : null, row2.measuredEfforts.length ? `${t2.col.efforts}: ${row2.measuredEfforts.join(", ")}` : null].filter(Boolean).join(" \xB7 ");
+        const modelCell = el("td", {}, el("code", { textContent: row2.id }), el("div", { className: "muted", textContent: `${kTokens(row2.context)} \xB7 ${price}` }));
+        if (priceFrom) modelCell.title = `${t2.col.price}: ${priceFrom}`;
         body.append(el(
           "tr",
           { dataset: { model: row2.id } },
           el("td", {}, use),
-          el("td", {}, el("code", { textContent: row2.id })),
-          el("td", { textContent: kTokens(row2.context) }),
-          el("td", { textContent: row2.priceIn === null && row2.priceOut === null ? t2.unknown : `${usd(row2.priceIn)} \xB7 ${usd(row2.priceOut)}${priceFrom ? ` (${priceFrom})` : ""}` }),
-          el("td", { textContent: score ? `${score.value.toFixed(1)}${score.effort ? ` @${score.effort}` : ""} \xB7 ${score.label}${score.historical ? ` \xB7 ${t2.old}` : ""}` : t2.unknown }),
-          el("td", { textContent: row2.measuredEfforts.join(", ") || "\u2014" }),
+          modelCell,
+          scoreCell,
           el("td", {}, effortSelect),
           el("td", {}, tierSelect),
           el("td", {}, row2.listed && !row2.fromList ? drop : "")
@@ -842,7 +898,7 @@
   var ROUTE_PAGE_STRINGS = {
     en: {
       title: "Where agents run",
-      lead: "What the orchestrator's route tool chooses from when it starts a subagent: your subscriptions and coding plans (each reached only through its own CLI and its own sign-in), model accounts of the Accounts plugin, Model: Auto (Jev), and any other CLI on its own default model as the last fallback. A model is chosen by its measured score for the task type, then by price or by how much of a window it would take; a subscription with headroom above your reserve costs nothing. Nothing is started here, and the orchestrator's spawn is still checked by CanvasTTY.",
+      lead: "Where an orchestrator's subagents run: your subscriptions and plans first when they have room, then model accounts and Auto. Nothing starts here.",
       limits: (age) => age === null ? "Limit windows: not read yet." : `Limit windows: read ${age}. They are read while this page is open; after 30 minutes without it they count as unknown, never as used up.`,
       readNow: "Read now",
       plans: "Subscriptions and coding plans",
@@ -880,7 +936,7 @@
       speeds: "Output speeds (model=tokens/s, \u2026; empty: Artificial Analysis's measured speeds)",
       valueSpeed: "On plans, value speed",
       speed: { low: "little", moderate: "moderately", high: "a lot" },
-      planHelp: "On a plan a model costs the quota it uses and the time it takes: its expected tokens (a small model \xD71.2 until outcomes say otherwise) times its quota weight (by default its API price against the plan's top model), and its time: your speeds, else the output speed and first-chunk time Artificial Analysis measured for that model and effort. A model with no known speed counts as fast as the plan's top model (neither faster nor slower). Within the quality window the cheapest wins for small and medium tasks; large or risky tasks stay quality-first.",
+      planHelp: 'On a plan, a model costs the share of the plan it uses and the time it takes. Details: README, "How Auto decides".',
       other: "Other routes",
       autoRoute: "Model: Auto (Jev) as a subagent route",
       never: "Never use this CLI on its own sign-in",
@@ -913,6 +969,7 @@
       strategy: { "single-cheap": "one cheap", "single-strong": "one strong" },
       type: { coding: "coding", review: "review", research: "research", writing: "writing", chat: "chat" },
       level: { small: "small", medium: "medium", large: "large" },
+      classes: { D0: "Public", D1: "Internal", D2: "Confidential", D3: "Secret" },
       routeKind: { subscription: "subscription", "coding-plan": "coding plan", account: "model account", auto: "Auto (Jev)", "cli-default": "its own sign-in" },
       basis: { free: "free within the window", burning: "burning faster than its window", low: "close to the reserve", unknown: "quota unknown", plan: "coding plan", local: "on this computer", flat: "flat-rate, unpriced", api: "API price", unpriced: "no price known", unavailable: "unavailable" },
       score: (value, label, below) => value === null ? "no score" : `score ${value.toFixed(1)}${label ? ` (${label})` : ""}${below ? `, ${below} below the best` : ""}`,
@@ -923,7 +980,7 @@
     },
     ru: {
       title: "\u0413\u0434\u0435 \u0440\u0430\u0431\u043E\u0442\u0430\u044E\u0442 \u0430\u0433\u0435\u043D\u0442\u044B",
-      lead: "\u0418\u0437 \u0447\u0435\u0433\u043E \u0432\u044B\u0431\u0438\u0440\u0430\u0435\u0442 \u0438\u043D\u0441\u0442\u0440\u0443\u043C\u0435\u043D\u0442 route \u043E\u0440\u043A\u0435\u0441\u0442\u0440\u0430\u0442\u043E\u0440\u0430, \u043A\u043E\u0433\u0434\u0430 \u0437\u0430\u043F\u0443\u0441\u043A\u0430\u0435\u0442 \u0441\u0443\u0431\u0430\u0433\u0435\u043D\u0442\u0430: \u0432\u0430\u0448\u0438 \u043F\u043E\u0434\u043F\u0438\u0441\u043A\u0438 \u0438 \u043F\u043B\u0430\u043D\u044B \u0434\u043B\u044F \u043A\u043E\u0434\u0430 (\u043A\u0430\u0436\u0434\u044B\u0439 \u2014 \u0442\u043E\u043B\u044C\u043A\u043E \u0447\u0435\u0440\u0435\u0437 \u0441\u0432\u043E\u0439 CLI \u0438 \u0435\u0433\u043E \u0441\u043E\u0431\u0441\u0442\u0432\u0435\u043D\u043D\u044B\u0439 \u0432\u0445\u043E\u0434), \u0430\u043A\u043A\u0430\u0443\u043D\u0442\u044B \u043C\u043E\u0434\u0435\u043B\u0435\u0439 \u043F\u043B\u0430\u0433\u0438\u043D\u0430 Accounts, \u043C\u043E\u0434\u0435\u043B\u044C \xAB\u0410\u0432\u0442\u043E (Jev)\xBB \u0438 \u043B\u044E\u0431\u043E\u0439 \u0434\u0440\u0443\u0433\u043E\u0439 CLI \u043D\u0430 \u0435\u0433\u043E \u043C\u043E\u0434\u0435\u043B\u0438 \u043F\u043E \u0443\u043C\u043E\u043B\u0447\u0430\u043D\u0438\u044E \u2014 \u0432 \u043F\u043E\u0441\u043B\u0435\u0434\u043D\u044E\u044E \u043E\u0447\u0435\u0440\u0435\u0434\u044C. \u041C\u043E\u0434\u0435\u043B\u044C \u0432\u044B\u0431\u0438\u0440\u0430\u0435\u0442\u0441\u044F \u043F\u043E \u0438\u0437\u043C\u0435\u0440\u0435\u043D\u043D\u043E\u0439 \u043E\u0446\u0435\u043D\u043A\u0435 \u0434\u043B\u044F \u0442\u0438\u043F\u0430 \u0437\u0430\u0434\u0430\u0447\u0438, \u0437\u0430\u0442\u0435\u043C \u043F\u043E \u0446\u0435\u043D\u0435 \u0438\u043B\u0438 \u043F\u043E \u0434\u043E\u043B\u0435 \u043E\u043A\u043D\u0430, \u043A\u043E\u0442\u043E\u0440\u0443\u044E \u043E\u043D\u0430 \u0437\u0430\u0439\u043C\u0451\u0442; \u043F\u043E\u0434\u043F\u0438\u0441\u043A\u0430 \u0441 \u0437\u0430\u043F\u0430\u0441\u043E\u043C \u0432\u044B\u0448\u0435 \u0432\u0430\u0448\u0435\u0433\u043E \u0440\u0435\u0437\u0435\u0440\u0432\u0430 \u043D\u0438\u0447\u0435\u0433\u043E \u043D\u0435 \u0441\u0442\u043E\u0438\u0442. \u0417\u0434\u0435\u0441\u044C \u043D\u0438\u0447\u0435\u0433\u043E \u043D\u0435 \u0437\u0430\u043F\u0443\u0441\u043A\u0430\u0435\u0442\u0441\u044F, \u0430 \u0437\u0430\u043F\u0443\u0441\u043A \u043E\u0440\u043A\u0435\u0441\u0442\u0440\u0430\u0442\u043E\u0440\u0430 \u043F\u043E-\u043F\u0440\u0435\u0436\u043D\u0435\u043C\u0443 \u043F\u0440\u043E\u0432\u0435\u0440\u044F\u0435\u0442 CanvasTTY.",
+      lead: "\u0413\u0434\u0435 \u0440\u0430\u0431\u043E\u0442\u0430\u044E\u0442 \u0441\u0443\u0431\u0430\u0433\u0435\u043D\u0442\u044B \u043E\u0440\u043A\u0435\u0441\u0442\u0440\u0430\u0442\u043E\u0440\u0430: \u0441\u043D\u0430\u0447\u0430\u043B\u0430 \u0432\u0430\u0448\u0438 \u043F\u043E\u0434\u043F\u0438\u0441\u043A\u0438 \u0438 \u043F\u043B\u0430\u043D\u044B, \u043F\u043E\u043A\u0430 \u0432 \u043D\u0438\u0445 \u0435\u0441\u0442\u044C \u0437\u0430\u043F\u0430\u0441, \u0437\u0430\u0442\u0435\u043C \u0430\u043A\u043A\u0430\u0443\u043D\u0442\u044B \u043C\u043E\u0434\u0435\u043B\u0435\u0439 \u0438 \xAB\u0410\u0432\u0442\u043E\xBB. \u0417\u0434\u0435\u0441\u044C \u043D\u0438\u0447\u0435\u0433\u043E \u043D\u0435 \u0437\u0430\u043F\u0443\u0441\u043A\u0430\u0435\u0442\u0441\u044F.",
       limits: (age) => age === null ? "\u041E\u043A\u043D\u0430 \u043B\u0438\u043C\u0438\u0442\u043E\u0432: \u0435\u0449\u0451 \u043D\u0435 \u043F\u0440\u043E\u0447\u0438\u0442\u0430\u043D\u044B." : `\u041E\u043A\u043D\u0430 \u043B\u0438\u043C\u0438\u0442\u043E\u0432: \u043F\u0440\u043E\u0447\u0438\u0442\u0430\u043D\u044B ${age}. \u041E\u043D\u0438 \u0447\u0438\u0442\u0430\u044E\u0442\u0441\u044F, \u043F\u043E\u043A\u0430 \u044D\u0442\u0430 \u0441\u0442\u0440\u0430\u043D\u0438\u0446\u0430 \u043E\u0442\u043A\u0440\u044B\u0442\u0430; \u0447\u0435\u0440\u0435\u0437 30 \u043C\u0438\u043D\u0443\u0442 \u0431\u0435\u0437 \u043D\u0435\u0451 \u0441\u0447\u0438\u0442\u0430\u044E\u0442\u0441\u044F \u043D\u0435\u0438\u0437\u0432\u0435\u0441\u0442\u043D\u044B\u043C\u0438, \u043D\u043E \u043D\u0435 \u0438\u0441\u0447\u0435\u0440\u043F\u0430\u043D\u043D\u044B\u043C\u0438.`,
       readNow: "\u041F\u0440\u043E\u0447\u0438\u0442\u0430\u0442\u044C \u0441\u0435\u0439\u0447\u0430\u0441",
       plans: "\u041F\u043E\u0434\u043F\u0438\u0441\u043A\u0438 \u0438 \u043F\u043B\u0430\u043D\u044B \u0434\u043B\u044F \u043A\u043E\u0434\u0430",
@@ -961,7 +1018,7 @@
       speeds: "\u0421\u043A\u043E\u0440\u043E\u0441\u0442\u044C \u0432\u044B\u0432\u043E\u0434\u0430 (\u043C\u043E\u0434\u0435\u043B\u044C=\u0442\u043E\u043A\u0435\u043D\u043E\u0432/\u0441, \u2026; \u043F\u0443\u0441\u0442\u043E \u2014 \u0441\u043A\u043E\u0440\u043E\u0441\u0442\u0438, \u0438\u0437\u043C\u0435\u0440\u0435\u043D\u043D\u044B\u0435 Artificial Analysis)",
       valueSpeed: "\u041D\u0430 \u043F\u043B\u0430\u043D\u0430\u0445 \u0446\u0435\u043D\u0438\u0442\u044C \u0441\u043A\u043E\u0440\u043E\u0441\u0442\u044C",
       speed: { low: "\u043D\u0435\u043C\u043D\u043E\u0433\u043E", moderate: "\u0443\u043C\u0435\u0440\u0435\u043D\u043D\u043E", high: "\u0441\u0438\u043B\u044C\u043D\u043E" },
-      planHelp: "\u041D\u0430 \u043F\u043B\u0430\u043D\u0435 \u043C\u043E\u0434\u0435\u043B\u044C \u0441\u0442\u043E\u0438\u0442 \u0442\u0443 \u043A\u0432\u043E\u0442\u0443, \u043A\u043E\u0442\u043E\u0440\u0443\u044E \u0442\u0440\u0430\u0442\u0438\u0442, \u0438 \u0442\u043E \u0432\u0440\u0435\u043C\u044F, \u043A\u043E\u0442\u043E\u0440\u043E\u0435 \u0437\u0430\u043D\u0438\u043C\u0430\u0435\u0442: \u043E\u0436\u0438\u0434\u0430\u0435\u043C\u044B\u0435 \u0442\u043E\u043A\u0435\u043D\u044B (\u0443 \u043C\u0430\u043B\u0435\u043D\u044C\u043A\u043E\u0439 \u043C\u043E\u0434\u0435\u043B\u0438 \xD71,2, \u043F\u043E\u043A\u0430 \u0440\u0435\u0437\u0443\u043B\u044C\u0442\u0430\u0442\u044B \u043D\u0435 \u043F\u043E\u043A\u0430\u0436\u0443\u0442 \u0438\u043D\u043E\u0435) \u043D\u0430 \u0435\u0451 \u0432\u0435\u0441 \u043A\u0432\u043E\u0442\u044B (\u043F\u043E \u0443\u043C\u043E\u043B\u0447\u0430\u043D\u0438\u044E \u2014 \u0435\u0451 \u0446\u0435\u043D\u0430 API \u043A \u0441\u0442\u0430\u0440\u0448\u0435\u0439 \u043C\u043E\u0434\u0435\u043B\u0438 \u043F\u043B\u0430\u043D\u0430) \u0438 \u0435\u0451 \u0432\u0440\u0435\u043C\u044F: \u0432\u0430\u0448\u0438 \u0441\u043A\u043E\u0440\u043E\u0441\u0442\u0438, \u0438\u043D\u0430\u0447\u0435 \u0441\u043A\u043E\u0440\u043E\u0441\u0442\u044C \u0432\u044B\u0432\u043E\u0434\u0430 \u0438 \u0432\u0440\u0435\u043C\u044F \u0434\u043E \u043F\u0435\u0440\u0432\u043E\u0433\u043E \u0444\u0440\u0430\u0433\u043C\u0435\u043D\u0442\u0430, \u0438\u0437\u043C\u0435\u0440\u0435\u043D\u043D\u044B\u0435 Artificial Analysis \u0434\u043B\u044F \u044D\u0442\u043E\u0439 \u043C\u043E\u0434\u0435\u043B\u0438 \u0438 \u0443\u0440\u043E\u0432\u043D\u044F \u0440\u0430\u0441\u0441\u0443\u0436\u0434\u0435\u043D\u0438\u044F. \u041C\u043E\u0434\u0435\u043B\u044C \u0441 \u043D\u0435\u0438\u0437\u0432\u0435\u0441\u0442\u043D\u043E\u0439 \u0441\u043A\u043E\u0440\u043E\u0441\u0442\u044C\u044E \u0441\u0447\u0438\u0442\u0430\u0435\u0442\u0441\u044F \u0442\u0430\u043A\u043E\u0439 \u0436\u0435 \u0431\u044B\u0441\u0442\u0440\u043E\u0439, \u043A\u0430\u043A \u0441\u0442\u0430\u0440\u0448\u0430\u044F \u043C\u043E\u0434\u0435\u043B\u044C \u043F\u043B\u0430\u043D\u0430 (\u043D\u0435 \u0431\u044B\u0441\u0442\u0440\u0435\u0435 \u0438 \u043D\u0435 \u043C\u0435\u0434\u043B\u0435\u043D\u043D\u0435\u0435). \u0412 \u043F\u0440\u0435\u0434\u0435\u043B\u0430\u0445 \u043E\u043A\u043D\u0430 \u043A\u0430\u0447\u0435\u0441\u0442\u0432\u0430 \u0434\u043B\u044F \u043C\u0430\u043B\u0435\u043D\u044C\u043A\u0438\u0445 \u0438 \u0441\u0440\u0435\u0434\u043D\u0438\u0445 \u0437\u0430\u0434\u0430\u0447 \u043F\u043E\u0431\u0435\u0436\u0434\u0430\u0435\u0442 \u0441\u0430\u043C\u0430\u044F \u0434\u0435\u0448\u0451\u0432\u0430\u044F; \u0431\u043E\u043B\u044C\u0448\u0438\u0435 \u0438 \u0440\u0438\u0441\u043A\u043E\u0432\u0430\u043D\u043D\u044B\u0435 \u0437\u0430\u0434\u0430\u0447\u0438 \u2014 \u0441\u043D\u0430\u0447\u0430\u043B\u0430 \u043A\u0430\u0447\u0435\u0441\u0442\u0432\u043E.",
+      planHelp: "\u041D\u0430 \u043F\u043B\u0430\u043D\u0435 \u043C\u043E\u0434\u0435\u043B\u044C \u0441\u0442\u043E\u0438\u0442 \u0442\u0443 \u0434\u043E\u043B\u044E \u043F\u043B\u0430\u043D\u0430, \u043A\u043E\u0442\u043E\u0440\u0443\u044E \u0442\u0440\u0430\u0442\u0438\u0442, \u0438 \u0442\u043E \u0432\u0440\u0435\u043C\u044F, \u043A\u043E\u0442\u043E\u0440\u043E\u0435 \u0437\u0430\u043D\u0438\u043C\u0430\u0435\u0442. \u041F\u043E\u0434\u0440\u043E\u0431\u043D\u0435\u0435 \u2014 \u0432 README, \xAB\u041A\u0430\u043A \u0440\u0435\u0448\u0430\u0435\u0442 \u0410\u0432\u0442\u043E\xBB.",
       other: "\u0414\u0440\u0443\u0433\u0438\u0435 \u043F\u0443\u0442\u0438",
       autoRoute: "\u041C\u043E\u0434\u0435\u043B\u044C \xAB\u0410\u0432\u0442\u043E (Jev)\xBB \u043A\u0430\u043A \u043F\u0443\u0442\u044C \u0434\u043B\u044F \u0441\u0443\u0431\u0430\u0433\u0435\u043D\u0442\u0430",
       never: "\u041D\u0438\u043A\u043E\u0433\u0434\u0430 \u043D\u0435 \u0437\u0430\u043F\u0443\u0441\u043A\u0430\u0442\u044C \u044D\u0442\u043E\u0442 CLI \u043D\u0430 \u0435\u0433\u043E \u0441\u043E\u0431\u0441\u0442\u0432\u0435\u043D\u043D\u043E\u043C \u0432\u0445\u043E\u0434\u0435",
@@ -994,6 +1051,7 @@
       strategy: { "single-cheap": "\u043E\u0434\u043D\u0430 \u0434\u0435\u0448\u0451\u0432\u0430\u044F", "single-strong": "\u043E\u0434\u043D\u0430 \u0441\u0438\u043B\u044C\u043D\u0430\u044F" },
       type: { coding: "\u043A\u043E\u0434", review: "\u0440\u0435\u0432\u044C\u044E", research: "\u0438\u0441\u0441\u043B\u0435\u0434\u043E\u0432\u0430\u043D\u0438\u0435", writing: "\u0442\u0435\u043A\u0441\u0442\u044B", chat: "\u043E\u0431\u0449\u0435\u043D\u0438\u0435" },
       level: { small: "\u043C\u0430\u043B\u0435\u043D\u044C\u043A\u0430\u044F", medium: "\u0441\u0440\u0435\u0434\u043D\u044F\u044F", large: "\u0431\u043E\u043B\u044C\u0448\u0430\u044F" },
+      classes: { D0: "\u041E\u0442\u043A\u0440\u044B\u0442\u044B\u0435", D1: "\u0412\u043D\u0443\u0442\u0440\u0435\u043D\u043D\u0438\u0435", D2: "\u041A\u043E\u043D\u0444\u0438\u0434\u0435\u043D\u0446\u0438\u0430\u043B\u044C\u043D\u044B\u0435", D3: "\u0421\u0435\u043A\u0440\u0435\u0442\u043D\u044B\u0435" },
       routeKind: { subscription: "\u043F\u043E\u0434\u043F\u0438\u0441\u043A\u0430", "coding-plan": "\u043F\u043B\u0430\u043D \u0434\u043B\u044F \u043A\u043E\u0434\u0430", account: "\u0430\u043A\u043A\u0430\u0443\u043D\u0442 \u043C\u043E\u0434\u0435\u043B\u0438", auto: "\u0410\u0432\u0442\u043E (Jev)", "cli-default": "\u0441\u0432\u043E\u0439 \u0432\u0445\u043E\u0434 CLI" },
       basis: { free: "\u0431\u0435\u0441\u043F\u043B\u0430\u0442\u043D\u043E \u0432 \u043F\u0440\u0435\u0434\u0435\u043B\u0430\u0445 \u043E\u043A\u043D\u0430", burning: "\u0440\u0430\u0441\u0445\u043E\u0434\u0443\u0435\u0442\u0441\u044F \u0431\u044B\u0441\u0442\u0440\u0435\u0435 \u043E\u043A\u043D\u0430", low: "\u0431\u043B\u0438\u0437\u043A\u043E \u043A \u0440\u0435\u0437\u0435\u0440\u0432\u0443", unknown: "\u043B\u0438\u043C\u0438\u0442 \u043D\u0435\u0438\u0437\u0432\u0435\u0441\u0442\u0435\u043D", plan: "\u043F\u043B\u0430\u043D \u0434\u043B\u044F \u043A\u043E\u0434\u0430", local: "\u043D\u0430 \u044D\u0442\u043E\u043C \u043A\u043E\u043C\u043F\u044C\u044E\u0442\u0435\u0440\u0435", flat: "\u0444\u0438\u043A\u0441\u0438\u0440\u043E\u0432\u0430\u043D\u043D\u044B\u0439 \u0442\u0430\u0440\u0438\u0444, \u0431\u0435\u0437 \u0446\u0435\u043D\u044B", api: "\u0446\u0435\u043D\u0430 API", unpriced: "\u0446\u0435\u043D\u0430 \u043D\u0435\u0438\u0437\u0432\u0435\u0441\u0442\u043D\u0430", unavailable: "\u043D\u0435\u0434\u043E\u0441\u0442\u0443\u043F\u043D\u043E" },
       score: (value, label, below) => value === null ? "\u0431\u0435\u0437 \u043E\u0446\u0435\u043D\u043A\u0438" : `\u043E\u0446\u0435\u043D\u043A\u0430 ${value.toFixed(1).replace(".", ",")}${label ? ` (${label})` : ""}${below ? `, \u043D\u0430 ${String(below).replace(".", ",")} \u043D\u0438\u0436\u0435 \u043B\u0443\u0447\u0448\u0435\u0439` : ""}`,
@@ -1023,7 +1081,7 @@
       change(next);
       page.request("route.save", { settings: next }).then(() => page.reload(), (error) => page.say(error instanceof Error ? error.message : String(error)));
     };
-    const trustOptions = [["unset", t2.trustUnset], ["D0", "D0"], ["D1", "D1"], ["D2", "D2"], ["D3", "D3"]];
+    const trustOptions = [["unset", t2.trustUnset], ...["D0", "D1", "D2", "D3"].map((c) => [c, t2.classes[c] ?? c])];
     const allowOptions = ["prefer", "allow", "never"].map((value) => [value, t2.allow[value]]);
     const section = el("section", { className: "auto", dataset: { section: "routing" } });
     section.append(el("h2", { textContent: t2.title }), el("p", { className: "muted", textContent: t2.lead }));
@@ -1210,7 +1268,9 @@
     section.append(el("h2", { textContent: t2.recent }));
     const recent = el("ul", { className: "recent", dataset: { route: "recent" } });
     if (!state2.recent.length) recent.append(el("li", { className: "muted", textContent: t2.noRecent }));
-    for (const record of state2.recent.slice(0, 20)) recent.append(recentRow2(record, t2, page));
+    const shown = state2.recent.slice(0, 5);
+    const asking = shown.find((record) => record.outcome?.by !== "person") ?? null;
+    for (const record of shown) recent.append(recentRow2(record, t2, page, record === asking));
     section.append(recent);
     return section;
   }
@@ -1329,7 +1389,7 @@
     box.append(el("div", { className: "add" }, el("span", { className: "label", textContent: t2.newPlan }), cli, kind, name, models, add), el("p", { className: "muted", textContent: t2.modelsHelp }));
     return box;
   }
-  function recentRow2(record, t2, page) {
+  function recentRow2(record, t2, page, asking) {
     const time = new Date(record.at).toLocaleTimeString(document.documentElement.lang || "en", { hour: "2-digit", minute: "2-digit", hourCycle: "h23" });
     const option = record.options[record.spawned?.option ?? 0];
     const item = el("li", { dataset: { decision: record.id } });
@@ -1342,7 +1402,7 @@
       el("code", { textContent: option ? `${option.cli}${option.model ? ` \xB7 ${option.model}` : ""}${option.effort ? `@${option.effort}` : ""}` : "\u2014" }),
       el("span", { textContent: option ? t2.estimate(option.estimateData, option.estimate) : "" })
     ));
-    if (option) item.append(el("div", { className: "muted", textContent: [`${t2.routeKind[option.kind] ?? option.kind}: ${option.label}`, t2.score(option.score, option.scoreLabel ?? null, option.below ?? null), t2.basis[option.costBasis] ?? option.costBasis].join(" \xB7 ") }));
+    if (option) item.append(el("div", { className: "muted", textContent: [option.kind === "auto" ? t2.routeKind.auto : `${t2.routeKind[option.kind] ?? option.kind}: ${option.label}`, t2.score(option.score, option.scoreLabel ?? null, option.below ?? null), t2.basis[option.costBasis] ?? option.costBasis].join(" \xB7 ") }));
     const outcome = record.outcome ? `${t2.outcome[record.outcome.result] ?? record.outcome.result}${record.outcome.by === "person" ? ` (${t2.byPerson})` : ""}` : "";
     const right = el("button", { type: "button", textContent: t2.right, name: `route-right-${record.id}` });
     const wrong = el("button", { type: "button", textContent: t2.wrong, name: `route-wrong-${record.id}` });
@@ -1352,17 +1412,40 @@
     wrong.addEventListener("click", () => {
       void page.request("route.feedback", { id: record.id, ok: false }).then(() => page.reload(), (error) => page.say(String(error)));
     });
-    item.append(el("div", { className: "row" }, el("span", { textContent: outcome }), right, wrong));
+    item.append(el("div", { className: "row" }, el("span", { textContent: outcome }), ...asking ? [right, wrong] : []));
     return item;
   }
 
   // src/ui/settings.ts
   var host2 = window.CanvasTTYPlugin;
-  var SERVICE = "assistant";
+  var SERVICE2 = "assistant";
   var STRINGS = {
     en: {
       title: "Decision models",
-      lead: "Optional. A small decision model (Jev: TypeSafe, OpenRouter, Vercel; Laya; an Eikos server; or a model on your Ollama) sharpens command review, task triage and routing. Without one, simple rules are used. Command review itself (Strict, Basic rules, Off) is set on the Assistant settings page.",
+      lead: "Optional: with a key, Jev judges tasks and Auto picks a model for each turn; without one, simple rules are used.",
+      quick: "Auto (Jev)",
+      autoOn: "Auto",
+      autoOnHelp: "Picks a model for each turn of OpenCode cards started with Model: Auto.",
+      orKey: "OpenRouter key",
+      orKeyHelp: "One key for Jev and for Auto's models. Stored by CanvasTTY, never shown again.",
+      orKeySaved: "saved",
+      orKeyMissing: "not saved",
+      change: "Save",
+      prefer: "Prefer",
+      prefCheap: "Cheaper",
+      prefBalanced: "Balanced",
+      prefBest: "Better",
+      preferHelp: "How much quality to trade for price.",
+      dailyCap: "Daily limit, $",
+      dailyCapHelp: "Auto stops for the day when it is spent.",
+      today: "Today",
+      todayLine: (usd2, calls) => `$${usd2.toFixed(2)} \xB7 ${calls} calls`,
+      noDecisions: "No turns routed yet.",
+      jevOff: "Jev does not judge tasks now (Task triage is Off).",
+      jevOn: "Let Jev decide",
+      jevNoText: "Jev reads no task text now (only code facts may leave this computer).",
+      jevText: "Allow internal texts",
+      advanced: "Advanced: models, catalog, several models, where agents run, data, review models",
       modes: "Modes",
       triage: "Task triage (launch and orchestrator)",
       off: "Off",
@@ -1377,8 +1460,9 @@
       dataOff: "Off",
       grant: "What may leave this computer",
       grantOff: "Only code facts (no text)",
-      grantD1: "Texts up to D1",
-      grantD2: "Texts up to D2",
+      grantD1: "Texts up to internal",
+      grantD2: "Texts up to confidential",
+      classes: { D0: "Public", D1: "Internal", D2: "Confidential", D3: "Secret (stays here)" },
       defaultClass: "Class of card text",
       engine: "Where it runs",
       engineAuto: "Jev first, then this computer",
@@ -1411,12 +1495,36 @@
       noRecent: "Nothing reviewed yet.",
       right: "Right",
       wrong: "Wrong",
+      more: (n) => `and ${n} more`,
       saved: "Saved.",
       notSaved: "Not saved: "
     },
     ru: {
       title: "\u041C\u043E\u0434\u0435\u043B\u0438 \u0440\u0435\u0448\u0435\u043D\u0438\u0439",
-      lead: "\u041D\u0435\u043E\u0431\u044F\u0437\u0430\u0442\u0435\u043B\u044C\u043D\u043E. \u041C\u0430\u043B\u0435\u043D\u044C\u043A\u0430\u044F \u043C\u043E\u0434\u0435\u043B\u044C \u0440\u0435\u0448\u0435\u043D\u0438\u0439 (Jev: TypeSafe, OpenRouter, Vercel; Laya; \u0441\u0435\u0440\u0432\u0435\u0440 Eikos \u0438\u043B\u0438 \u043C\u043E\u0434\u0435\u043B\u044C \u0432 \u0432\u0430\u0448\u0435\u0439 Ollama) \u0443\u0442\u043E\u0447\u043D\u044F\u0435\u0442 \u043F\u0440\u043E\u0432\u0435\u0440\u043A\u0443 \u043A\u043E\u043C\u0430\u043D\u0434, \u0440\u0430\u0437\u0431\u043E\u0440 \u0437\u0430\u0434\u0430\u0447 \u0438 \u0432\u044B\u0431\u043E\u0440 \u043C\u043E\u0434\u0435\u043B\u0438. \u0411\u0435\u0437 \u043D\u0435\u0451 \u0440\u0430\u0431\u043E\u0442\u0430\u044E\u0442 \u043F\u0440\u043E\u0441\u0442\u044B\u0435 \u043F\u0440\u0430\u0432\u0438\u043B\u0430. \u0421\u0430\u043C\u0443 \u043F\u0440\u043E\u0432\u0435\u0440\u043A\u0443 \u043A\u043E\u043C\u0430\u043D\u0434 (\xAB\u0421\u0442\u0440\u043E\u0433\u043E\xBB, \xAB\u0411\u0430\u0437\u043E\u0432\u044B\u0435 \u043F\u0440\u0430\u0432\u0438\u043B\u0430\xBB, \xAB\u0412\u044B\u043A\u043B\xBB) \u0437\u0430\u0434\u0430\u044E\u0442 \u043D\u0430 \u0441\u0442\u0440\u0430\u043D\u0438\u0446\u0435 \u043D\u0430\u0441\u0442\u0440\u043E\u0435\u043A \u041F\u043E\u043C\u043E\u0449\u043D\u0438\u043A\u0430.",
+      lead: "\u041D\u0435\u043E\u0431\u044F\u0437\u0430\u0442\u0435\u043B\u044C\u043D\u043E: \u0441 \u043A\u043B\u044E\u0447\u043E\u043C Jev \u0440\u0430\u0437\u0431\u0438\u0440\u0430\u0435\u0442 \u0437\u0430\u0434\u0430\u0447\u0438, \u0430 \xAB\u0410\u0432\u0442\u043E\xBB \u0432\u044B\u0431\u0438\u0440\u0430\u0435\u0442 \u043C\u043E\u0434\u0435\u043B\u044C \u043D\u0430 \u043A\u0430\u0436\u0434\u044B\u0439 \u0445\u043E\u0434; \u0431\u0435\u0437 \u043A\u043B\u044E\u0447\u0430 \u0440\u0430\u0431\u043E\u0442\u0430\u044E\u0442 \u043F\u0440\u043E\u0441\u0442\u044B\u0435 \u043F\u0440\u0430\u0432\u0438\u043B\u0430.",
+      quick: "\u0410\u0432\u0442\u043E (Jev)",
+      autoOn: "\u0410\u0432\u0442\u043E",
+      autoOnHelp: "\u0412\u044B\u0431\u0438\u0440\u0430\u0435\u0442 \u043C\u043E\u0434\u0435\u043B\u044C \u043D\u0430 \u043A\u0430\u0436\u0434\u044B\u0439 \u0445\u043E\u0434 \u0432 \u043E\u043A\u043D\u0430\u0445 OpenCode, \u0437\u0430\u043F\u0443\u0449\u0435\u043D\u043D\u044B\u0445 \u0441 \xAB\u041C\u043E\u0434\u0435\u043B\u044C: \u0410\u0432\u0442\u043E\xBB.",
+      orKey: "\u041A\u043B\u044E\u0447 OpenRouter",
+      orKeyHelp: "\u041E\u0434\u0438\u043D \u043A\u043B\u044E\u0447 \u0434\u043B\u044F Jev \u0438 \u0434\u043B\u044F \u043C\u043E\u0434\u0435\u043B\u0435\u0439 \xAB\u0410\u0432\u0442\u043E\xBB. \u0425\u0440\u0430\u043D\u0438\u0442\u0441\u044F \u0432 CanvasTTY \u0438 \u0431\u043E\u043B\u044C\u0448\u0435 \u043D\u0435 \u043F\u043E\u043A\u0430\u0437\u044B\u0432\u0430\u0435\u0442\u0441\u044F.",
+      orKeySaved: "\u0441\u043E\u0445\u0440\u0430\u043D\u0451\u043D",
+      orKeyMissing: "\u043D\u0435 \u0441\u043E\u0445\u0440\u0430\u043D\u0451\u043D",
+      change: "\u0421\u043E\u0445\u0440\u0430\u043D\u0438\u0442\u044C",
+      prefer: "\u041F\u0440\u0435\u0434\u043F\u043E\u0447\u0442\u0435\u043D\u0438\u0435",
+      prefCheap: "\u0414\u0435\u0448\u0435\u0432\u043B\u0435",
+      prefBalanced: "\u0421\u0431\u0430\u043B\u0430\u043D\u0441\u0438\u0440\u043E\u0432\u0430\u043D\u043D\u043E",
+      prefBest: "\u041B\u0443\u0447\u0448\u0435",
+      preferHelp: "\u0421\u043A\u043E\u043B\u044C\u043A\u043E \u043A\u0430\u0447\u0435\u0441\u0442\u0432\u0430 \u043C\u043E\u0436\u043D\u043E \u0443\u0441\u0442\u0443\u043F\u0438\u0442\u044C \u0440\u0430\u0434\u0438 \u0446\u0435\u043D\u044B.",
+      dailyCap: "\u041F\u0440\u0435\u0434\u0435\u043B \u0432 \u0434\u0435\u043D\u044C, $",
+      dailyCapHelp: "\u041A\u043E\u0433\u0434\u0430 \u043E\u043D \u043F\u043E\u0442\u0440\u0430\u0447\u0435\u043D, \xAB\u0410\u0432\u0442\u043E\xBB \u043E\u0441\u0442\u0430\u043D\u0430\u0432\u043B\u0438\u0432\u0430\u0435\u0442\u0441\u044F \u0434\u043E \u0437\u0430\u0432\u0442\u0440\u0430.",
+      today: "\u0421\u0435\u0433\u043E\u0434\u043D\u044F",
+      todayLine: (usd2, calls) => `$${usd2.toFixed(2)} \xB7 \u0432\u044B\u0437\u043E\u0432\u043E\u0432: ${calls}`,
+      noDecisions: "\u0425\u043E\u0434\u043E\u0432 \u043F\u043E\u043A\u0430 \u043D\u0435 \u0431\u044B\u043B\u043E.",
+      jevOff: "\u0421\u0435\u0439\u0447\u0430\u0441 Jev \u043D\u0435 \u0440\u0430\u0437\u0431\u0438\u0440\u0430\u0435\u0442 \u0437\u0430\u0434\u0430\u0447\u0438 (\u0440\u0430\u0437\u0431\u043E\u0440 \u0437\u0430\u0434\u0430\u0447\u0438 \u0432\u044B\u043A\u043B\u044E\u0447\u0435\u043D).",
+      jevOn: "\u041F\u0443\u0441\u0442\u044C \u0440\u0435\u0448\u0430\u0435\u0442 Jev",
+      jevNoText: "\u0421\u0435\u0439\u0447\u0430\u0441 Jev \u043D\u0435 \u0447\u0438\u0442\u0430\u0435\u0442 \u0442\u0435\u043A\u0441\u0442 \u0437\u0430\u0434\u0430\u0447 (\u0441 \u043A\u043E\u043C\u043F\u044C\u044E\u0442\u0435\u0440\u0430 \u0443\u0445\u043E\u0434\u044F\u0442 \u0442\u043E\u043B\u044C\u043A\u043E \u0441\u043B\u0443\u0436\u0435\u0431\u043D\u044B\u0435 \u043F\u0440\u0438\u0437\u043D\u0430\u043A\u0438).",
+      jevText: "\u0420\u0430\u0437\u0440\u0435\u0448\u0438\u0442\u044C \u0432\u043D\u0443\u0442\u0440\u0435\u043D\u043D\u0438\u0435 \u0442\u0435\u043A\u0441\u0442\u044B",
+      advanced: "\u0414\u043E\u043F\u043E\u043B\u043D\u0438\u0442\u0435\u043B\u044C\u043D\u043E: \u043C\u043E\u0434\u0435\u043B\u0438, \u043A\u0430\u0442\u0430\u043B\u043E\u0433, \u043D\u0435\u0441\u043A\u043E\u043B\u044C\u043A\u043E \u043C\u043E\u0434\u0435\u043B\u0435\u0439, \u0433\u0434\u0435 \u0440\u0430\u0431\u043E\u0442\u0430\u044E\u0442 \u0430\u0433\u0435\u043D\u0442\u044B, \u0434\u0430\u043D\u043D\u044B\u0435, \u043C\u043E\u0434\u0435\u043B\u0438 \u043F\u0440\u043E\u0432\u0435\u0440\u043A\u0438",
       modes: "\u0420\u0435\u0436\u0438\u043C\u044B",
       triage: "\u0420\u0430\u0437\u0431\u043E\u0440 \u0437\u0430\u0434\u0430\u0447\u0438 (\u0437\u0430\u043F\u0443\u0441\u043A \u0438 \u043E\u0440\u043A\u0435\u0441\u0442\u0440\u0430\u0442\u043E\u0440)",
       off: "\u0412\u044B\u043A\u043B",
@@ -1431,8 +1539,9 @@
       dataOff: "\u0412\u044B\u043A\u043B",
       grant: "\u0427\u0442\u043E \u043C\u043E\u0436\u0435\u0442 \u0443\u0439\u0442\u0438 \u0441 \u044D\u0442\u043E\u0433\u043E \u043A\u043E\u043C\u043F\u044C\u044E\u0442\u0435\u0440\u0430",
       grantOff: "\u0422\u043E\u043B\u044C\u043A\u043E \u0441\u043B\u0443\u0436\u0435\u0431\u043D\u044B\u0435 \u043F\u0440\u0438\u0437\u043D\u0430\u043A\u0438 (\u0431\u0435\u0437 \u0442\u0435\u043A\u0441\u0442\u0430)",
-      grantD1: "\u0422\u0435\u043A\u0441\u0442\u044B \u0434\u043E D1",
-      grantD2: "\u0422\u0435\u043A\u0441\u0442\u044B \u0434\u043E D2",
+      grantD1: "\u0422\u0435\u043A\u0441\u0442\u044B \u0434\u043E \u0432\u043D\u0443\u0442\u0440\u0435\u043D\u043D\u0438\u0445",
+      grantD2: "\u0422\u0435\u043A\u0441\u0442\u044B \u0434\u043E \u043A\u043E\u043D\u0444\u0438\u0434\u0435\u043D\u0446\u0438\u0430\u043B\u044C\u043D\u044B\u0445",
+      classes: { D0: "\u041E\u0442\u043A\u0440\u044B\u0442\u044B\u0435", D1: "\u0412\u043D\u0443\u0442\u0440\u0435\u043D\u043D\u0438\u0435", D2: "\u041A\u043E\u043D\u0444\u0438\u0434\u0435\u043D\u0446\u0438\u0430\u043B\u044C\u043D\u044B\u0435", D3: "\u0421\u0435\u043A\u0440\u0435\u0442\u043D\u044B\u0435 (\u043E\u0441\u0442\u0430\u044E\u0442\u0441\u044F \u0437\u0434\u0435\u0441\u044C)" },
       defaultClass: "\u041A\u043B\u0430\u0441\u0441 \u0442\u0435\u043A\u0441\u0442\u0430 \u043E\u043A\u043D\u0430",
       engine: "\u0413\u0434\u0435 \u0440\u0430\u0431\u043E\u0442\u0430\u0435\u0442",
       engineAuto: "\u0421\u043D\u0430\u0447\u0430\u043B\u0430 Jev, \u043F\u043E\u0442\u043E\u043C \u044D\u0442\u043E\u0442 \u043A\u043E\u043C\u043F\u044C\u044E\u0442\u0435\u0440",
@@ -1465,6 +1574,7 @@
       noRecent: "\u041F\u043E\u043A\u0430 \u043D\u0438\u0447\u0435\u0433\u043E \u043D\u0435 \u043F\u0440\u043E\u0432\u0435\u0440\u044F\u043B\u043E\u0441\u044C.",
       right: "\u0412\u0435\u0440\u043D\u043E",
       wrong: "\u041D\u0435\u0432\u0435\u0440\u043D\u043E",
+      more: (n) => `\u0438 \u0435\u0449\u0451 ${n}`,
       saved: "\u0421\u043E\u0445\u0440\u0430\u043D\u0435\u043D\u043E.",
       notSaved: "\u041D\u0435 \u0441\u043E\u0445\u0440\u0430\u043D\u0435\u043D\u043E: "
     }
@@ -1512,10 +1622,10 @@
   }
   async function load() {
     const [main, auto, route] = await Promise.all([
-      host2.service.request(SERVICE, "state"),
+      host2.service.request(SERVICE2, "state"),
       // A service from before Auto (Jev) has no such method: the page simply shows no Auto rows.
-      host2.service.request(SERVICE, "auto.state").catch(() => null),
-      host2.service.request(SERVICE, "route.state").catch(() => null)
+      host2.service.request(SERVICE2, "auto.state").catch(() => null),
+      host2.service.request(SERVICE2, "route.state").catch(() => null)
     ]);
     state = main;
     autoState = auto;
@@ -1527,7 +1637,7 @@
   async function forwardLimits() {
     if (!host2.request) return;
     const snapshot = await host2.request("limits.get");
-    await host2.service.request(SERVICE, "route.limits", { snapshot });
+    await host2.service.request(SERVICE2, "route.limits", { snapshot });
   }
   function forwardQuietly() {
     if (visible) void forwardLimits().catch(() => void 0);
@@ -1544,7 +1654,7 @@
       const next = structuredClone(state.settings);
       change(next);
       try {
-        await host2.service.request(SERVICE, "save", { settings: next });
+        await host2.service.request(SERVICE2, "save", { settings: next });
         say(t.saved);
       } catch (error) {
         say(`${t.notSaved}${errorText(error)}`);
@@ -1573,14 +1683,14 @@
       s.backends.find((b) => b.id === entry.id).enabled = value;
     }), `enabled-${entry.id}`));
     if (info?.target === "remote") {
-      controls.append(el2("span", { className: "label", textContent: t.trust }), select(entry.trust ?? "D0", [["D0", "D0"], ["D1", "D1"], ["D2", "D2"]], (value) => void save((s) => {
+      controls.append(el2("span", { className: "label", textContent: t.trust }), select(entry.trust ?? "D0", ["D0", "D1", "D2"].map((c) => [c, t.classes[c]]), (value) => void save((s) => {
         s.backends.find((b) => b.id === entry.id).trust = value;
       }), `trust-${entry.id}`));
     }
     const checkButton = el2("button", { type: "button", textContent: t.check, name: `check-${entry.id}` });
     checkButton.addEventListener("click", () => {
       say(t.checking);
-      host2.service.request(SERVICE, "check", { backendId: entry.id }).then(() => load(), (error) => say(errorText(error)));
+      host2.service.request(SERVICE2, "check", { backendId: entry.id }).then(() => load(), (error) => say(errorText(error)));
     });
     const removeButton = el2("button", { type: "button", textContent: t.remove });
     removeButton.addEventListener("click", () => void save((s) => {
@@ -1599,7 +1709,7 @@
           await host2.secrets.set(slot.secret, JSON.stringify({ origin: slot.origin, value }));
           stored = true;
           input.value = "";
-          await host2.service.request(SERVICE, "keyChanged", { backendId: entry.id });
+          await host2.service.request(SERVICE2, "keyChanged", { backendId: entry.id });
           say(t.saved);
         } catch (error) {
           say(`${t.notSaved}${errorText(error)}`);
@@ -1610,7 +1720,7 @@
       removeKey.addEventListener("click", async () => {
         try {
           await host2.secrets.delete(slot.secret);
-          await host2.service.request(SERVICE, "keyChanged", { backendId: entry.id });
+          await host2.service.request(SERVICE2, "keyChanged", { backendId: entry.id });
         } catch (error) {
           say(errorText(error));
         }
@@ -1683,13 +1793,15 @@
   function recentSection() {
     const list = el2("ul", { className: "recent" });
     if (!state.recent.length) list.append(el2("li", { className: "muted", textContent: t.noRecent }));
-    for (const entry of state.recent.slice(0, 20)) {
+    const shown = state.recent.slice(0, RECENT_SHOWN);
+    const asking = shown.find((entry) => entry.auditId && entry.tier !== "rule" && !entry.label) ?? null;
+    for (const entry of shown) {
       const item = el2("li", {}, el2("code", { textContent: entry.summary }), ` \u2192 ${entry.act ?? "\u2014"} (${entry.outcome}, ${entry.tier ?? "\u2014"}, ${entry.reason}) `);
-      if (entry.auditId && entry.tier !== "rule" && !entry.label) {
+      if (entry === asking) {
         for (const verdict of ["right", "wrong"]) {
           const button = el2("button", { type: "button", textContent: t[verdict] });
           button.addEventListener("click", async () => {
-            await host2.service.request(SERVICE, "feedback", { auditId: entry.auditId, verdict });
+            await host2.service.request(SERVICE2, "feedback", { auditId: entry.auditId, verdict });
             await load();
           });
           item.append(button);
@@ -1697,7 +1809,99 @@
       } else if (entry.label) item.append(el2("span", { className: "muted", textContent: t[entry.label] }));
       list.append(item);
     }
+    if (state.recent.length > RECENT_SHOWN) list.append(el2("li", { className: "muted", textContent: t.more(state.recent.length - RECENT_SHOWN) }));
     return list;
+  }
+  var RECENT_SHOWN = 5;
+  function quickSection() {
+    const s = state.settings;
+    const auto = autoState;
+    const a = auto.settings;
+    const saveAuto = (change) => {
+      const next = structuredClone(a);
+      change(next);
+      host2.service.request(SERVICE2, "auto.save", { settings: next }).then(() => load(), (error) => say(`${t.notSaved}${errorText(error)}`));
+    };
+    const on = a.upstreams.some((upstream) => upstream.enabled) && a.dailyUsdCap > 0;
+    const toggleNode = toggle("auto-on", on, t.autoOn, (value) => saveAuto((next) => {
+      for (const upstream of next.upstreams) upstream.enabled = value;
+      if (value && next.dailyUsdCap <= 0) next.dailyUsdCap = 1;
+    }));
+    const input = el2("input", { type: "password", placeholder: t.orKey, autocomplete: "off", name: "quick-key", className: "input" });
+    const saveKey = el2("button", { type: "button", textContent: t.change, name: "quick-key-save", className: "button" });
+    saveKey.addEventListener("click", async () => {
+      const value = input.value.trim();
+      if (!value) return;
+      try {
+        let backend = state.settings.backends.find((entry) => entry.preset === "openrouter");
+        if (!backend) {
+          const taken = new Set(state.settings.backends.map((entry2) => entry2.id));
+          let n = 1;
+          while (taken.has(`openrouter-${n}`)) n++;
+          const entry = { id: `openrouter-${n}`, preset: "openrouter", enabled: true, model: PRESETS.find((item) => item.id === "openrouter").model };
+          await save((next) => {
+            next.backends.push(entry);
+          });
+          backend = state.settings.backends.find((item) => item.id === entry.id);
+        }
+        const slot = backend ? state.slots[backend.id] : null;
+        if (!backend || !slot) throw new Error(t.keyNone);
+        await host2.secrets.set(slot.secret, JSON.stringify({ origin: slot.origin, value }));
+        input.value = "";
+        await host2.service.request(SERVICE2, "quickKeySaved", { backendId: backend.id });
+        say(t.saved);
+      } catch (error) {
+        say(`${t.notSaved}${errorText(error)}`);
+      }
+      await load().catch((error) => say(errorText(error)));
+    });
+    const prefer = segmented("auto-preference-quick", a.preference, [["cheap", t.prefCheap], ["balanced", t.prefBalanced], ["best", t.prefBest]], (value) => saveAuto((next) => {
+      next.preference = value;
+    }));
+    const cap = el2("input", { type: "number", name: "quick-daily", min: "0", max: "100", step: "0.5", value: String(a.dailyUsdCap), className: "input" });
+    cap.addEventListener("change", () => {
+      const value = Number(cap.value);
+      if (Number.isFinite(value) && value >= 0 && value <= 100) saveAuto((next) => {
+        next.dailyUsdCap = value;
+      });
+    });
+    const turns = auto.recent.filter((record) => record.kind === "turn").slice(0, 5);
+    const today = el2(
+      "div",
+      {},
+      el2("div", { textContent: t.todayLine(auto.stats.spentToday, auto.stats.requests) }),
+      ...turns.length ? turns.map((record) => el2("div", { className: "muted", textContent: autoStrings.turnLine(record) })) : [el2("div", { className: "muted", textContent: t.noDecisions })]
+    );
+    const notes = [];
+    if (auto.jevKey && s.modes["task.route"] === "off") {
+      const fix = el2("button", { type: "button", className: "link-button", textContent: t.jevOn, name: "quick-jev-on" });
+      fix.addEventListener("click", () => void save((next) => {
+        next.modes["task.route"] = "auto";
+        next.enabled = true;
+      }));
+      notes.push(el2("div", { className: "row" }, el2("span", { className: "muted", textContent: t.jevOff }), fix));
+    } else if (auto.jevKey && s.grant === "off") {
+      const fix = el2("button", { type: "button", className: "link-button", textContent: t.jevText, name: "quick-jev-text" });
+      fix.addEventListener("click", () => void save((next) => {
+        next.grant = "D1";
+      }));
+      notes.push(el2("div", { className: "row" }, el2("span", { className: "muted", textContent: t.jevNoText }), fix));
+    }
+    return el2(
+      "section",
+      { dataset: { section: "quick" } },
+      el2("h2", { textContent: t.quick }),
+      el2(
+        "div",
+        { className: "setting-group" },
+        settingRow(t.autoOn, t.autoOnHelp, toggleNode),
+        settingRow(t.orKey, `${auto.jevKey ? t.orKeySaved : t.orKeyMissing}. ${t.orKeyHelp}`, el2("span", { className: "row" }, input, saveKey)),
+        settingRow(t.prefer, t.preferHelp, prefer),
+        settingRow(t.dailyCap, t.dailyCapHelp, cap),
+        settingRow(t.today, "", today)
+      ),
+      ...notes
+    );
   }
   function render() {
     if (!state) return;
@@ -1705,9 +1909,12 @@
     const backends = el2("ul", { className: "backends" });
     if (!s.backends.length) backends.append(el2("li", { className: "muted", textContent: t.none }));
     for (const entry of s.backends) backends.append(backendRow(entry));
-    root.replaceChildren(
-      el2("h1", { textContent: t.title }),
-      el2("p", { className: "muted", textContent: t.lead }),
+    const advanced = el2("details", { className: "advanced", open: advancedOpen, name: "advanced" });
+    advanced.addEventListener("toggle", () => {
+      advancedOpen = advanced.open;
+    });
+    advanced.append(
+      el2("summary", { textContent: t.advanced }),
       el2("h2", { textContent: t.modes }),
       // Task triage needs the Assistant on; command review's own control keeps it on while review runs.
       row(t.triage, select(s.modes["task.route"], [["off", t.off], ["shadow", t.shadow], ["suggest", t.suggest], ["auto", t.auto]], (value) => void save((next) => {
@@ -1718,7 +1925,7 @@
       el2("h2", { textContent: t.backends }),
       backends,
       addForm(),
-      smartSection(),
+      ...s.backends.some((entry) => entry.preset === "emulated") || s.smart.kind !== "none" ? [smartSection()] : [],
       el2("h2", { textContent: t.data }),
       row(t.engine, select(s.engine, [["auto", t.engineAuto], ["jev", t.engineJev], ["local", t.engineLocal]], (value) => void save((next) => {
         next.engine = value;
@@ -1729,13 +1936,13 @@
       row(t.grant, select(s.grant, [["off", t.grantOff], ["D1", t.grantD1], ["D2", t.grantD2]], (value) => void save((next) => {
         next.grant = value;
       }), "grant")),
-      row(t.defaultClass, select(s.defaultDataClass, [["D0", "D0"], ["D1", "D1"], ["D2", "D2"], ["D3", "D3"]], (value) => void save((next) => {
+      row(t.defaultClass, select(s.defaultDataClass, ["D0", "D1", "D2", "D3"].map((c) => [c, t.classes[c]]), (value) => void save((next) => {
         next.defaultDataClass = value;
       }), "default-class")),
       el2("h2", { textContent: t.recent }),
       recentSection(),
       ...autoState ? [renderAuto(autoState, autoStrings, {
-        request: (method, params) => host2.service.request(SERVICE, method, params),
+        request: (method, params) => host2.service.request(SERVICE2, method, params),
         setSecret: (key, value) => host2.secrets.set(key, value),
         deleteSecret: (key) => host2.secrets.delete(key),
         say,
@@ -1744,7 +1951,7 @@
         }
       }, autoView)] : [],
       ...routeState ? [renderRouting(routeState, routeStrings, {
-        request: (method, params) => host2.service.request(SERVICE, method, params),
+        request: (method, params) => host2.service.request(SERVICE2, method, params),
         forwardLimits,
         say,
         reload: () => {
@@ -1752,7 +1959,14 @@
         }
       })] : []
     );
+    root.replaceChildren(
+      el2("h1", { textContent: t.title }),
+      el2("p", { className: "muted", textContent: t.lead }),
+      ...autoState ? [quickSection()] : [],
+      advanced
+    );
   }
+  var advancedOpen = false;
   host2.onContext(({ appearance }) => {
     const locale = applyAppearance(appearance);
     t = locale === "ru" ? STRINGS.ru : STRINGS.en;
@@ -1761,13 +1975,13 @@
     render();
   });
   host2.service.onEvent(({ serviceId, event, data }) => {
-    if (serviceId === SERVICE && event === "settings") {
+    if (serviceId === SERVICE2 && event === "settings") {
       whenIdle(() => {
         void load().catch((error) => say(errorText(error)));
       });
       return;
     }
-    if (serviceId !== SERVICE || event !== "check") return;
+    if (serviceId !== SERVICE2 || event !== "check") return;
     const result = data;
     say("error" in result ? result.error : result.added ? t.checkOk(result) : t.checkFail(result));
     void load();

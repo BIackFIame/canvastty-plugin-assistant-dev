@@ -66,7 +66,7 @@ export class Harness {
   readonly boards: TaskBoards;
   private readonly host: Host;
   private readonly dir: string;
-  private readonly locale: Locale;
+  private locale: Locale;
   private readonly now: () => number;
   private readonly reviewOn: () => boolean;
   private readonly sessions = new Map<string, CardSummary>();
@@ -97,6 +97,8 @@ export class Harness {
   }
 
   get strings(): ServiceStrings { return STRINGS[this.locale]; }
+  /** The person switched CanvasTTY's language (a page said so): badges, tooltips and toasts follow from now on. */
+  setLocale(locale: Locale): void { this.locale = locale; }
 
   /** An error for a page, in the person's language. */
   private fail(code: ErrorCode): never { throw new HarnessError(code, this.locale); }

@@ -37,7 +37,7 @@ const cliName = (id: string): string => CLI_NAMES[id] ?? id;
 export const ROUTE_PAGE_STRINGS = {
   en: {
     title: 'Where agents run',
-    lead: 'What the orchestrator\'s route tool chooses from when it starts a subagent: your subscriptions and coding plans (each reached only through its own CLI and its own sign-in), model accounts of the Accounts plugin, Model: Auto (Jev), and any other CLI on its own default model as the last fallback. A model is chosen by its measured score for the task type, then by price or by how much of a window it would take; a subscription with headroom above your reserve costs nothing. Nothing is started here, and the orchestrator\'s spawn is still checked by CanvasTTY.',
+    lead: 'Where an orchestrator\'s subagents run: your subscriptions and plans first when they have room, then model accounts and Auto. Nothing starts here.',
     limits: (age: string | null) => age === null ? 'Limit windows: not read yet.' : `Limit windows: read ${age}. They are read while this page is open; after 30 minutes without it they count as unknown, never as used up.`,
     readNow: 'Read now',
     plans: 'Subscriptions and coding plans', noPlans: 'None declared: subagents run on each CLI\'s own default model, after any scored option.',
@@ -59,7 +59,7 @@ export const ROUTE_PAGE_STRINGS = {
     quotaBy: 'Quota counted by', quotaKind: { tokens: 'tokens', prompts: 'prompts', unknown: 'not known' } as Record<string, string>,
     weights: 'Quota weights (model=weight, …; 1 = like the plan\'s top model)', speeds: 'Output speeds (model=tokens/s, …; empty: Artificial Analysis\'s measured speeds)',
     valueSpeed: 'On plans, value speed', speed: { low: 'little', moderate: 'moderately', high: 'a lot' } as Record<string, string>,
-    planHelp: 'On a plan a model costs the quota it uses and the time it takes: its expected tokens (a small model ×1.2 until outcomes say otherwise) times its quota weight (by default its API price against the plan\'s top model), and its time: your speeds, else the output speed and first-chunk time Artificial Analysis measured for that model and effort. A model with no known speed counts as fast as the plan\'s top model (neither faster nor slower). Within the quality window the cheapest wins for small and medium tasks; large or risky tasks stay quality-first.',
+    planHelp: 'On a plan, a model costs the share of the plan it uses and the time it takes. Details: README, "How Auto decides".',
     other: 'Other routes', autoRoute: 'Model: Auto (Jev) as a subagent route', never: 'Never use this CLI on its own sign-in',
     neverList: 'Never:', choices: 'Choices', preferSubs: 'Prefer subscriptions with headroom over a cheaper API route, within the quality window',
     newModels: 'New models', policy: { wait: 'Wait for a measured score', provisional: 'Provisional score (mapped, −5)', explore: 'Provisional, and explore 5% of easy tasks' } as Record<string, string>,
@@ -74,6 +74,7 @@ export const ROUTE_PAGE_STRINGS = {
     strategy: { 'single-cheap': 'one cheap', 'single-strong': 'one strong' } as Record<string, string>,
     type: { coding: 'coding', review: 'review', research: 'research', writing: 'writing', chat: 'chat' } as Record<string, string>,
     level: { small: 'small', medium: 'medium', large: 'large' } as Record<string, string>,
+    classes: { D0: 'Public', D1: 'Internal', D2: 'Confidential', D3: 'Secret' } as Record<string, string>,
     routeKind: { subscription: 'subscription', 'coding-plan': 'coding plan', account: 'model account', auto: 'Auto (Jev)', 'cli-default': 'its own sign-in' } as Record<string, string>,
     basis: { free: 'free within the window', burning: 'burning faster than its window', low: 'close to the reserve', unknown: 'quota unknown', plan: 'coding plan', local: 'on this computer', flat: 'flat-rate, unpriced', api: 'API price', unpriced: 'no price known', unavailable: 'unavailable' } as Record<string, string>,
     score: (value: number | null, label: string | null, below: number | null) => value === null ? 'no score' : `score ${value.toFixed(1)}${label ? ` (${label})` : ''}${below ? `, ${below} below the best` : ''}`,
@@ -83,7 +84,7 @@ export const ROUTE_PAGE_STRINGS = {
   },
   ru: {
     title: 'Где работают агенты',
-    lead: 'Из чего выбирает инструмент route оркестратора, когда запускает субагента: ваши подписки и планы для кода (каждый — только через свой CLI и его собственный вход), аккаунты моделей плагина Accounts, модель «Авто (Jev)» и любой другой CLI на его модели по умолчанию — в последнюю очередь. Модель выбирается по измеренной оценке для типа задачи, затем по цене или по доле окна, которую она займёт; подписка с запасом выше вашего резерва ничего не стоит. Здесь ничего не запускается, а запуск оркестратора по-прежнему проверяет CanvasTTY.',
+    lead: 'Где работают субагенты оркестратора: сначала ваши подписки и планы, пока в них есть запас, затем аккаунты моделей и «Авто». Здесь ничего не запускается.',
     limits: (age: string | null) => age === null ? 'Окна лимитов: ещё не прочитаны.' : `Окна лимитов: прочитаны ${age}. Они читаются, пока эта страница открыта; через 30 минут без неё считаются неизвестными, но не исчерпанными.`,
     readNow: 'Прочитать сейчас',
     plans: 'Подписки и планы для кода', noPlans: 'Ничего не объявлено: субагенты работают на модели по умолчанию своего CLI, после вариантов с оценкой.',
@@ -105,7 +106,7 @@ export const ROUTE_PAGE_STRINGS = {
     quotaBy: 'Квота считается по', quotaKind: { tokens: 'токенам', prompts: 'запросам', unknown: 'неизвестно' } as Record<string, string>,
     weights: 'Веса квоты (модель=вес, …; 1 — как у старшей модели плана)', speeds: 'Скорость вывода (модель=токенов/с, …; пусто — скорости, измеренные Artificial Analysis)',
     valueSpeed: 'На планах ценить скорость', speed: { low: 'немного', moderate: 'умеренно', high: 'сильно' } as Record<string, string>,
-    planHelp: 'На плане модель стоит ту квоту, которую тратит, и то время, которое занимает: ожидаемые токены (у маленькой модели ×1,2, пока результаты не покажут иное) на её вес квоты (по умолчанию — её цена API к старшей модели плана) и её время: ваши скорости, иначе скорость вывода и время до первого фрагмента, измеренные Artificial Analysis для этой модели и уровня рассуждения. Модель с неизвестной скоростью считается такой же быстрой, как старшая модель плана (не быстрее и не медленнее). В пределах окна качества для маленьких и средних задач побеждает самая дешёвая; большие и рискованные задачи — сначала качество.',
+    planHelp: 'На плане модель стоит ту долю плана, которую тратит, и то время, которое занимает. Подробнее — в README, «Как решает Авто».',
     other: 'Другие пути', autoRoute: 'Модель «Авто (Jev)» как путь для субагента', never: 'Никогда не запускать этот CLI на его собственном входе',
     neverList: 'Никогда:', choices: 'Выбор', preferSubs: 'Предпочитать подписки с запасом более дешёвому API в пределах окна качества',
     newModels: 'Новые модели', policy: { wait: 'Ждать измеренной оценки', provisional: 'Предварительная оценка (пересчитанная, −5)', explore: 'Предварительная и проба на 5% простых задач' } as Record<string, string>,
@@ -120,6 +121,7 @@ export const ROUTE_PAGE_STRINGS = {
     strategy: { 'single-cheap': 'одна дешёвая', 'single-strong': 'одна сильная' } as Record<string, string>,
     type: { coding: 'код', review: 'ревью', research: 'исследование', writing: 'тексты', chat: 'общение' } as Record<string, string>,
     level: { small: 'маленькая', medium: 'средняя', large: 'большая' } as Record<string, string>,
+    classes: { D0: 'Открытые', D1: 'Внутренние', D2: 'Конфиденциальные', D3: 'Секретные' } as Record<string, string>,
     routeKind: { subscription: 'подписка', 'coding-plan': 'план для кода', account: 'аккаунт модели', auto: 'Авто (Jev)', 'cli-default': 'свой вход CLI' } as Record<string, string>,
     basis: { free: 'бесплатно в пределах окна', burning: 'расходуется быстрее окна', low: 'близко к резерву', unknown: 'лимит неизвестен', plan: 'план для кода', local: 'на этом компьютере', flat: 'фиксированный тариф, без цены', api: 'цена API', unpriced: 'цена неизвестна', unavailable: 'недоступно' } as Record<string, string>,
     score: (value: number | null, label: string | null, below: number | null) => value === null ? 'без оценки' : `оценка ${value.toFixed(1).replace('.', ',')}${label ? ` (${label})` : ''}${below ? `, на ${String(below).replace('.', ',')} ниже лучшей` : ''}`,
@@ -151,7 +153,7 @@ export function renderRouting(state: RouteState, t: Strings, page: RoutePageHost
     change(next);
     page.request('route.save', { settings: next }).then(() => page.reload(), error => page.say(error instanceof Error ? error.message : String(error)));
   };
-  const trustOptions: Array<[TrustLevel, string]> = [['unset', t.trustUnset], ['D0', 'D0'], ['D1', 'D1'], ['D2', 'D2'], ['D3', 'D3']];
+  const trustOptions: Array<[TrustLevel, string]> = [['unset', t.trustUnset], ...(['D0', 'D1', 'D2', 'D3'] as const).map(c => [c, t.classes[c] ?? c] as [TrustLevel, string])];
   const allowOptions: Array<[RouteAllow, string]> = (['prefer', 'allow', 'never'] as const).map(value => [value, t.allow[value]!]);
   const section = el('section', { className: 'auto', dataset: { section: 'routing' } });
   section.append(el('h2', { textContent: t.title }), el('p', { className: 'muted', textContent: t.lead }));
@@ -288,7 +290,10 @@ export function renderRouting(state: RouteState, t: Strings, page: RoutePageHost
   section.append(el('h2', { textContent: t.recent }));
   const recent = el('ul', { className: 'recent', dataset: { route: 'recent' } });
   if (!state.recent.length) recent.append(el('li', { className: 'muted', textContent: t.noRecent }));
-  for (const record of state.recent.slice(0, 20)) recent.append(recentRow(record, t, page));
+  // The last five; Right/Wrong only on the newest one the person has not judged yet.
+  const shown = state.recent.slice(0, 5);
+  const asking = shown.find(record => record.outcome?.by !== 'person') ?? null;
+  for (const record of shown) recent.append(recentRow(record, t, page, record === asking));
   section.append(recent);
   return section;
 }
@@ -374,7 +379,7 @@ function addPlan(settings: RouteSettings, t: Strings, save: (change: (next: Rout
   return box;
 }
 
-function recentRow(record: RouteRecord, t: Strings, page: RoutePageHost): HTMLLIElement {
+function recentRow(record: RouteRecord, t: Strings, page: RoutePageHost, asking: boolean): HTMLLIElement {
   const time = new Date(record.at).toLocaleTimeString(document.documentElement.lang || 'en', { hour: '2-digit', minute: '2-digit', hourCycle: 'h23' });
   const option = record.options[record.spawned?.option ?? 0];
   const item = el('li', { dataset: { decision: record.id } });
@@ -384,12 +389,12 @@ function recentRow(record: RouteRecord, t: Strings, page: RoutePageHost): HTMLLI
     el('code', { textContent: option ? `${option.cli}${option.model ? ` · ${option.model}` : ''}${option.effort ? `@${option.effort}` : ''}` : '—' }),
     el('span', { textContent: option ? t.estimate(option.estimateData, option.estimate) : '' })));
   // The why-line in the person's language, from the record's data (the orchestrator got the English one).
-  if (option) item.append(el('div', { className: 'muted', textContent: [`${t.routeKind[option.kind] ?? option.kind}: ${option.label}`, t.score(option.score, option.scoreLabel ?? null, option.below ?? null), t.basis[option.costBasis] ?? option.costBasis].join(' · ') }));
+  if (option) item.append(el('div', { className: 'muted', textContent: [option.kind === 'auto' ? t.routeKind.auto! : `${t.routeKind[option.kind] ?? option.kind}: ${option.label}`, t.score(option.score, option.scoreLabel ?? null, option.below ?? null), t.basis[option.costBasis] ?? option.costBasis].join(' · ') }));
   const outcome = record.outcome ? `${t.outcome[record.outcome.result] ?? record.outcome.result}${record.outcome.by === 'person' ? ` (${t.byPerson})` : ''}` : '';
   const right = el('button', { type: 'button', textContent: t.right, name: `route-right-${record.id}` });
   const wrong = el('button', { type: 'button', textContent: t.wrong, name: `route-wrong-${record.id}` });
   right.addEventListener('click', () => { void page.request('route.feedback', { id: record.id, ok: true }).then(() => page.reload(), error => page.say(String(error))); });
   wrong.addEventListener('click', () => { void page.request('route.feedback', { id: record.id, ok: false }).then(() => page.reload(), error => page.say(String(error))); });
-  item.append(el('div', { className: 'row' }, el('span', { textContent: outcome }), right, wrong));
+  item.append(el('div', { className: 'row' }, el('span', { textContent: outcome }), ...(asking ? [right, wrong] : [])));
   return item;
 }

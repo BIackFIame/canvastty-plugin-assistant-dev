@@ -199,6 +199,16 @@ model account (an account and Auto on one launch are refused: both configure Ope
 - **Known limit**: the agent's own shell can read its key and call the router itself; it then spends at most that
   card's cap through the same allow-list.
 
+## How Auto decides
+
+The settings pages keep one plain sentence per control; the numbers live here.
+
+- **Turn level.** Jev's task triage gives the task type (coding, review, research, writing, chat) and how hard the turn is. A turn is small only when Jev puts at least 0.5 on the two easiest levels (0.7 for research and review); an orchestrator's turn is never small. Without Jev, word rules decide and are never "sure".
+- **Model.** Among the models you allow that are healthy now, the cheapest one whose benchmark score for that type is within the preference's window of the best: Balanced 8 / 5 / 3 points on small / medium / large turns, Cheaper 15 / 10 / 5, Better 0. Within the window a lower reasoning effort is preferred too, except on large turns. Unknown scores never beat known ones.
+- **Several models** (hard text turns only). On Auto, consensus runs when (judge's score + 1.5 points per extra vendor, at most 3) − the single model's score − cost weight × log2(fan-out cost ÷ single cost) − 0.5 × log2(fan-out time ÷ single time) > 0. Cost weight: Cheaper 3, Balanced 1, Better 0; the time term is 0 when a speed is unknown. Drafts are within 8 points of the best, judges within 3.
+- **Plans.** On a subscription, coding plan or flat-rate account a model costs its quota share against the plan's top model (expected tokens, ×1.2 for small models until outcomes say otherwise, times the API price ratio or your weight) plus "value speed" × its time against the top model's (your speeds, else Artificial Analysis's output speed and first-chunk time; unknown counts as the same time).
+- **Data.** Public, internal, confidential and secret are D0–D3 in the logs. Secret text stays on this computer.
+
 ## Limits
 
 - Budgets per minute, per day and in USD per day for cloud calls. A cloud call holds an upper estimate of its cost

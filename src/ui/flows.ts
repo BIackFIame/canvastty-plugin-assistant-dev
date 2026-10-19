@@ -18,7 +18,7 @@ const STRINGS = {
   en: {
     off: 'Flows are off in the Assistant settings.',
     waiting: 'Waiting for you', none: 'No flow is waiting. When an orchestrator asks you to approve one, it appears here.',
-    flow: 'Flow', builtIn: 'Built in', project: 'From this project', what: 'What it does', goal: 'Goal', for: 'Orchestrator',
+    flow: 'Flow', builtIn: 'built-in', project: 'From this project', what: 'What it does', goal: 'Goal', for: 'Orchestrator',
     role: 'Role', model: 'Provider / model', task: 'Task', auto: 'chosen by the orchestrator', providerDefault: 'default model',
     request: 'Start tells the orchestrator it may go ahead and hands it these roles. This is a request it is told to follow, not a lock: CanvasTTY cannot yet stop an orchestrator that starts agents without it. Each agent still goes through CanvasTTY\'s own launch checks.',
     changed: 'The plan changed: the orchestrator replaced the plan that was shown here. Read it again before you start.',
@@ -30,7 +30,7 @@ const STRINGS = {
   ru: {
     off: 'Сценарии выключены в настройках Помощника.',
     waiting: 'Ждёт вас', none: 'Нет сценариев, ждущих решения. Когда оркестратор попросит одобрить сценарий, он появится здесь.',
-    flow: 'Сценарий', builtIn: 'Встроенный', project: 'Из этого проекта', what: 'Что делает', goal: 'Цель', for: 'Оркестратор',
+    flow: 'Сценарий', builtIn: 'встроенный', project: 'Из этого проекта', what: 'Что делает', goal: 'Цель', for: 'Оркестратор',
     role: 'Роль', model: 'Провайдер / модель', task: 'Задача', auto: 'выберет оркестратор', providerDefault: 'модель по умолчанию',
     request: '«Запустить» разрешает оркестратору начать и передаёт ему эти роли. Это просьба, которой его просят следовать, а не запрет: CanvasTTY пока не может остановить оркестратор, который запускает агентов без неё. Каждый агент всё равно проходит обычные проверки запуска CanvasTTY.',
     changed: 'План изменился: оркестратор заменил план, который был здесь. Прочитайте его заново перед запуском.',
