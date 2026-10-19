@@ -31,13 +31,14 @@ writeFileSync(join(project, 'scripts', 'build.sh'), 'echo build\n');
 writeFileSync(join(project, 'src', 'a.ts'), 'export const a = 1;\n');
 writeFileSync(join(project, 'Makefile'), 'all:\n\techo all\n');
 writeFileSync(join(project, '.env'), 'NOT_A_REAL_KEY=placeholder\n');
+writeFileSync(join(project, '.git', 'config'), '[core]\n\trepositoryformatversion = 0\n\tbare = false\n');
 symlinkSync(outside, join(project, 'link-out'));
 symlinkSync(outside, join(project, 'node_modules'));
 process.on('exit', () => rmSync(base, { recursive: true, force: true }));
 
 const exec = command => ({ kind: 'execute', command, commandCwd: null, paths: [], content: null, inputTruncated: false, url: null });
 const facts = (command, extra = {}) => analyzeAction(exec(command), project, { home, ...extra });
-const verdict = command => tier1(facts(command));
+const verdict = (command, cwd = project) => tier1(facts(command), { cwd });
 
 // ---------------------------------------------------------------------------
 // Tier 1: the owner's hard denies, always-ask and the read-only allow list
@@ -105,6 +106,44 @@ test('tier 1 always-ask: force push, history rewrites, unresolved recursive dele
     assert.equal(result.verdict, 'ask', `${command} → ${JSON.stringify(result)}`);
     assert.equal(result.rule, rule, `${command} rule`);
   }
+});
+
+test('tier 1: git is a read-only allow only when the repository\'s own configuration starts no other program; signature flags never', () => {
+  const repo = join(base, 'git-config');
+  mkdirSync(join(repo, '.git'), { recursive: true });
+  const at = config => { writeFileSync(join(repo, '.git', 'config'), `[core]\n\tbare = false\n${config}`); return command => tier1(analyzeAction(exec(command), repo, { home }), { cwd: repo }); };
+  const clean = at('');
+  for (const command of ['git status', 'git diff', 'git log -p -3', 'git show HEAD', 'git blame README.md']) assert.equal(clean(command).verdict, 'allow', command);
+  for (const command of ['git log --show-signature', 'git show --show-signature HEAD', 'git log --format=%G?', 'git log --pretty=format:%GS', 'git diff --ext-diff', 'git log --textconv -p', 'git --paginate log'])
+    assert.notEqual(clean(command).verdict, 'allow', command);
+  const risky = ['[diff]\n\texternal = /tmp/x\n', '[diff "bin"]\n\tcommand = /tmp/x\n', '[diff "bin"]\n\ttextconv = /tmp/x\n', '[core]\n\tpager = /tmp/x\n', '[core]\n\tfsmonitor = /tmp/x\n',
+    '[core]\n\thooksPath = /tmp/h\n', '[include]\n\tpath = /tmp/other\n', '[includeIf "gitdir:/"]\n\tpath = /tmp/other\n', '[filter "lfs"]\n\tclean = /tmp/x\n', '[log]\n\tshowSignature = true\n', '[gpg]\n\tprogram = /tmp/x\n'];
+  for (const config of risky) {
+    const check = at(config);
+    for (const command of ['git diff', 'git log -p', 'git show HEAD', 'git status']) {
+      const result = check(command);
+      assert.notEqual(result.verdict, 'allow', `${command} with ${config.trim()}`);
+      assert.notEqual(result.verdict, 'deny', 'unsure falls through to the review, never a deny');
+    }
+  }
+  // Unsure: no folder given, no repository, an unreadable worktree pointer.
+  assert.equal(tier1(analyzeAction(exec('git status'), repo, { home })).verdict, null, 'no folder: the review decides');
+  const bare = join(base, 'no-repo-here');
+  mkdirSync(bare, { recursive: true });
+  assert.equal(verdict('git status', bare).verdict, null, 'no repository: the review decides');
+  const linked = join(base, 'linked');
+  mkdirSync(join(base, 'gitdirs', 'wt', ), { recursive: true });
+  mkdirSync(linked, { recursive: true });
+  writeFileSync(join(linked, '.git'), `gitdir: ${join(base, 'gitdirs', 'wt')}\n`);
+  writeFileSync(join(base, 'gitdirs', 'wt', 'commondir'), '../common\n');
+  mkdirSync(join(base, 'gitdirs', 'common'), { recursive: true });
+  writeFileSync(join(base, 'gitdirs', 'common', 'config'), '[core]\n\tbare = false\n');
+  const inLinked = command => tier1(analyzeAction(exec(command), linked, { home }), { cwd: linked });
+  assert.equal(inLinked('git status').verdict, 'allow', 'a linked worktree: its common config is read');
+  writeFileSync(join(base, 'gitdirs', 'wt', 'config.worktree'), '[core]\n\tfsmonitor = /tmp/x\n');
+  assert.equal(inLinked('git status').verdict, null, 'and its worktree config');
+  // Other read-only programs do not depend on git's configuration.
+  assert.equal(tier1(analyzeAction(exec('ls'), bare, { home }), { cwd: bare }).verdict, 'allow');
 });
 
 test('tier 1 allows only whole read-only commands without metacharacters, inside the project, with no key file', () => {
@@ -381,7 +420,7 @@ const ctx = () => ({ signal: new AbortController().signal, assertCurrent() {}, r
 async function decide(engine, command, { session = {}, typed = true, git = fakeGit(), tracker, files } = {}) {
   const f = await computed(command, { git, requestTypedByPerson: typed, ...(tracker ? { tracker } : {}) });
   return askCommandReview(engine, {
-    facts: f, tier1: tier1(f), personRequest: 'Run the tests and fix what fails', content: null, dataClass: 'D2',
+    facts: f, tier1: tier1(f, { cwd: project }), personRequest: 'Run the tests and fix what fails', content: null, dataClass: 'D2',
     session: { suspect: false, strict: false, personOnly: false, ...session }, cacheScope: 'scope',
     referencedFiles: files ?? (include => collectReferencedFiles({ root: project, facts: f, git: null, signal: new AbortController().signal, include }))
   }, ctx());
@@ -543,7 +582,7 @@ test('one-way property: across random answers, facts and modes, every allow is t
     assert.equal(session.suspect || session.personOnly, false);
     assert.equal(unseeableEffect(f), false, command);
     assert.equal(PERSON_ONLY_CLASSES.includes(f.actionClass), false, command);
-    if (result.path === 'tier1') { assert.equal(tier1(f).verdict, 'allow'); continue; }
+    if (result.path === 'tier1') { assert.equal(tier1(f, { cwd: project }).verdict, 'allow'); continue; }
     assert.equal(options.qualified, true);
     assert.equal(options.variant, 'full');
     if (result.path === 'R3') {

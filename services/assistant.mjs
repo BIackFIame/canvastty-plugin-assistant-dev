@@ -76,7 +76,7 @@ function serve({ methods, notifications = {}, onInitialize, input = process.stdi
     return true;
   };
   const host = {
-    callHost: (method, params) => new Promise((resolve8, reject) => {
+    callHost: (method, params) => new Promise((resolve9, reject) => {
       if (hostGone) {
         reject(new Error("The host connection is closed."));
         return;
@@ -90,7 +90,7 @@ function serve({ methods, notifications = {}, onInitialize, input = process.stdi
         pending.delete(id);
         reject(new Error(`The host did not answer ${method} in time.`));
       }, limit2.hostCallMs);
-      pending.set(id, { resolve: resolve8, reject, timer });
+      pending.set(id, { resolve: resolve9, reject, timer });
       if (!send({ id, method, params })) {
         clearTimeout(timer);
         pending.delete(id);
@@ -1261,9 +1261,9 @@ function decodeResponse(dialect, value, request, options = {}) {
   for (const [id, question] of Object.entries(request.questions)) {
     const answer = given[id];
     if (!isRecord2(answer)) invalid2("Missing System One answer.");
-    const read = readAnswer(dialect, question, answer, decimals ?? 2);
-    if (read.type === "choice" && options.tournament?.includes(id)) read.uncalibrated = true;
-    answers[id] = read;
+    const read2 = readAnswer(dialect, question, answer, decimals ?? 2);
+    if (read2.type === "choice" && options.tournament?.includes(id)) read2.uncalibrated = true;
+    answers[id] = read2;
     const vendor = vendorConfidence(answer);
     if (vendor !== null) confidence[id] = vendor;
   }
@@ -1356,14 +1356,14 @@ function retryDelayMs(attempt, headers, timing) {
   return timing.now + delay + timing.expectedLatencyMs < timing.deadlineAt ? delay : null;
 }
 function sleep(ms, signal) {
-  return new Promise((resolve8, reject) => {
+  return new Promise((resolve9, reject) => {
     if (signal.aborted) {
       reject(signal.reason);
       return;
     }
     const timer = setTimeout(() => {
       signal.removeEventListener("abort", abort);
-      resolve8();
+      resolve9();
     }, ms);
     const abort = () => {
       clearTimeout(timer);
@@ -2866,10 +2866,10 @@ var EmulatedSystemOneBackend = class {
         continue;
       }
       try {
-        const read = await this.letterAnswer(ctx, probe, request.state, question, symmetric);
-        answers[id] = read.answer;
-        readout[id] = read.readout;
-        letterMass[id] = read.letterMass;
+        const read2 = await this.letterAnswer(ctx, probe, request.state, question, symmetric);
+        answers[id] = read2.answer;
+        readout[id] = read2.readout;
+        letterMass[id] = read2.letterMass;
       } catch (error) {
         const errorClass = error instanceof SystemOneError ? error.errorClass : null;
         if (errorClass === "context") {
@@ -2985,8 +2985,8 @@ var EmulatedSystemOneBackend = class {
         for (const id of Object.keys(group)) skipped[id] = "context";
         continue;
       }
-      const read = await this.jsonCall(ctx, probe, state, group);
-      for (const [id, answer] of Object.entries(read)) {
+      const read2 = await this.jsonCall(ctx, probe, state, group);
+      for (const [id, answer] of Object.entries(read2)) {
         answers[id] = answer;
         readout[id] = "json";
       }
@@ -3174,11 +3174,11 @@ var AssistantBudget = class {
       if (onAbort) signal?.removeEventListener("abort", onAbort);
       onAbort = null;
     };
-    const ready2 = new Promise((resolve8, reject) => {
+    const ready2 = new Promise((resolve9, reject) => {
       wake = () => {
         admitted = true;
         unlisten();
-        resolve8();
+        resolve9();
       };
       if (!signal) return;
       onAbort = () => {
@@ -5185,7 +5185,7 @@ var AssistantEngine = class _AssistantEngine {
 import { createHash as createHash4 } from "node:crypto";
 import { lstatSync, readFileSync as readFileSync3 } from "node:fs";
 import { homedir as homedir2, tmpdir as tmpdir2 } from "node:os";
-import { isAbsolute as isAbsolute5, join as join6, relative as relative5, resolve as resolve5, sep as sep5 } from "node:path";
+import { isAbsolute as isAbsolute6, join as join6, relative as relative5, resolve as resolve6, sep as sep5 } from "node:path";
 
 // src/shared/commandReview.ts
 var REVIEWABLE_ACP_KINDS = ["read", "edit", "delete", "move", "search", "execute", "fetch"];
@@ -5611,14 +5611,14 @@ function readBounded2(path, max) {
     const stat2 = fstatSync(fd);
     if (!stat2.isFile()) return null;
     const buffer = Buffer.alloc(Math.min(max + 1, Math.max(1, stat2.size + 1)));
-    let read = 0;
-    while (read < buffer.length) {
-      const n = readSync(fd, buffer, read, buffer.length - read, read);
+    let read2 = 0;
+    while (read2 < buffer.length) {
+      const n = readSync(fd, buffer, read2, buffer.length - read2, read2);
       if (n <= 0) break;
-      read += n;
+      read2 += n;
     }
-    const truncated = read > max;
-    const bytes = buffer.subarray(0, Math.min(read, max));
+    const truncated = read2 > max;
+    const bytes = buffer.subarray(0, Math.min(read2, max));
     if (bytes.includes(0)) return null;
     return { text: bytes.toString("utf8"), truncated };
   } catch {
@@ -5633,10 +5633,10 @@ function readBounded2(path, max) {
 function packageScripts(rootReal) {
   const real = insideRoot(rootReal, "package.json");
   if (!real) return null;
-  const read = readBounded2(real, PACKAGE_JSON_MAX);
-  if (!read || read.truncated) return null;
+  const read2 = readBounded2(real, PACKAGE_JSON_MAX);
+  if (!read2 || read2.truncated) return null;
   try {
-    const parsed = JSON.parse(read.text);
+    const parsed = JSON.parse(read2.text);
     if (!parsed.scripts || typeof parsed.scripts !== "object" || Array.isArray(parsed.scripts)) return {};
     return Object.fromEntries(Object.entries(parsed.scripts).filter(([, value]) => typeof value === "string"));
   } catch {
@@ -5727,8 +5727,8 @@ async function collectReferencedFiles(input) {
   let complete = true;
   const content = (rel) => {
     const real = insideRoot(rootReal, rel);
-    const read = real ? readBounded2(real, REVIEW_LIMITS.referencedFileBytes) : null;
-    return read ? { path: rel, kind: "content", text: read.text, truncated: read.truncated } : null;
+    const read2 = real ? readBounded2(real, REVIEW_LIMITS.referencedFileBytes) : null;
+    return read2 ? { path: rel, kind: "content", text: read2.text, truncated: read2.truncated } : null;
   };
   const required = [];
   for (const rel of input.facts.changedScripts) required.push(async () => content(rel));
@@ -7657,8 +7657,64 @@ async function verifyTestRun(input) {
 }
 
 // src/review/inspection.ts
+import { statSync as statSync4 } from "node:fs";
+import { isAbsolute as isAbsolute5, relative as relative4, resolve as resolve5, sep as sep4 } from "node:path";
+
+// src/review/gitConfig.ts
 import { readFileSync as readFileSync2, statSync as statSync3 } from "node:fs";
-import { dirname as dirname3, isAbsolute as isAbsolute4, join as join5, relative as relative4, resolve as resolve4, sep as sep4 } from "node:path";
+import { dirname as dirname3, isAbsolute as isAbsolute4, join as join5, resolve as resolve4 } from "node:path";
+var RISKY_KEY = /^\s*(?:external|command|textconv|pager|fsmonitor|hookspath|clean|smudge|process|program|showsignature)\s*=/imu;
+var RISKY_SECTION = /^\s*\[\s*(?:include|includeif|pager|filter|gpg)\b/imu;
+function read(path) {
+  try {
+    return readFileSync2(path, "utf8");
+  } catch {
+    return null;
+  }
+}
+function gitDirs(cwd) {
+  let dir = resolve4(cwd);
+  for (let i = 0; i < 128; i++) {
+    const dotGit = join5(dir, ".git");
+    let stat2;
+    try {
+      stat2 = statSync3(dotGit);
+    } catch {
+      stat2 = null;
+    }
+    if (stat2?.isDirectory()) return [dotGit];
+    if (stat2?.isFile()) {
+      const pointer = /^gitdir:\s*(.+)\s*$/mu.exec(read(dotGit) ?? "")?.[1];
+      if (!pointer) return null;
+      const gitDir = isAbsolute4(pointer) ? pointer : resolve4(dir, pointer);
+      const common = read(join5(gitDir, "commondir"))?.trim();
+      return [gitDir, ...common ? [isAbsolute4(common) ? common : resolve4(gitDir, common)] : []];
+    }
+    const parent = dirname3(dir);
+    if (parent === dir) return null;
+    dir = parent;
+  }
+  return null;
+}
+function gitConfigSafe(cwd) {
+  const dirs = gitDirs(cwd);
+  if (!dirs) return false;
+  let found = false;
+  for (const dir of dirs) {
+    for (const name of ["config", "config.worktree"]) {
+      const text6 = read(join5(dir, name));
+      if (text6 === null) {
+        if (name === "config" && dir === dirs.at(-1)) return false;
+        continue;
+      }
+      found = true;
+      if (RISKY_KEY.test(text6) || RISKY_SECTION.test(text6)) return false;
+    }
+  }
+  return found;
+}
+
+// src/review/inspection.ts
 var WORD = /^(?:[A-Za-z0-9_\-.,/:@+]+|'[^'\n]*'|"[^"$`\\!\n]*")+$/u;
 var UNQUOTED_GLOB = /[*?[\]{}~]/u;
 function plainWords(command) {
@@ -7679,40 +7735,15 @@ var GIT_FLAGS = {
   log: /^(?:--oneline|-\d{1,4}|-n|--max-count=\d{1,4}|--stat|--name-only|--name-status|-p|--patch|--no-color|--graph|--decorate|--no-decorate|--format=[A-Za-z%:() -]{1,40}|--pretty=(?:oneline|short|medium|full|fuller)|--no-ext-diff|--no-textconv|--)$/u
 };
 var REVISION = /^(?:HEAD(?:[~^]\d{0,3})*|[0-9a-f]{7,40}|[A-Za-z0-9._/-]+\.\.[A-Za-z0-9._/~^-]+|\d{1,4})$/u;
-var RISKY_GIT_CONFIG = /^\s*(?:pager|external|textconv|command|fsmonitor|hookspath|sshcommand|askpass|editor)\s*=|^\s*\[\s*(?:include|includeif|pager)\b/imu;
-function gitConfigClean(root) {
-  let dir = root;
-  for (let i = 0; i < 64; i++) {
-    const dotGit = join5(dir, ".git");
-    let stat2;
-    try {
-      stat2 = statSync3(dotGit);
-    } catch {
-      stat2 = null;
-    }
-    if (stat2) {
-      if (!stat2.isDirectory()) return false;
-      try {
-        return !RISKY_GIT_CONFIG.test(readFileSync2(join5(dotGit, "config"), "utf8"));
-      } catch {
-        return false;
-      }
-    }
-    const parent = dirname3(dir);
-    if (parent === dir) return false;
-    dir = parent;
-  }
-  return false;
-}
 function plainInspection(command, cwd, root) {
   const words = plainWords(command);
   if (!words?.length) return false;
-  const rootReal = realish(resolve4(root));
-  const here = realish(resolve4(cwd));
+  const rootReal = realish(resolve5(root));
+  const here = realish(resolve5(cwd));
   const insideRoot2 = (abs) => abs === rootReal || abs.startsWith(`${rootReal}${sep4}`);
   if (!insideRoot2(here)) return false;
   const pathOk = (word) => {
-    const abs = realish(isAbsolute4(word) ? word : resolve4(here, word));
+    const abs = realish(isAbsolute5(word) ? word : resolve5(here, word));
     if (!insideRoot2(abs) || isCredentialPath(abs)) return false;
     const rel = relative4(rootReal, abs).split(sep4).join("/");
     return !rel || !isProtectedRel(rel) && !/(?:^|\/)\.git(?:\/|$)/u.test(rel);
@@ -7745,7 +7776,7 @@ function plainInspection(command, cwd, root) {
       return paths.length > 0 && paths.every((path) => {
         if (!pathOk(path)) return false;
         try {
-          return statSync3(realish(isAbsolute4(path) ? path : resolve4(here, path))).isFile();
+          return statSync4(realish(isAbsolute5(path) ? path : resolve5(here, path))).isFile();
         } catch {
           return false;
         }
@@ -7754,7 +7785,7 @@ function plainInspection(command, cwd, root) {
     case "git": {
       const [sub, ...rest] = args;
       const flags = sub ? GIT_FLAGS[sub] : void 0;
-      if (!flags || !gitConfigClean(rootReal)) return false;
+      if (!flags || !gitConfigSafe(here)) return false;
       let afterDashes = false;
       for (const arg of rest) {
         if (arg === "--") {
@@ -7796,9 +7827,10 @@ var ALLOW = {
   du: null,
   git: ["status", "diff", "log", "show", "branch", "rev-parse", "ls-files", "blame"]
 };
-var REFUSED_FLAGS = /^(?:--pre|--pre-glob|-z|--search-zip|--output|--ext-diff|--textconv|-o|--open-files-in-pager|-O)(?:=|$)/u;
+var REFUSED_FLAGS = /^(?:--pre|--pre-glob|-z|--search-zip|--output|--ext-diff|--textconv|-o|--open-files-in-pager|-O|--show-signature|--paginate)(?:=|$)/u;
+var SIGNATURE_FORMAT = /^--(?:format|pretty)=.*%G/u;
 var VERSION_ONLY = /^(?:node|npm|pnpm|yarn|bun|deno|python3?|pip3?|git|go|cargo|rustc|java|ruby|tsc|make|cmake|docker|gh|uv) (?:--version|version)$/u;
-function tier1(facts) {
+function tier1(facts, context = {}) {
   const deny = (rule) => ({ verdict: "deny", rule });
   const ask = (rule) => ({ verdict: "ask", rule });
   if (facts.elevation) return deny("elevation");
@@ -7817,10 +7849,10 @@ function tier1(facts) {
   if (facts.killAll) return ask("kill-all");
   if (facts.encoded) return ask("encoded");
   if (facts.unterminated) return ask("unreadable");
-  if (exactAllow(facts)) return { verdict: "allow", rule: "read-only" };
+  if (exactAllow(facts, context.cwd ?? null)) return { verdict: "allow", rule: "read-only" };
   return { verdict: null, rule: null };
 }
-function exactAllow(facts) {
+function exactAllow(facts, cwd) {
   if (facts.kind !== "execute" && facts.kind !== null || !facts.command || facts.truncated) return false;
   const command = normalizeCommand(facts.command);
   if (!command || command.length > 400 || SHELL_METACHARACTER.test(command)) return false;
@@ -7837,7 +7869,9 @@ function exactAllow(facts) {
     if (!subs.includes(argv[1] ?? "")) return false;
     if (program === "git" && argv[1] === "branch" && argv.slice(2).some((arg) => !/^(?:-a|-r|-v|-vv|--list|--all|--show-current)$/u.test(arg))) return false;
   }
-  return !argv.slice(1).some((arg) => REFUSED_FLAGS.test(arg));
+  if (argv.slice(1).some((arg) => REFUSED_FLAGS.test(arg) || SIGNATURE_FORMAT.test(arg))) return false;
+  if (program === "git" && argv[1] !== "--version" && argv[1] !== "version" && (!cwd || !gitConfigSafe(cwd))) return false;
+  return true;
 }
 
 // src/review/reviewService.ts
@@ -7857,7 +7891,7 @@ function namedFolders(text6) {
 function newFileTargets(toolName, toolInput, truncated, cwd) {
   const raw = record(toolInput);
   if (truncated || !raw || !wholeContentWrite(toolName, toolInput, truncated, cwd)) return null;
-  const abs = (path) => isAbsolute5(path) ? path : join6(cwd, path);
+  const abs = (path) => isAbsolute6(path) ? path : join6(cwd, path);
   let paths;
   if (toolName === "apply_patch" || toolName === "patch") {
     const patch = [raw.command, raw.patch, raw.patchText, raw.input].find((value) => typeof value === "string") ?? "";
@@ -7874,7 +7908,7 @@ var MAX_SESSIONS = 512;
 function targetOf(request, action) {
   const raw = record(request.input);
   const path = raw ? [raw.file_path, raw.filePath, raw.path].find((value) => typeof value === "string" && value.length > 0) : void 0;
-  return path ? realish(resolve5(isAbsolute5(path) ? path : join6(action.commandCwd ?? request.agentCwd ?? request.cwd, path))) : null;
+  return path ? realish(resolve6(isAbsolute6(path) ? path : join6(action.commandCwd ?? request.agentCwd ?? request.cwd, path))) : null;
 }
 function ownFileResult(request, state, action) {
   if (request.truncated || action.inputTruncated) return null;
@@ -7989,7 +8023,7 @@ function wholeContentWrite(toolName, toolInput, truncated, cwd = null) {
   if (truncated || !raw) return false;
   if (WHOLE_FILE_WRITES.has(toolName)) return typeof raw.content === "string" && [raw.file_path, raw.filePath, raw.path].some((value) => typeof value === "string" && value.length > 0);
   if (toolName === "edit" && Object.keys(raw).every((key) => key === "file_path" || key === "content") && typeof raw.content === "string" && typeof raw.file_path === "string" && raw.file_path.length > 0) {
-    const path = isAbsolute5(raw.file_path) ? raw.file_path : cwd ? join6(cwd, raw.file_path) : null;
+    const path = isAbsolute6(raw.file_path) ? raw.file_path : cwd ? join6(cwd, raw.file_path) : null;
     return path !== null && nothingAt(path);
   }
   if (toolName === "apply_patch" || toolName === "patch") {
@@ -8126,7 +8160,7 @@ function temporaryRoots() {
 }
 var within = (path, root) => {
   const rel = relative5(root, path);
-  return rel === "" || !rel.startsWith("..") && !isAbsolute5(rel);
+  return rel === "" || !rel.startsWith("..") && !isAbsolute6(rel);
 };
 function writesOnlyToTemp(facts, cwd) {
   if (facts.deletesOutside) return false;
@@ -8316,11 +8350,11 @@ var ReviewService = class {
         agentRoots: [join6(home, ".claude")],
         signal: AbortSignal.any([signal, AbortSignal.timeout(REVIEW_LIMITS.factsMs)])
       });
-      const rules = tier1(facts);
+      const rules = tier1(facts, { cwd: action.commandCwd ?? request.agentCwd ?? request.cwd });
       const summary = facts.kind === null ? `${request.tool.name.replace(/[^\w.:-]/gu, "").slice(0, 40)} (${facts.actionClass})` : reviewSummary(facts);
       if (facts.writeTargets.length) this.tracker.note(request.sessionId, facts.writeTargets.filter((path) => !facts.downloadTargets.includes(path)), "write");
       if (facts.downloadTargets.length) this.tracker.note(request.sessionId, facts.downloadTargets, "download");
-      if (action.kind === "edit") this.tracker.note(request.sessionId, action.paths.map((path) => isAbsolute5(path) ? path : join6(action.commandCwd ?? request.cwd, path)), "edit");
+      if (action.kind === "edit") this.tracker.note(request.sessionId, action.paths.map((path) => isAbsolute6(path) ? path : join6(action.commandCwd ?? request.cwd, path)), "edit");
       if (rules.verdict === "deny") {
         const reason = rules.rule === "write-outside" && writesOnlyToTemp(facts, request.cwd) ? TEMP_WRITE_MESSAGE : DENY_MESSAGES[rules.rule] ?? DENY_MESSAGES.elevation;
         this.remember(request.sessionId, summary, mode, { outcome: "deny", act: "deny", tier: "rule", reason: "rule-deny", model: null, auditId: null });
@@ -8395,10 +8429,10 @@ var ReviewService = class {
     const kind = created ? "new" : "own";
     const targets = created ?? (own ? [own.abs] : null);
     if (!targets) return false;
-    const root = realish(resolve5(request.cwd));
+    const root = realish(resolve6(request.cwd));
     const inside = (dir, abs) => abs.startsWith(`${dir}${sep5}`);
     if (!targets.every((path) => {
-      const abs = realish(resolve5(path));
+      const abs = realish(resolve6(path));
       return inside(root, abs) && !isCredentialPath(abs) && !isProtectedRel(relative5(root, abs).split(sep5).join("/"));
     })) return false;
     const risks = Object.entries(verdict.risks ?? {}).filter(([id]) => id !== "effect_hidden");
@@ -8407,9 +8441,9 @@ var ReviewService = class {
     if (verdict.probability >= TRUST_CHAIN_MIN_SERVES) return kind;
     if (!low) return false;
     const texts = [...this.ownTexts(above), ...this.ownTexts(state)];
-    const folders = [realish(resolve5(request.agentCwd ?? request.cwd)), ...texts.flatMap(namedFolders).map((folder) => realish(resolve5(root, folder)))].filter((dir) => dir === root || inside(root, dir));
+    const folders = [realish(resolve6(request.agentCwd ?? request.cwd)), ...texts.flatMap(namedFolders).map((folder) => realish(resolve6(root, folder)))].filter((dir) => dir === root || inside(root, dir));
     return targets.every((path) => {
-      const abs = realish(resolve5(path));
+      const abs = realish(resolve6(path));
       return texts.some((text6) => namesFile(text6, abs)) && folders.some((dir) => inside(dir, abs));
     }) ? kind : false;
   }
@@ -8587,8 +8621,8 @@ function advise(triage, input) {
 }
 
 // src/triage/taskRoute.ts
-import { existsSync, statSync as statSync4 } from "node:fs";
-import { dirname as dirname4, isAbsolute as isAbsolute6, join as join7, relative as relative6, resolve as resolve6 } from "node:path";
+import { existsSync, statSync as statSync5 } from "node:fs";
+import { dirname as dirname4, isAbsolute as isAbsolute7, join as join7, relative as relative6, resolve as resolve7 } from "node:path";
 function actionable(triage) {
   return triage.kindBand === "auto" || triage.difficultyBand === "auto" || [triage.destructive, triage.networkPublish, triage.secrets, triage.outsideProject].some((p2) => p2 >= ROUTE_TAUS.risk) || triage.untrusted >= ROUTE_TAUS.untrusted || triage.parallel >= ROUTE_TAUS.parallel;
 }
@@ -8609,7 +8643,7 @@ async function askTaskRoute(engine, input, ctx) {
   return { decision, triage: decision.fallbackReason ? null : captured.triage };
 }
 function isGitRepository(cwd) {
-  let current = resolve6(cwd);
+  let current = resolve7(cwd);
   for (let depth = 0; depth < 64; depth++) {
     try {
       if (existsSync(join7(current, ".git"))) return true;
@@ -8624,18 +8658,18 @@ function isGitRepository(cwd) {
 }
 var PATH_TOKEN = /(?:^|[\s"'`(\[<])((?:\.{0,2}\/)?[\w@.-]+(?:\/[\w@.-]+)*\.[A-Za-z0-9]{1,8}|(?:\.{0,2}\/)?[\w@.-]+(?:\/[\w@.-]+)+\/?)(?=$|[\s"'`)\]>,.:;!?])/gu;
 function mentionedExistingPaths(task, cwd) {
-  const root = resolve6(cwd);
+  const root = resolve7(cwd);
   const seen = /* @__PURE__ */ new Set();
   let found = 0, checked = 0;
   for (const match of task.slice(0, FIELD_BOUNDS.task * 4).matchAll(PATH_TOKEN)) {
     const token = match[1].replace(/\/$/u, "");
-    if (!token || isAbsolute6(token) || seen.has(token)) continue;
+    if (!token || isAbsolute7(token) || seen.has(token)) continue;
     seen.add(token);
     if (++checked > 64) break;
-    const target = resolve6(root, token), rel = relative6(root, target);
-    if (!rel || rel.startsWith("..") || isAbsolute6(rel)) continue;
+    const target = resolve7(root, token), rel = relative6(root, target);
+    if (!rel || rel.startsWith("..") || isAbsolute7(rel)) continue;
     try {
-      statSync4(target);
+      statSync5(target);
       found++;
     } catch {
     }
@@ -9499,11 +9533,11 @@ var PlanStore = class {
   }
   /** Resolves on the next change or after `ms`. */
   waitForChange(ms) {
-    return new Promise((resolve8) => {
+    return new Promise((resolve9) => {
       const done = () => {
         clearTimeout(timer);
         this.waiters.delete(done);
-        resolve8();
+        resolve9();
       };
       const timer = setTimeout(done, ms);
       this.waiters.add(done);
@@ -11808,8 +11842,8 @@ function badgeText(model) {
 
 // src/auto/launch.ts
 import { randomBytes as randomBytes4 } from "node:crypto";
-import { existsSync as existsSync2, readFileSync as readFileSync5, statSync as statSync5 } from "node:fs";
-import { dirname as dirname5, join as join11, resolve as resolve7 } from "node:path";
+import { existsSync as existsSync2, readFileSync as readFileSync5, statSync as statSync6 } from "node:fs";
+import { dirname as dirname5, join as join11, resolve as resolve8 } from "node:path";
 var LOCAL_ENVIRONMENT_KINDS = ["worktree"];
 var MODEL_KEYS = ["model", "small_model", "enabled_providers", "disabled_providers"];
 var CONFIG_NAMES = ["opencode.json", "opencode.jsonc", join11(".opencode", "opencode.json"), join11(".opencode", "opencode.jsonc")];
@@ -11860,13 +11894,13 @@ function modelChoiceIn(config) {
   return null;
 }
 function projectModelConfig(cwd) {
-  let current = resolve7(cwd);
+  let current = resolve8(cwd);
   for (let depth = 0; depth < 64; depth++) {
     for (const name of CONFIG_NAMES) {
       const path = join11(current, name);
       let size;
       try {
-        size = statSync5(path).size;
+        size = statSync6(path).size;
       } catch {
         continue;
       }
@@ -11951,7 +11985,7 @@ function openCodeContribution(input) {
 
 // src/auto/router.ts
 import { randomBytes as randomBytes6 } from "node:crypto";
-import { appendFileSync, mkdirSync as mkdirSync2, readFileSync as readFileSync7, renameSync as renameSync3, statSync as statSync6, writeFileSync as writeFileSync2 } from "node:fs";
+import { appendFileSync, mkdirSync as mkdirSync2, readFileSync as readFileSync7, renameSync as renameSync3, statSync as statSync7, writeFileSync as writeFileSync2 } from "node:fs";
 import { createServer } from "node:http";
 import { join as join13 } from "node:path";
 
@@ -12452,7 +12486,7 @@ var AutoRouter = class {
       if (Number.isInteger(value) && value > 1023 && value < 65536) stored = value;
     } catch {
     }
-    const listen = (port) => new Promise((resolve8, reject) => {
+    const listen = (port) => new Promise((resolve9, reject) => {
       const server = createServer((request, response) => {
         void this.handle(request, response);
       });
@@ -12462,7 +12496,7 @@ var AutoRouter = class {
       server.once("error", reject);
       server.listen({ port, host: "127.0.0.1", exclusive: true }, () => {
         server.off("error", reject);
-        resolve8(server);
+        resolve9(server);
       });
     });
     this.starting = (async () => {
@@ -12494,7 +12528,7 @@ var AutoRouter = class {
     this.server = null;
     if (!server) return;
     server.closeAllConnections?.();
-    await new Promise((resolve8) => server.close(() => resolve8()));
+    await new Promise((resolve9) => server.close(() => resolve9()));
   }
   /** Nothing uses the router any more: the port closes (it is reused next time). */
   idle() {
@@ -12579,7 +12613,7 @@ var AutoRouter = class {
     }
   }
   readBody(request) {
-    return new Promise((resolve8, reject) => {
+    return new Promise((resolve9, reject) => {
       const chunks = [];
       let size = 0;
       request.on("data", (chunk) => {
@@ -12591,7 +12625,7 @@ var AutoRouter = class {
         }
         chunks.push(chunk);
       });
-      request.on("end", () => resolve8(Buffer.concat(chunks)));
+      request.on("end", () => resolve9(Buffer.concat(chunks)));
       request.on("error", reject);
     });
   }
@@ -12620,10 +12654,10 @@ var AutoRouter = class {
       try {
         const answer = await Promise.race([
           this.deps.decide(text6, grant, controller.signal),
-          new Promise((resolve8) => {
+          new Promise((resolve9) => {
             timer = setTimeout(() => {
               controller.abort();
-              resolve8(null);
+              resolve9(null);
             }, this.timeouts.jevMs);
           })
         ]);
@@ -12975,9 +13009,9 @@ var AutoRouter = class {
           }
           if (next.done) break;
           take(next.value);
-          if (!response.write(next.value)) await new Promise((resolve8) => {
-            response.once("drain", resolve8);
-            response.once("close", resolve8);
+          if (!response.write(next.value)) await new Promise((resolve9) => {
+            response.once("drain", resolve9);
+            response.once("close", resolve9);
           });
           if (response.destroyed) {
             failed = true;
@@ -13304,7 +13338,7 @@ var AutoRouter = class {
     if (!file) return;
     try {
       try {
-        if (statSync6(file).size > ROUTER_LIMITS.logBytes) renameSync3(file, `${file}.1`);
+        if (statSync7(file).size > ROUTER_LIMITS.logBytes) renameSync3(file, `${file}.1`);
       } catch {
       }
       appendFileSync(file, `${JSON.stringify(record4)}
@@ -13913,7 +13947,7 @@ function rawCandidates(ctx) {
   const raws = [];
   const known = (identity) => ctx.index.rows(identity).length > 0;
   const declared = /* @__PURE__ */ new Set();
-  const resolve8 = (cli, model) => {
+  const resolve9 = (cli, model) => {
     const r = resolveModel(cli, model, ctx.settings.aliases, known);
     return { identity: r.identity, from: r.from };
   };
@@ -13926,7 +13960,7 @@ function rawCandidates(ctx) {
     else models = plan3.models.length ? plan3.models : [null];
     if (!MODEL_CLIS.has(plan3.cli)) models = [null];
     for (const model of models) {
-      const resolved = model ? resolve8(plan3.cli, model) : { identity: null, from: "none" };
+      const resolved = model ? resolve9(plan3.cli, model) : { identity: null, from: "none" };
       const takes = effortsOf(plan3.cli, entry);
       for (const effort of effortVariants(ctx.index, resolved.identity, takes)) {
         raws.push({ ...base, model, resolved, effort, effortVia: takes.length ? "spawn" : "none", ...plan3.cli === "opencode" ? { context: openCodeContext(model) } : {} });
@@ -13935,7 +13969,7 @@ function rawCandidates(ctx) {
   }
   for (const row of ctx.accountRows) {
     const host = row.endpoint;
-    const resolved = resolve8(row.provider, row.model);
+    const resolved = resolve9(row.provider, row.model);
     const takes = CLI_EFFORTS[row.provider] ?? [];
     const rowEffort = typeof row.launchOptions?.[ACCOUNTS_ID]?.effort === "string" && row.launchOptions[ACCOUNTS_ID].effort !== "default" ? row.launchOptions[ACCOUNTS_ID].effort : null;
     const efforts = rowEffort ? [rowEffort] : effortVariants(ctx.index, resolved.identity, takes);
@@ -14447,15 +14481,15 @@ function costText(c, now) {
   return `${base}; ~${Math.round(p2.quota * 100)}% of the plan quota ${p2.against} would use${p2.faster && p2.faster !== 1 ? `, ~${p2.faster}\xD7 ${p2.faster > 1 ? "faster" : "as fast"}${from}` : ""}`;
 }
 function costBase(c, now) {
-  const read = c.quota ? `, read ${ago(c.quota.readAt, now)}` : "";
+  const read2 = c.quota ? `, read ${ago(c.quota.readAt, now)}` : "";
   const used = c.quota?.window ? `${windowName(c.quota.window.minutes, c.quota.window.label)} ${Math.round(c.quota.window.usedPercent)}% used` : "";
   switch (c.costBasis) {
     case "free":
-      return `subscription: free (${used}, headroom ${c.quota?.headroom}% above the reserve${read})`;
+      return `subscription: free (${used}, headroom ${c.quota?.headroom}% above the reserve${read2})`;
     case "burning":
-      return `subscription burning faster than its window (pace ${c.quota?.pace}): priced like its API route${read}`;
+      return `subscription burning faster than its window (pace ${c.quota?.pace}): priced like its API route${read2}`;
     case "low":
-      return `subscription close to its reserve (${used}${read}): priced like its API route`;
+      return `subscription close to its reserve (${used}${read2}): priced like its API route`;
     case "unknown":
       return `subscription: quota unknown (${c.quota?.note ?? "not read"})`;
     case "plan":
@@ -15637,8 +15671,8 @@ function retryStored(host, failed, apply, delays = RETRY_DELAYS_MS) {
 
 // src/service/main.ts
 var resolveReady;
-var ready = new Promise((resolve8) => {
-  resolveReady = resolve8;
+var ready = new Promise((resolve9) => {
+  resolveReady = resolve9;
 });
 var assistant = null;
 var str2 = (value) => typeof value === "string" ? value : "";

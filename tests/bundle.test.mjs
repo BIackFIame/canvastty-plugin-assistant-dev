@@ -4,7 +4,7 @@
 import assert from 'node:assert/strict';
 import { spawn } from 'node:child_process';
 import { createHash } from 'node:crypto';
-import { mkdtempSync, mkdirSync, readFileSync, realpathSync, rmSync } from 'node:fs';
+import { mkdtempSync, mkdirSync, readFileSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { createInterface } from 'node:readline';
@@ -17,6 +17,7 @@ const manifest = JSON.parse(readFileSync(join(root, 'canvastty.plugin.json'), 'u
 const base = realpathSync(mkdtempSync(join(tmpdir(), 'canvastty-assistant-bundle-')));
 const project = join(base, 'project');
 mkdirSync(join(project, '.git'), { recursive: true });
+writeFileSync(join(project, '.git', 'config'), '[core]\n\tbare = false\n');
 process.on('exit', () => rmSync(base, { recursive: true, force: true }));
 
 test('the manifest\'s coreFiles match the package bytes, and the service and page are single bundled files', () => {

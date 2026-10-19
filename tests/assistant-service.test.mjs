@@ -19,6 +19,7 @@ const home = join(base, 'home');
 const project = join(base, 'project');
 for (const dir of [home, project, join(project, '.git'), join(project, 'scripts')]) mkdirSync(dir, { recursive: true });
 writeFileSync(join(project, 'package.json'), JSON.stringify({ name: 'p', scripts: { test: 'node scripts/test.js' } }));
+writeFileSync(join(project, '.git', 'config'), '[core]\n\tbare = false\n');
 writeFileSync(join(project, 'scripts', 'test.js'), 'console.log(1)\n');
 process.on('exit', () => rmSync(base, { recursive: true, force: true }));
 

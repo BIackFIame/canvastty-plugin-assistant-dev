@@ -555,7 +555,7 @@ export class ReviewService {
         tracker: this.tracker, git, home, agentRoots: [join(home, '.claude')],
         signal: AbortSignal.any([signal, AbortSignal.timeout(REVIEW_LIMITS.factsMs)])
       });
-      const rules = tier1(facts);
+      const rules = tier1(facts, { cwd: action.commandCwd ?? request.agentCwd ?? request.cwd });
       const summary = facts.kind === null ? `${request.tool.name.replace(/[^\w.:-]/gu, '').slice(0, 40)} (${facts.actionClass})` : reviewSummary(facts);
       // What the call writes counts as written by the session, whatever the answer (the safe side).
       if (facts.writeTargets.length) this.tracker.note(request.sessionId, facts.writeTargets.filter(path => !facts.downloadTargets.includes(path)), 'write');
