@@ -2,6 +2,7 @@ import { REVIEWABLE_ACP_KINDS } from '../shared/commandReview.ts';
 import type { CommandFacts } from './commandFacts.ts';
 import { programName } from './commandFacts.ts';
 import { lexShell, normalizeCommand, SHELL_METACHARACTER } from './shellParse.ts';
+import { gitConfigSafe } from './gitConfig.ts';
 
 /**
  * Tier 1 of command review (assistant spec §3.1b, R1): deterministic and final, evaluated before any model.
@@ -30,10 +31,17 @@ const ALLOW: Readonly<Record<string, readonly string[] | null>> = {
   git: ['status', 'diff', 'log', 'show', 'branch', 'rev-parse', 'ls-files', 'blame']
 };
 /** Flags that make an allow-listed program write, run a helper or read compressed files through external programs. */
-const REFUSED_FLAGS = /^(?:--pre|--pre-glob|-z|--search-zip|--output|--ext-diff|--textconv|-o|--open-files-in-pager|-O)(?:=|$)/u;
+const REFUSED_FLAGS = /^(?:--pre|--pre-glob|-z|--search-zip|--output|--ext-diff|--textconv|-o|--open-files-in-pager|-O|--show-signature|--paginate)(?:=|$)/u;
+/** git log/show formats with signature placeholders (%G…) run gpg. */
+const SIGNATURE_FORMAT = /^--(?:format|pretty)=.*%G/u;
 const VERSION_ONLY = /^(?:node|npm|pnpm|yarn|bun|deno|python3?|pip3?|git|go|cargo|rustc|java|ruby|tsc|make|cmake|docker|gh|uv) (?:--version|version)$/u;
 
-export function tier1(facts: CommandFacts): Tier1Result {
+/**
+ * `context.cwd`: where the command runs. A git command is a tier-1 allow only when the repository's own
+ * configuration there starts no other program (gitConfig.ts); without a folder, or when unsure, it is left to the
+ * normal review (never denied for it).
+ */
+export function tier1(facts: CommandFacts, context: { cwd?: string | null } = {}): Tier1Result {
   const deny = (rule: typeof TIER1_DENY_RULES[number]): Tier1Result => ({ verdict: 'deny', rule });
   const ask = (rule: typeof TIER1_ASK_RULES[number]): Tier1Result => ({ verdict: 'ask', rule });
   if (facts.elevation) return deny('elevation');
@@ -54,12 +62,12 @@ export function tier1(facts: CommandFacts): Tier1Result {
   if (facts.encoded) return ask('encoded');
   if (facts.unterminated) return ask('unreadable');
 
-  if (exactAllow(facts)) return { verdict: 'allow', rule: 'read-only' };
+  if (exactAllow(facts, context.cwd ?? null)) return { verdict: 'allow', rule: 'read-only' };
   return { verdict: null, rule: null };
 }
 
 /** A whole normalized command, no metacharacters, one program from the list, every path inside and not a key file. */
-function exactAllow(facts: CommandFacts): boolean {
+function exactAllow(facts: CommandFacts, cwd: string | null): boolean {
   if (facts.kind !== 'execute' && facts.kind !== null || !facts.command || facts.truncated) return false;
   const command = normalizeCommand(facts.command);
   if (!command || command.length > 400 || SHELL_METACHARACTER.test(command)) return false;
@@ -78,5 +86,8 @@ function exactAllow(facts: CommandFacts): boolean {
     // `git branch` only lists: no names, no flags that change anything.
     if (program === 'git' && argv[1] === 'branch' && argv.slice(2).some(arg => !/^(?:-a|-r|-v|-vv|--list|--all|--show-current)$/u.test(arg))) return false;
   }
-  return !argv.slice(1).some(arg => REFUSED_FLAGS.test(arg));
+  if (argv.slice(1).some(arg => REFUSED_FLAGS.test(arg) || SIGNATURE_FORMAT.test(arg))) return false;
+  // git may start a pager, an external diff, a textconv, an fsmonitor or gpg from the repository's own configuration.
+  if (program === 'git' && argv[1] !== '--version' && argv[1] !== 'version' && (!cwd || !gitConfigSafe(cwd))) return false;
+  return true;
 }
