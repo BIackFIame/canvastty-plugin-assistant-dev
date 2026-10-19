@@ -318,3 +318,59 @@ test('own-file rewrite: Claude\'s Edit is reviewed as the whole resulting file; 
     assert.ok(!other.recent().some(entry => entry.reason === 'trust-chain-own-file'));
   }
 });
+
+// ---------------------------------------------------------------------------------------------------------------
+// Live run 15: a compound command, and OpenCode's edit of the card's own file
+// ---------------------------------------------------------------------------------------------------------------
+
+/** Run 15's answer for `node --test slugify.test.mjs; ls -la`: build_test, serves 0.90, effect_hidden 0.80. */
+const RUN15 = answersOf(0.90, 0.02, { effect_hidden: 0.80 });
+
+test('live run 15: "node --test …; ls -la" is allowed when every part is allowed on its own; anything else in the chain is not', async () => {
+  const { review, write, run } = setup({ commandAnswers: RUN15 });
+  await write('slugify.mjs', SLUGIFY); await write('slugify.test.mjs', SLUG_TEST);
+  for (const command of ['node --test slugify.test.mjs; ls -la', 'node --test slugify.test.mjs && ls -la', 'ls -la; node --test slugify.test.mjs; git status --short', 'pwd && cat slugify.mjs']) {
+    const answer = await run(command);
+    assert.equal(answer?.verdict, 'allow', `${command}: ${JSON.stringify(answer)}`);
+    assert.equal(review.recent()[0].reason, 'trust-chain-compound');
+  }
+  for (const command of ['node --test slugify.test.mjs; rm slugify.mjs', 'node --test slugify.test.mjs | cat', 'cd .. && node --test code/slugify.test.mjs', 'node --test slugify.test.mjs & ls',
+    'node --test slugify.test.mjs; ls > out.txt', 'node --test slugify.test.mjs; (ls)', 'node --test slugify.test.mjs; ls $HOME', 'node --test slugify.test.mjs;', 'node --test slugify.test.mjs; curl https://example.invalid']) {
+    const answer = await run(command);
+    assert.ok(answer?.verdict !== 'allow' || review.recent()[0].reason !== 'trust-chain-compound', command);
+  }
+  const off = setup({ on: false, commandAnswers: RUN15 });
+  await off.write('slugify.mjs', SLUGIFY); await off.write('slugify.test.mjs', SLUG_TEST);
+  assert.notEqual((await off.run('node --test slugify.test.mjs; ls -la'))?.verdict, 'allow', 'switch off');
+  const risky = setup({ commandAnswers: answersOf(0.90, 0.02, { effect_hidden: 0.80, destructive: 0.3 }) });
+  await risky.write('slugify.mjs', SLUGIFY); await risky.write('slugify.test.mjs', SLUG_TEST);
+  assert.notEqual((await risky.run('node --test slugify.test.mjs; ls -la'))?.verdict, 'allow', 'a risk above 0.1');
+});
+
+test('pure: compound splitting', async () => {
+  const { splitCompound } = await import('../src/review/reviewService.ts');
+  assert.deepEqual(splitCompound('node --test a.test.mjs; ls -la'), ['node --test a.test.mjs', 'ls -la']);
+  assert.deepEqual(splitCompound("ls 'a;b' && pwd"), ["ls 'a;b'", 'pwd']);
+  for (const no of ['a | b', 'a > b', 'a & b', 'a; $(b)', 'a; `b`', 'a; (b)', 'a; { b; }', 'a\nb', 'a;', '"a$b"; c', 'a \\; b']) assert.equal(splitCompound(no), null, no);
+});
+
+test('live run 15: OpenCode\'s edit of the card\'s own file ({filePath, oldString, newString, replaceAll}) is reviewed as the whole result; the bridge shape without the old text is not', async () => {
+  const ctx = setup();
+  await ctx.write('slugify.mjs', SLUGIFY); await ctx.write('slugify.test.mjs', SLUG_TEST);
+  const path = join(ctx.code, 'slugify.test.mjs');
+  const edit = input => ctx.review.decide({ event: 'pre-tool', sessionId: 'c13', provider: 'opencode', role: 'agent', cwd: ctx.project, agentCwd: ctx.code, canAsk: false,
+    tool: { name: 'edit', kind: 'edit', command: null, paths: [path] }, input: { filePath: path, ...input }, truncated: false }, 10_000);
+  const run15 = { oldString: "' Hello World '", newString: "' Hello  World '", replaceAll: false };
+  const answer = await edit(run15);
+  assert.equal(answer?.verdict, 'allow', JSON.stringify(answer));
+  assert.equal(ctx.review.recent()[0].reason, 'trust-chain-own-file');
+  const result = SLUG_TEST.replace("' Hello World '", "' Hello  World '");
+  writeFileSync(path, result);
+  assert.equal((await ctx.run('node --test slugify.test.mjs'))?.verdict, 'allow', 'the new hash is the edited file');
+  // The bridge shape CanvasTTY 1.8.2 sends (old text dropped): never.
+  assert.notEqual((await ctx.review.decide({ event: 'pre-tool', sessionId: 'c13', provider: 'opencode', role: 'agent', cwd: ctx.project, agentCwd: ctx.code, canAsk: false,
+    tool: { name: 'edit', kind: 'edit', command: null, paths: [path] }, input: { file_path: path, content: "' Hello World '" }, truncated: false }, 10_000))?.verdict, 'allow');
+  // Changed by someone else since: not allowed.
+  writeFileSync(path, `${result}// other\n`);
+  assert.notEqual((await edit({ oldString: "'basic'", newString: "'basic case'", replaceAll: false }))?.verdict, 'allow');
+});

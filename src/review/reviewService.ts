@@ -141,6 +141,35 @@ interface SessionState {
 
 const MAX_SESSIONS = 512;
 
+/**
+ * `a ; b && c` → its plain commands, or null when there is anything but `;` and `&&` between them: a pipe, a
+ * redirect, a single `&`, a subshell or grouping, expansion, a backslash, a newline, or quoting that expands. At most
+ * 8 parts, none empty.
+ */
+export function splitCompound(command: string): string[] | null {
+  const parts: string[] = [];
+  let current = '';
+  let quote: '"' | "'" | null = null;
+  for (let i = 0; i < command.length; i++) {
+    const c = command[i]!;
+    if (quote) {
+      if (c === quote) quote = null;
+      else if (quote === '"' && /[$`\\!]/u.test(c)) return null;
+      current += c;
+      continue;
+    }
+    if (c === '"' || c === "'") { quote = c; current += c; continue; }
+    if (c === ';') { parts.push(current); current = ''; continue; }
+    if (c === '&') { if (command[i + 1] !== '&') return null; i++; parts.push(current); current = ''; continue; }
+    if (/[|<>`$()\\\n\r{}]/u.test(c)) return null;
+    current += c;
+  }
+  if (quote) return null;
+  parts.push(current);
+  const trimmed = parts.map(part => part.trim());
+  return trimmed.length <= 8 && trimmed.every(Boolean) ? trimmed : null;
+}
+
 /** The real absolute path a single-file write or edit names. */
 function targetOf(request: DecideRequest, action: ReviewAction): string | null {
   const raw = record(request.input);
@@ -176,9 +205,13 @@ function ownFileResult(request: DecideRequest, state: SessionState, action: Revi
     const parts = text.split(from);
     if (parts.length < 2) return null;
     if (edit.replace_all === true || edit.replaceAll === true) return parts.join(to);
+    if (edit.replace_all !== undefined && typeof edit.replace_all !== 'boolean' || edit.replaceAll !== undefined && typeof edit.replaceAll !== 'boolean') return null;
     return parts.length === 2 ? parts.join(to) : null;
   };
-  if (name === 'Edit') return ((): OwnFile | null => { const result = apply(current, raw); return result === null ? null : { abs, content: result }; })();
+  // Claude's Edit, and OpenCode's edit with its own field names (run 15: {filePath, oldString, newString, replaceAll})
+  // when the host passes them on; the bridge shape with only `content` has no old text and never gets here.
+  const hasOld = typeof (raw.old_string ?? raw.oldString) === 'string' && typeof (raw.new_string ?? raw.newString) === 'string';
+  if (name === 'Edit' || name === 'edit' && hasOld) return ((): OwnFile | null => { const result = apply(current, raw); return result === null ? null : { abs, content: result }; })();
   if (name === 'MultiEdit' && Array.isArray(raw.edits) && raw.edits.length && raw.edits.length <= 32) {
     let text: string | null = current;
     for (const edit of raw.edits) { text = text === null ? null : apply(text, record(edit) ?? {}); }
@@ -591,6 +624,11 @@ export class ReviewService {
         this.rememberVerdict(request.sessionId, summary, mode, { ...verdict, act: 'allow', outcome: 'allow', by: 'assistant', reason: 'trust-chain-inspect' }, 'allow');
         return { verdict: 'allow', reason: 'CanvasTTY Assistant: allowed by the trust chain: the person asked its orchestrator for this task, and this only looks at files inside the project' };
       }
+      const compound = !verdict.act && !signal.aborted ? await this.compoundChain(request, state, verdict, action, signal) : null;
+      if (compound) {
+        this.rememberVerdict(request.sessionId, summary, mode, { ...verdict, act: 'allow', outcome: 'allow', by: 'assistant', reason: 'trust-chain-compound' }, 'allow');
+        return { verdict: 'allow', reason: `CanvasTTY Assistant: allowed by the trust chain: the person asked its orchestrator for this task, and each of its ${compound} commands is allowed on its own (read-only, inspection or its tests)` };
+      }
       const tested = !verdict.act && !signal.aborted ? await this.testChain(request, state, rules, facts, verdict, action, signal) : null;
       if (tested) {
         this.rememberVerdict(request.sessionId, summary, mode, { ...verdict, act: 'allow', outcome: 'allow', by: 'assistant', reason: 'trust-chain-test' }, 'allow');
@@ -713,6 +751,40 @@ export class ReviewService {
     const git = this.options.git === null ? null : this.options.git ?? defaultGit;
     const checked = await verifyTestRun({ command: action.command, cwd: action.commandCwd ?? request.agentCwd ?? request.cwd, root: request.cwd, reviewed: state.reviewed, git, signal });
     return checked.ok ? checked : null;
+  }
+
+  /**
+   * A compound command under the trust chain: only `;` and `&&` between plain commands (splitCompound refuses pipes,
+   * redirects, subshells, expansion and backgrounding). Allowed only when every part is allowed on its own: by
+   * tier 1's read-only list, by the inspection rule, or by the test rule, each part's facts computed alone and the
+   * review's answers for the whole command applied to each. A `cd` is never a part that passes, so no part runs
+   * somewhere else. Returns the number of parts.
+   */
+  private async compoundChain(request: DecideRequest, state: SessionState, verdict: CommandReviewVerdict, action: ReviewAction, signal: AbortSignal): Promise<number | null> {
+    if (this.options.trustChain?.() !== true || action.kind !== 'execute' || !action.command || action.inputTruncated) return null;
+    if (!state.subagent || !state.parent || state.suspect || this.circuit.personOnly(request.sessionId)) return null;
+    const above = this.sessions.get(state.parent);
+    if (!above || above.subagent || !this.ownTexts(above).length) return null;
+    if (verdict.outcome === 'deny' || verdict.modelDenied) return null;
+    const parts = splitCompound(action.command);
+    if (!parts || parts.length < 2) return null;
+    const git = this.options.git === null ? null : this.options.git ?? defaultGit;
+    const home = this.options.home ?? homedir();
+    const cwd = action.commandCwd ?? request.agentCwd ?? request.cwd;
+    for (const part of parts) {
+      const partAction: ReviewAction = { ...action, command: part, commandCwd: cwd };
+      const facts = await computeCommandFacts({
+        action: partAction, root: request.cwd, sessionId: request.sessionId, requestTypedByPerson: false,
+        tracker: this.tracker, git, home, agentRoots: [join(home, '.claude')], signal: AbortSignal.any([signal, AbortSignal.timeout(REVIEW_LIMITS.factsMs)])
+      });
+      const rules = tier1(facts, { cwd });
+      if (rules.verdict === 'allow') continue;
+      if (rules.verdict) return null;
+      if (await this.inspectionChain(request, state, rules, facts, verdict, partAction)) continue;
+      if (await this.testChain(request, state, rules, facts, verdict, partAction, signal)) continue;
+      return null;
+    }
+    return parts.length;
   }
 
   private async ladder(request: DecideRequest, state: SessionState, personRequest: string | null, facts: CommandFacts, rules: ReturnType<typeof tier1>, content: string | null, signal: AbortSignal, contentVisible = false): Promise<CommandReviewVerdict> {
