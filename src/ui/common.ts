@@ -22,6 +22,7 @@ export const SERVICE = 'assistant';
  * Language, system palette (sage, lilac, night) and, when the host sends it, the interface scale as `--ui-scale` on
  * the root: every size in apps/harness.css is in rem/em from `calc(13px * var(--ui-scale, 1))`.
  */
+let lastLocale: PageLocale | null = null;
 export function applyAppearance(appearance: Appearance): PageLocale {
   const locale: PageLocale = appearance.locale === 'ru' ? 'ru' : 'en';
   const root = document.documentElement;
@@ -29,6 +30,8 @@ export function applyAppearance(appearance: Appearance): PageLocale {
   root.dataset.palette = appearance.palette === 'lilac' || appearance.palette === 'night' ? appearance.palette : 'sage';
   const scale = typeof appearance.uiScale === 'number' ? appearance.uiScale : typeof appearance.scale === 'number' ? appearance.scale : null;
   if (scale !== null && Number.isFinite(scale) && scale >= 0.5 && scale <= 3) root.style?.setProperty('--ui-scale', String(scale));
+  // The service hears CanvasTTY's language only when it starts: tell it, so its badges and toasts follow.
+  if (locale !== lastLocale) { lastLocale = locale; void host?.service?.request(SERVICE, 'locale', { locale })?.catch?.(() => undefined); }
   return locale;
 }
 

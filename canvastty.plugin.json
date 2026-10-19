@@ -20,18 +20,18 @@
   "coreFiles": [
     {
       "path": "README.md",
-      "bytes": 21681,
-      "sha256": "ff6f188c064995ae90e045f20720e7266b6c870768772e2ea37e1919c7948d8f"
+      "bytes": 23405,
+      "sha256": "376b182b86f135294d19515176790b2827655c158f70e8a29b97b728d4851dd3"
     },
     {
       "path": "README.ru.md",
-      "bytes": 38358,
-      "sha256": "f2763e54a0e79d95489b40ec2f983c55fde81158fa2976a7df866399f12010d7"
+      "bytes": 41657,
+      "sha256": "f214d1c4309db3f6d8505a97a006c065a231d6fe09e225e0d39f1052891baf7d"
     },
     {
       "path": "services/assistant.mjs",
-      "bytes": 913501,
-      "sha256": "e2491154b616a09b2d6b3c726a4354124ebc78b6300d5c174bc607fc37b55eef"
+      "bytes": 916517,
+      "sha256": "9cadd6fdaeca06aeeb1d537e7cad3f8f876eedc3c3e9821036f7b9200844cdaa"
     },
     {
       "path": "settings/assistant.html",
@@ -40,13 +40,13 @@
     },
     {
       "path": "settings/assistant.js",
-      "bytes": 155350,
-      "sha256": "99a77316158bd09b77ed4b90fbc342210da21f761aa3f66fbfd660cc60a0e0ad"
+      "bytes": 153178,
+      "sha256": "2e255ba9021a53b1e8409c08bd7c5bfcd6d54baee2075da08496a4b55e8683ae"
     },
     {
       "path": "settings/assistant.css",
-      "bytes": 2078,
-      "sha256": "fe520097a646ea865c4a3724b24aa71a9848a578d72d43821c9c1238d2790fa1"
+      "bytes": 2449,
+      "sha256": "6c4e2e98be23d5a8fedbec07f2098ee122276461f6ff5daca863641060408b68"
     },
     {
       "path": "settings/harness.html",
@@ -55,8 +55,8 @@
     },
     {
       "path": "settings/harness.js",
-      "bytes": 17296,
-      "sha256": "773f99ff50918e4f5b4405c24460a97effde72da425a60a956241f68790b0b4e"
+      "bytes": 15438,
+      "sha256": "086ad4edf8a81d3319164dc730fffec11efa2937bbe58e954da11abb5d10ec34"
     },
     {
       "path": "apps/harness.css",
@@ -70,8 +70,8 @@
     },
     {
       "path": "apps/flows.js",
-      "bytes": 17260,
-      "sha256": "e7ae6916ce46c936fed41d966fdd37cf6b10a08df5aadceed197026540ab4fe7"
+      "bytes": 17440,
+      "sha256": "72677aee962260c61fd2cee7ab7e7dbebb14ef226f048b1136c5911eb0ecf465"
     },
     {
       "path": "apps/board.html",
@@ -80,8 +80,8 @@
     },
     {
       "path": "apps/board.js",
-      "bytes": 6734,
-      "sha256": "904e1d03c665d6a433b1e8cfb22014a23aab0a7ce30beb88a2d0450c67804282"
+      "bytes": 6892,
+      "sha256": "58d87917e1b8e45a3305e9b7a537f4d7290db0bcf1bddfaf871d03da4f8d8f29"
     }
   ],
   "services": [
@@ -100,56 +100,56 @@
         "delegable": true,
         "fields": [
           {
+            "key": "model",
+            "label": "Model",
+            "label.ru": "Модель",
+            "kind": "select",
+            "default": "off",
+            "options": [
+              {
+                "value": "off",
+                "label": "Agent's own"
+              },
+              {
+                "value": "auto",
+                "label": "Auto (Jev)"
+              }
+            ]
+          },
+          {
             "key": "task",
-            "label": "Task (for review and triage)",
-            "label.ru": "Задача (для проверки и разбора)",
+            "label": "Task (for review)",
+            "label.ru": "Задача (для проверки)",
             "kind": "text",
             "default": "",
             "maxLength": 200
           },
           {
             "key": "dataClass",
-            "label": "Data class of this card",
-            "label.ru": "Класс данных этого окна",
+            "label": "Data class",
+            "label.ru": "Класс данных",
             "kind": "select",
             "default": "default",
             "options": [
               {
                 "value": "default",
-                "label": "As in Assistant settings"
+                "label": "As in settings"
               },
               {
                 "value": "D0",
-                "label": "D0 public"
+                "label": "Public"
               },
               {
                 "value": "D1",
-                "label": "D1 internal"
+                "label": "Internal"
               },
               {
                 "value": "D2",
-                "label": "D2 confidential"
+                "label": "Confidential"
               },
               {
                 "value": "D3",
-                "label": "D3 secret (stays on this computer)"
-              }
-            ]
-          },
-          {
-            "key": "model",
-            "label": "Model: Auto picks one per turn (OpenCode; keep Model at Default, no account)",
-            "label.ru": "Модель: Авто выбирает на каждый ход (OpenCode; без аккаунта и своей модели)",
-            "kind": "select",
-            "default": "off",
-            "options": [
-              {
-                "value": "off",
-                "label": "Off (the agent's own model)"
-              },
-              {
-                "value": "auto",
-                "label": "Auto (Jev)"
+                "label": "Secret (stays here)"
               }
             ]
           }

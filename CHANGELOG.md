@@ -2,6 +2,11 @@
 
 ## Next
 
+- **Simpler pages** (UI audit 2026-10-19): the Decision models page opens on a short view (Auto on/off, one OpenRouter
+  key, Cheaper/Balanced/Better, daily limit, today's spend and last turns) with everything else under Advanced; the
+  key sets up Jev and Auto's OpenRouter upstream; no horizontal overflow; data classes by name; one line per control
+  with the numbers in README "How Auto decides"; the service follows CanvasTTY's language when a page reports it;
+  launcher fields "Model: Agent's own / Auto (Jev)", "Task (for review)", "Data class".
 - **Trust chain: inspection and own files** (live run 14): plain read-only inspection inside the project, and rewrites
   of a file the card wrote whole earlier and nobody changed since, reviewed as the whole resulting file.
 - **Trust chain for tests** (live run 13): with the trust chain on, a subagent may run a plain known test runner when

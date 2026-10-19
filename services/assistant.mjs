@@ -8246,6 +8246,9 @@ var ReviewService = class {
   recent() {
     return structuredClone(this.recentReviews);
   }
+  setLocale(locale) {
+    this.options.locale = locale;
+  }
   /** «верно / неверно» on the settings page: the person's own label (R11), once per review. */
   feedback(auditId, verdict) {
     const entry = this.recentReviews.find((item) => item.auditId === auditId);
@@ -8972,7 +8975,7 @@ var EN = {
   report: {
     title: (title) => `Report: ${title}`,
     role: { agent: "agent", orchestrator: "orchestrator", subagent: "subagent" },
-    status: { idle: "idle", working: "working", needs_approval: "waiting for approval", unavailable: "not started", done: "done", failed: "failed" },
+    status: { idle: "idle", working: "working", needs_approval: "waiting for approval", unavailable: "waiting for the first prompt", done: "done", failed: "failed" },
     started: "Started",
     ran: "Ran",
     state: "Status",
@@ -9089,7 +9092,7 @@ var RU = {
   report: {
     title: (title) => `\u041E\u0442\u0447\u0451\u0442: ${title}`,
     role: { agent: "\u0430\u0433\u0435\u043D\u0442", orchestrator: "\u043E\u0440\u043A\u0435\u0441\u0442\u0440\u0430\u0442\u043E\u0440", subagent: "\u0441\u0443\u0431\u0430\u0433\u0435\u043D\u0442" },
-    status: { idle: "\u0436\u0434\u0451\u0442", working: "\u0440\u0430\u0431\u043E\u0442\u0430\u0435\u0442", needs_approval: "\u0436\u0434\u0451\u0442 \u043F\u043E\u0434\u0442\u0432\u0435\u0440\u0436\u0434\u0435\u043D\u0438\u044F", unavailable: "\u043D\u0435 \u0437\u0430\u043F\u0443\u0449\u0435\u043D", done: "\u0437\u0430\u0432\u0435\u0440\u0448\u0451\u043D", failed: "\u043E\u0448\u0438\u0431\u043A\u0430" },
+    status: { idle: "\u0436\u0434\u0451\u0442", working: "\u0440\u0430\u0431\u043E\u0442\u0430\u0435\u0442", needs_approval: "\u0436\u0434\u0451\u0442 \u043F\u043E\u0434\u0442\u0432\u0435\u0440\u0436\u0434\u0435\u043D\u0438\u044F", unavailable: "\u0436\u0434\u0451\u0442 \u043F\u0435\u0440\u0432\u043E\u0433\u043E \u0437\u0430\u043F\u0440\u043E\u0441\u0430", done: "\u0437\u0430\u0432\u0435\u0440\u0448\u0451\u043D", failed: "\u043E\u0448\u0438\u0431\u043A\u0430" },
     started: "\u0417\u0430\u043F\u0443\u0449\u0435\u043D",
     ran: "\u0420\u0430\u0431\u043E\u0442\u0430\u043B",
     state: "\u0421\u043E\u0441\u0442\u043E\u044F\u043D\u0438\u0435",
@@ -9703,8 +9706,7 @@ function reportText(journal, strings3, extra) {
     `${extra.reviewOn ? r.commandsReviewed : r.commandsSeen}: ${journal.commands}${reviewed}`,
     `${r.loops}: ${journal.loops || r.none}`,
     extra.childTitles.length ? `${r.children}: ${extra.childTitles.slice(0, 12).join(", ")}${extra.childTitles.length > 12 ? "\u2026" : ""}` : "",
-    extra.tasks && extra.tasks.total ? `${r.tasks}: ${extra.tasks.done}/${extra.tasks.total}` : "",
-    r.cost
+    extra.tasks && extra.tasks.total ? `${r.tasks}: ${extra.tasks.done}/${extra.tasks.total}` : ""
   ].filter(Boolean);
   return lines.join("\n").slice(0, 1900);
 }
@@ -9943,6 +9945,10 @@ var Harness = class {
   }
   get strings() {
     return STRINGS[this.locale];
+  }
+  /** The person switched CanvasTTY's language (a page said so): badges, tooltips and toasts follow from now on. */
+  setLocale(locale) {
+    this.locale = locale;
   }
   /** An error for a page, in the person's language. */
   fail(code) {
@@ -13324,6 +13330,8 @@ var TEST_TIMEOUT_MS = 1e4;
 var AutoService = class {
   settings;
   readable;
+  /** The person (or this service on their key) saved Auto settings at least once. */
+  everSaved;
   router;
   catalog;
   options;
@@ -13333,7 +13341,7 @@ var AutoService = class {
     this.options = options;
     this.readable = options.savedUnavailable !== true;
     this.settings = normalizeAutoSettings(this.readable ? options.saved : null);
-    const strings3 = AUTO_STRINGS[options.locale];
+    this.everSaved = this.readable && options.saved !== void 0 && options.saved !== null;
     this.catalog = new CatalogStore({
       directory: join14(options.dataDir, "auto"),
       bundled: bundled_default,
@@ -13353,7 +13361,7 @@ var AutoService = class {
       key: (upstream) => this.keyFor(upstream),
       ...options.decide ? { decide: options.decide } : {},
       ...options.turn ? { turn: options.turn } : {},
-      badge: (sessionId, model) => options.publishBadge(sessionId, model ? { text: badgeText(model.model), tone: "neutral", tooltip: strings3.badgeTip(model.tier, model.source) } : null),
+      badge: (sessionId, model) => options.publishBadge(sessionId, model ? { text: badgeText(model.model), tone: "neutral", tooltip: AUTO_STRINGS[this.options.locale].badgeTip(model.tier, model.source) } : null),
       log: (level, message) => options.host.log(level, message),
       ...options.parallelCap ? { parallelCap: options.parallelCap } : {},
       ...options.transport ? { transport: options.transport } : {},
@@ -13368,10 +13376,31 @@ var AutoService = class {
     if (!stored) return null;
     return stored.origin === originOf3(upstream.baseUrl) ? stored.value : null;
   }
+  setLocale(locale) {
+    this.options.locale = locale;
+  }
   loaded(saved) {
     this.settings = normalizeAutoSettings(saved);
     this.readable = true;
+    this.everSaved ||= saved !== void 0 && saved !== null;
     this.configureCatalog();
+  }
+  /** Whether the Jev · OpenRouter key is saved (for OpenRouter's own address). */
+  async jevKey() {
+    const stored = await this.options.readKey(JEV_OPENROUTER_SECRET).catch(() => null);
+    return !!stored && stored.origin === originOf3(OPENROUTER_BASE_URL);
+  }
+  /**
+   * Auto works with just a key: while Auto's settings were never saved and list no upstream, a saved Jev ·
+   * OpenRouter key adds the OpenRouter upstream on that key (every suitable model, trusted with D1 like a new
+   * upstream on the page). Once anything was saved, the person's list stays as they left it.
+   */
+  async adoptJevKey() {
+    if (!this.readable || this.everSaved || this.settings.upstreams.length || !await this.jevKey()) return false;
+    const next = structuredClone(this.settings);
+    next.upstreams.push({ id: "openrouter", preset: "openrouter", baseUrl: OPENROUTER_BASE_URL, trust: "D1", key: "jev", models: [], allModels: true, excluded: [], enabled: true });
+    await this.save(next);
+    return true;
   }
   /** Background refresh only while an upstream is on; OpenRouter's list only when an OpenRouter upstream uses it. */
   configureCatalog() {
@@ -13498,15 +13527,17 @@ var AutoService = class {
   // The decision models page
   // ---------------------------------------------------------------------------------------------------------------
   async state() {
+    await this.adoptJevKey().catch(() => false);
     const keys = {};
     for (const upstream of this.settings.upstreams) keys[upstream.id] = upstream.key === "none" ? true : !!await this.keyFor(upstream).catch(() => null);
-    return { settings: this.settings, readable: this.readable, keys, recent: this.router.recent(), stats: this.router.statsView(), catalog: this.catalog.status(), models: this.modelRows(), waitingForList: this.inventory().waitingForList, outcomes: this.router.routeOutcomes() };
+    return { jevKey: await this.jevKey(), settings: this.settings, readable: this.readable, keys, recent: this.router.recent(), stats: this.router.statsView(), catalog: this.catalog.status(), models: this.modelRows(), waitingForList: this.inventory().waitingForList, outcomes: this.router.routeOutcomes() };
   }
   async save(value) {
     if (!this.readable) throw new Error(this.options.locale === "ru" ? "\u0421\u043E\u0445\u0440\u0430\u043D\u0451\u043D\u043D\u044B\u0435 \u043D\u0430\u0441\u0442\u0440\u043E\u0439\u043A\u0438 \u0435\u0449\u0451 \u043D\u0435 \u043F\u0440\u043E\u0447\u0438\u0442\u0430\u043D\u044B, \u043F\u043E\u044D\u0442\u043E\u043C\u0443 \u043D\u0438\u0447\u0435\u0433\u043E \u043D\u0435 \u0438\u0437\u043C\u0435\u043D\u0435\u043D\u043E." : "The saved settings could not be read yet, so nothing is changed.");
     const next = validateAutoSettings(value);
     await this.options.host.callHost("storage.set", { key: AUTO_STORAGE_KEY, value: next });
     this.settings = next;
+    this.everSaved = true;
     this.configureCatalog();
     this.options.host.emit("settings", null);
     return next;
@@ -15205,6 +15236,19 @@ var Assistant = class {
   get pageLocale() {
     return this.locale;
   }
+  /**
+   * The language the person's pages report (CanvasTTY tells a service its locale only at start; a page's context
+   * follows the app's language). Everything the service writes for the person follows from now on.
+   */
+  setLocale(value) {
+    const locale = localeOf(value);
+    if (locale === this.locale) return locale;
+    this.locale = locale;
+    this.harness.setLocale(locale);
+    this.auto.setLocale(locale);
+    this.review.setLocale(locale);
+    return locale;
+  }
   /** A card's effective data class (its launch's, else the default). */
   classOf(sessionId) {
     return this.classes.get(sessionId) ?? this.settings.defaultDataClass;
@@ -15483,6 +15527,21 @@ ${JSON.stringify({ ...a, model: answer.model })}` };
     );
     return { running: true };
   }
+  /**
+   * The short view's key was saved (the person's click): Jev decides turns from now on when task triage was Off, and
+   * Auto adds its OpenRouter upstream on that key while its settings were never saved. Nothing else changes.
+   */
+  async quickKeySaved(backendId) {
+    this.keyChanged(backendId);
+    if (this.settings.modes["task.route"] === "off") {
+      const next = structuredClone(this.settings);
+      next.modes["task.route"] = "auto";
+      next.enabled = true;
+      await this.save(next);
+    }
+    await this.auto.adoptJevKey().catch(() => false);
+    return null;
+  }
   keyChanged(backendId) {
     const slot = this.engine.keySlot(backendId);
     if (slot) this.generations.set(slot.secret, (this.generations.get(slot.secret) ?? 0) + 1);
@@ -15628,6 +15687,8 @@ serve({
     "canvastty.launch.prepare": async (params) => (await ready).launch(params),
     "canvastty.tools.call": async (params) => (await ready).tool(String(params.tool), params.caller, params.input ?? {}),
     "canvastty.cards.invoke": async (params) => (await ready).harness.cardAction(str2(params.actionId), str2(params.sessionId), params.session),
+    // Any page: CanvasTTY's language as its context says (a service hears it only at start).
+    locale: async (params) => (await ready).setLocale(params.locale),
     // The decision models page.
     state: async () => (await ready).state(),
     save: async (params) => (await ready).save(params.settings),
@@ -15636,6 +15697,7 @@ serve({
       (await ready).keyChanged(String(params.backendId));
       return null;
     },
+    quickKeySaved: async (params) => (await ready).quickKeySaved(String(params.backendId)),
     feedback: async (params) => (await ready).review.feedback(String(params.auditId), params.verdict === "right" ? "right" : "wrong"),
     // The settings page (four controls).
     "harness.settings": async () => (await ready).harnessState(),

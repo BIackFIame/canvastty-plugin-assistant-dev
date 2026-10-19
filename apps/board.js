@@ -4,6 +4,7 @@
   // src/ui/common.ts
   var host = window.CanvasTTYPlugin;
   var SERVICE = "assistant";
+  var lastLocale = null;
   function applyAppearance(appearance) {
     const locale = appearance.locale === "ru" ? "ru" : "en";
     const root2 = document.documentElement;
@@ -11,6 +12,10 @@
     root2.dataset.palette = appearance.palette === "lilac" || appearance.palette === "night" ? appearance.palette : "sage";
     const scale = typeof appearance.uiScale === "number" ? appearance.uiScale : typeof appearance.scale === "number" ? appearance.scale : null;
     if (scale !== null && Number.isFinite(scale) && scale >= 0.5 && scale <= 3) root2.style?.setProperty("--ui-scale", String(scale));
+    if (locale !== lastLocale) {
+      lastLocale = locale;
+      void host?.service?.request(SERVICE, "locale", { locale })?.catch?.(() => void 0);
+    }
     return locale;
   }
   function onContext(render2) {
@@ -47,7 +52,7 @@
   var STRINGS = {
     en: {
       board: "Board",
-      none: "No task board yet. It fills when an orchestrator adds tasks (task_add) or a flow you started adds its roles.",
+      none: "No task board yet. It fills when an orchestrator adds tasks or a flow you started adds its roles.",
       empty: "This board has no tasks.",
       columns: { todo: "To do", doing: "In progress", done: "Done", blocked: "Blocked" },
       assignee: "Assignee",
@@ -56,7 +61,7 @@
     },
     ru: {
       board: "\u0414\u043E\u0441\u043A\u0430",
-      none: "\u0414\u043E\u0441\u043E\u043A \u0437\u0430\u0434\u0430\u0447 \u043F\u043E\u043A\u0430 \u043D\u0435\u0442. \u0414\u043E\u0441\u043A\u0430 \u0437\u0430\u043F\u043E\u043B\u043D\u0438\u0442\u0441\u044F, \u043A\u043E\u0433\u0434\u0430 \u043E\u0440\u043A\u0435\u0441\u0442\u0440\u0430\u0442\u043E\u0440 \u0434\u043E\u0431\u0430\u0432\u0438\u0442 \u0437\u0430\u0434\u0430\u0447\u0438 (task_add) \u0438\u043B\u0438 \u0437\u0430\u043F\u0443\u0449\u0435\u043D\u043D\u044B\u0439 \u0432\u0430\u043C\u0438 \u0441\u0446\u0435\u043D\u0430\u0440\u0438\u0439 \u0434\u043E\u0431\u0430\u0432\u0438\u0442 \u0441\u0432\u043E\u0438 \u0440\u043E\u043B\u0438.",
+      none: "\u0414\u043E\u0441\u043E\u043A \u0437\u0430\u0434\u0430\u0447 \u043F\u043E\u043A\u0430 \u043D\u0435\u0442. \u0414\u043E\u0441\u043A\u0430 \u0437\u0430\u043F\u043E\u043B\u043D\u0438\u0442\u0441\u044F, \u043A\u043E\u0433\u0434\u0430 \u043E\u0440\u043A\u0435\u0441\u0442\u0440\u0430\u0442\u043E\u0440 \u0434\u043E\u0431\u0430\u0432\u0438\u0442 \u0437\u0430\u0434\u0430\u0447\u0438 \u0438\u043B\u0438 \u0437\u0430\u043F\u0443\u0449\u0435\u043D\u043D\u044B\u0439 \u0432\u0430\u043C\u0438 \u0441\u0446\u0435\u043D\u0430\u0440\u0438\u0439 \u0434\u043E\u0431\u0430\u0432\u0438\u0442 \u0441\u0432\u043E\u0438 \u0440\u043E\u043B\u0438.",
       empty: "\u041D\u0430 \u044D\u0442\u043E\u0439 \u0434\u043E\u0441\u043A\u0435 \u043D\u0435\u0442 \u0437\u0430\u0434\u0430\u0447.",
       columns: { todo: "\u0421\u0434\u0435\u043B\u0430\u0442\u044C", doing: "\u0412 \u0440\u0430\u0431\u043E\u0442\u0435", done: "\u0413\u043E\u0442\u043E\u0432\u043E", blocked: "\u0417\u0430\u0431\u043B\u043E\u043A\u0438\u0440\u043E\u0432\u0430\u043D\u043E" },
       assignee: "\u0418\u0441\u043F\u043E\u043B\u043D\u0438\u0442\u0435\u043B\u044C",

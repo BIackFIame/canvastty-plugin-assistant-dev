@@ -4,7 +4,7 @@
 // secrets and never read back — the page only learns whether one exists.
 import type { AssistantBackendPreset, AssistantBackendSettings, AssistantBackendStatus, AssistantCheckResult, AssistantSettings } from '../shared/settings.ts';
 import type { RecentReview } from '../review/reviewService.ts';
-import { applyAppearance, whenIdle, type Appearance } from './common.ts';
+import { applyAppearance, segmented as segmentedOf, settingRow as settingRowOf, toggle as toggleOf, whenIdle, type Appearance } from './common.ts';
 import { AUTO_PAGE_STRINGS, newAutoView, renderAuto, type AutoState } from './autoRouting.ts';
 import { renderRouting, ROUTE_PAGE_STRINGS, type RouteState } from './routing.ts';
 
@@ -32,12 +32,21 @@ const SERVICE = 'assistant';
 
 const STRINGS = {
   en: {
-    title: 'Decision models', lead: 'Optional. A small decision model (Jev: TypeSafe, OpenRouter, Vercel; Laya; an Eikos server; or a model on your Ollama) sharpens command review, task triage and routing. Without one, simple rules are used. Command review itself (Strict, Basic rules, Off) is set on the Assistant settings page.',
+    title: 'Decision models', lead: 'Optional: with a key, Jev judges tasks and Auto picks a model for each turn; without one, simple rules are used.',
+    quick: 'Auto (Jev)', autoOn: 'Auto', autoOnHelp: 'Picks a model for each turn of OpenCode cards started with Model: Auto.',
+    orKey: 'OpenRouter key', orKeyHelp: 'One key for Jev and for Auto\'s models. Stored by CanvasTTY, never shown again.', orKeySaved: 'saved', orKeyMissing: 'not saved', change: 'Save',
+    prefer: 'Prefer', prefCheap: 'Cheaper', prefBalanced: 'Balanced', prefBest: 'Better', preferHelp: 'How much quality to trade for price.',
+    dailyCap: 'Daily limit, $', dailyCapHelp: 'Auto stops for the day when it is spent.',
+    today: 'Today', todayLine: (usd: number, calls: number) => `$${usd.toFixed(2)} · ${calls} calls`, noDecisions: 'No turns routed yet.',
+    jevOff: 'Jev does not judge tasks now (Task triage is Off).', jevOn: 'Let Jev decide',
+    jevNoText: 'Jev reads no task text now (only code facts may leave this computer).', jevText: 'Allow internal texts',
+    advanced: 'Advanced: models, catalog, several models, where agents run, data, review models',
     modes: 'Modes', triage: 'Task triage (launch and orchestrator)',
     off: 'Off', shadow: 'Learning', suggest: 'Suggest', auto: 'Auto',
     modeHelp: 'Learning records answers only. Suggest shows them on the card and enforces nothing. Auto may change what a launch is advised.',
     data: 'Data', dataMode: 'Data check', strict: 'Strict', warn: 'Warn only', dataOff: 'Off',
-    grant: 'What may leave this computer', grantOff: 'Only code facts (no text)', grantD1: 'Texts up to D1', grantD2: 'Texts up to D2',
+    grant: 'What may leave this computer', grantOff: 'Only code facts (no text)', grantD1: 'Texts up to internal', grantD2: 'Texts up to confidential',
+    classes: { D0: 'Public', D1: 'Internal', D2: 'Confidential', D3: 'Secret (stays here)' } as Record<string, string>,
     defaultClass: 'Class of card text', engine: 'Where it runs', engineAuto: 'Jev first, then this computer', engineJev: 'Jev only', engineLocal: 'This computer only',
     backends: 'Decision models', none: 'None yet.', add: 'Add', model: 'Model', url: 'Address', local: 'This server runs on this computer and sends nothing anywhere',
     check: 'Check', checking: 'Checking…', remove: 'Remove', enabledBackend: 'On', key: 'Key', keySet: 'key saved', keyNone: 'no key', saveKey: 'Save key', removeKey: 'Remove key',
@@ -45,16 +54,25 @@ const STRINGS = {
     checkOk: (r: AssistantCheckResult) => `OK: ${r.modelLabel ?? 'the model'} answered${r.latencyMs !== null ? ` in ${r.latencyMs} ms` : ''} (${r.requests} requests).`,
     checkFail: (r: AssistantCheckResult) => `Not usable: ${r.checks.filter(c => c.status === 'fail').map(c => c.detail).join(' ') || r.failure || 'the check failed'}`,
     smart: 'Second reviewer (larger local Ollama model)', smartNone: 'None', smartModel: 'Ollama model', smartAsk: 'While learning, also ask the second reviewer',
-    recent: 'Recent reviews', noRecent: 'Nothing reviewed yet.', right: 'Right', wrong: 'Wrong',
+    recent: 'Recent reviews', noRecent: 'Nothing reviewed yet.', right: 'Right', wrong: 'Wrong', more: (n: number) => `and ${n} more`,
     saved: 'Saved.', notSaved: 'Not saved: '
   },
   ru: {
-    title: 'Модели решений', lead: 'Необязательно. Маленькая модель решений (Jev: TypeSafe, OpenRouter, Vercel; Laya; сервер Eikos или модель в вашей Ollama) уточняет проверку команд, разбор задач и выбор модели. Без неё работают простые правила. Саму проверку команд («Строго», «Базовые правила», «Выкл») задают на странице настроек Помощника.',
+    title: 'Модели решений', lead: 'Необязательно: с ключом Jev разбирает задачи, а «Авто» выбирает модель на каждый ход; без ключа работают простые правила.',
+    quick: 'Авто (Jev)', autoOn: 'Авто', autoOnHelp: 'Выбирает модель на каждый ход в окнах OpenCode, запущенных с «Модель: Авто».',
+    orKey: 'Ключ OpenRouter', orKeyHelp: 'Один ключ для Jev и для моделей «Авто». Хранится в CanvasTTY и больше не показывается.', orKeySaved: 'сохранён', orKeyMissing: 'не сохранён', change: 'Сохранить',
+    prefer: 'Предпочтение', prefCheap: 'Дешевле', prefBalanced: 'Сбалансированно', prefBest: 'Лучше', preferHelp: 'Сколько качества можно уступить ради цены.',
+    dailyCap: 'Предел в день, $', dailyCapHelp: 'Когда он потрачен, «Авто» останавливается до завтра.',
+    today: 'Сегодня', todayLine: (usd: number, calls: number) => `$${usd.toFixed(2)} · вызовов: ${calls}`, noDecisions: 'Ходов пока не было.',
+    jevOff: 'Сейчас Jev не разбирает задачи (разбор задачи выключен).', jevOn: 'Пусть решает Jev',
+    jevNoText: 'Сейчас Jev не читает текст задач (с компьютера уходят только служебные признаки).', jevText: 'Разрешить внутренние тексты',
+    advanced: 'Дополнительно: модели, каталог, несколько моделей, где работают агенты, данные, модели проверки',
     modes: 'Режимы', triage: 'Разбор задачи (запуск и оркестратор)',
     off: 'Выкл', shadow: 'Обучение', suggest: 'Подсказки', auto: 'Авто',
     modeHelp: 'Обучение только записывает ответы. Подсказки показывают их на окне и ничего не решают. Авто может менять советы при запуске.',
     data: 'Данные', dataMode: 'Проверка данных', strict: 'Строго', warn: 'Только предупреждать', dataOff: 'Выкл',
-    grant: 'Что может уйти с этого компьютера', grantOff: 'Только служебные признаки (без текста)', grantD1: 'Тексты до D1', grantD2: 'Тексты до D2',
+    grant: 'Что может уйти с этого компьютера', grantOff: 'Только служебные признаки (без текста)', grantD1: 'Тексты до внутренних', grantD2: 'Тексты до конфиденциальных',
+    classes: { D0: 'Открытые', D1: 'Внутренние', D2: 'Конфиденциальные', D3: 'Секретные (остаются здесь)' } as Record<string, string>,
     defaultClass: 'Класс текста окна', engine: 'Где работает', engineAuto: 'Сначала Jev, потом этот компьютер', engineJev: 'Только Jev', engineLocal: 'Только этот компьютер',
     backends: 'Модели решений', none: 'Пока нет.', add: 'Добавить', model: 'Модель', url: 'Адрес', local: 'Сервер работает на этом компьютере и никуда не отправляет данные',
     check: 'Проверить', checking: 'Проверяю…', remove: 'Удалить', enabledBackend: 'Вкл', key: 'Ключ', keySet: 'ключ сохранён', keyNone: 'нет ключа', saveKey: 'Сохранить ключ', removeKey: 'Удалить ключ',
@@ -62,7 +80,7 @@ const STRINGS = {
     checkOk: (r: AssistantCheckResult) => `Работает: ${r.modelLabel ?? 'модель'} ответила${r.latencyMs !== null ? ` за ${r.latencyMs} мс` : ''} (запросов: ${r.requests}).`,
     checkFail: (r: AssistantCheckResult) => `Не подходит: ${r.checks.filter(c => c.status === 'fail').map(c => c.detail).join(' ') || r.failure || 'проверка не прошла'}`,
     smart: 'Второй проверяющий (большая локальная модель Ollama)', smartNone: 'Нет', smartModel: 'Модель Ollama', smartAsk: 'Во время обучения тоже спрашивать второго проверяющего',
-    recent: 'Последние проверки', noRecent: 'Пока ничего не проверялось.', right: 'Верно', wrong: 'Неверно',
+    recent: 'Последние проверки', noRecent: 'Пока ничего не проверялось.', right: 'Верно', wrong: 'Неверно', more: (n: number) => `и ещё ${n}`,
     saved: 'Сохранено.', notSaved: 'Не сохранено: '
   }
 };
@@ -175,7 +193,7 @@ function backendRow(entry: AssistantBackendSettings): HTMLLIElement {
   const controls = el('div', { className: 'row' });
   controls.append(checkbox(entry.enabled, t.enabledBackend, value => void save(s => { s.backends.find(b => b.id === entry.id)!.enabled = value; }), `enabled-${entry.id}`));
   if (info?.target === 'remote') {
-    controls.append(el('span', { className: 'label', textContent: t.trust }), select(entry.trust ?? 'D0', [['D0', 'D0'], ['D1', 'D1'], ['D2', 'D2']], value => void save(s => { s.backends.find(b => b.id === entry.id)!.trust = value; }), `trust-${entry.id}`));
+    controls.append(el('span', { className: 'label', textContent: t.trust }), select(entry.trust ?? 'D0', (['D0', 'D1', 'D2'] as const).map(c => [c, t.classes[c]!] as [typeof c, string]), value => void save(s => { s.backends.find(b => b.id === entry.id)!.trust = value; }), `trust-${entry.id}`));
   }
   const checkButton = el('button', { type: 'button', textContent: t.check, name: `check-${entry.id}` });
   checkButton.addEventListener('click', () => {
@@ -273,9 +291,12 @@ function smartSection(): HTMLDivElement {
 function recentSection(): HTMLUListElement {
   const list = el('ul', { className: 'recent' });
   if (!state!.recent.length) list.append(el('li', { className: 'muted', textContent: t.noRecent }));
-  for (const entry of state!.recent.slice(0, 20)) {
+  const shown = state!.recent.slice(0, RECENT_SHOWN);
+  // Right/Wrong only on the newest one still waiting for a label: one question at a time.
+  const asking = shown.find(entry => entry.auditId && entry.tier !== 'rule' && !entry.label) ?? null;
+  for (const entry of shown) {
     const item = el('li', {}, el('code', { textContent: entry.summary }), ` → ${entry.act ?? '—'} (${entry.outcome}, ${entry.tier ?? '—'}, ${entry.reason}) `);
-    if (entry.auditId && entry.tier !== 'rule' && !entry.label) {
+    if (entry === asking) {
       for (const verdict of ['right', 'wrong'] as const) {
         const button = el('button', { type: 'button', textContent: t[verdict] });
         button.addEventListener('click', async () => { await host.service.request(SERVICE, 'feedback', { auditId: entry.auditId, verdict }); await load(); });
@@ -284,7 +305,80 @@ function recentSection(): HTMLUListElement {
     } else if (entry.label) item.append(el('span', { className: 'muted', textContent: t[entry.label] }));
     list.append(item);
   }
+  if (state!.recent.length > RECENT_SHOWN) list.append(el('li', { className: 'muted', textContent: t.more(state!.recent.length - RECENT_SHOWN) }));
   return list;
+}
+
+const RECENT_SHOWN = 5;
+
+/**
+ * The short default view: Auto on or off, the one OpenRouter key (Jev's, which Auto uses too), the preference, the
+ * daily limit and today's spend with the last few turns. Everything else is under Advanced.
+ */
+function quickSection(): HTMLElement {
+  const s = state!.settings;
+  const auto = autoState!;
+  const a = auto.settings;
+  const saveAuto = (change: (next: typeof a) => void): void => {
+    const next = structuredClone(a);
+    change(next);
+    host.service.request(SERVICE, 'auto.save', { settings: next }).then(() => load(), error => say(`${t.notSaved}${errorText(error)}`));
+  };
+  const on = a.upstreams.some(upstream => upstream.enabled) && a.dailyUsdCap > 0;
+  const toggleNode = toggleOf('auto-on', on, t.autoOn, value => saveAuto(next => {
+    for (const upstream of next.upstreams) upstream.enabled = value;
+    if (value && next.dailyUsdCap <= 0) next.dailyUsdCap = 1;
+  }));
+  // The key: Jev · OpenRouter's (Auto's OpenRouter upstream uses it too). Its backend is added first when missing.
+  const input = el('input', { type: 'password', placeholder: t.orKey, autocomplete: 'off', name: 'quick-key', className: 'input' });
+  const saveKey = el('button', { type: 'button', textContent: t.change, name: 'quick-key-save', className: 'button' });
+  saveKey.addEventListener('click', async () => {
+    const value = input.value.trim();
+    if (!value) return;
+    try {
+      let backend = state!.settings.backends.find(entry => entry.preset === 'openrouter');
+      if (!backend) {
+        const taken = new Set(state!.settings.backends.map(entry => entry.id));
+        let n = 1;
+        while (taken.has(`openrouter-${n}`)) n++;
+        const entry: AssistantBackendSettings = { id: `openrouter-${n}`, preset: 'openrouter', enabled: true, model: PRESETS.find(item => item.id === 'openrouter')!.model };
+        await save(next => { next.backends.push(entry); });
+        backend = state!.settings.backends.find(item => item.id === entry.id);
+      }
+      const slot = backend ? state!.slots[backend.id] : null;
+      if (!backend || !slot) throw new Error(t.keyNone);
+      await host.secrets.set(slot.secret, JSON.stringify({ origin: slot.origin, value }));
+      input.value = '';
+      await host.service.request(SERVICE, 'quickKeySaved', { backendId: backend.id });
+      say(t.saved);
+    } catch (error) { say(`${t.notSaved}${errorText(error)}`); }
+    await load().catch(error => say(errorText(error)));
+  });
+  const prefer = segmentedOf('auto-preference-quick', a.preference, [['cheap', t.prefCheap], ['balanced', t.prefBalanced], ['best', t.prefBest]], value => saveAuto(next => { next.preference = value; }));
+  const cap = el('input', { type: 'number', name: 'quick-daily', min: '0', max: '100', step: '0.5', value: String(a.dailyUsdCap), className: 'input' });
+  cap.addEventListener('change', () => { const value = Number(cap.value); if (Number.isFinite(value) && value >= 0 && value <= 100) saveAuto(next => { next.dailyUsdCap = value; }); });
+  const turns = auto.recent.filter(record => record.kind === 'turn').slice(0, 5);
+  const today = el('div', {}, el('div', { textContent: t.todayLine(auto.stats.spentToday, auto.stats.requests) }),
+    ...(turns.length ? turns.map(record => el('div', { className: 'muted', textContent: autoStrings.turnLine(record) })) : [el('div', { className: 'muted', textContent: t.noDecisions })]));
+  const notes: HTMLElement[] = [];
+  if (auto.jevKey && s.modes['task.route'] === 'off') {
+    const fix = el('button', { type: 'button', className: 'link-button', textContent: t.jevOn, name: 'quick-jev-on' });
+    fix.addEventListener('click', () => void save(next => { next.modes['task.route'] = 'auto'; next.enabled = true; }));
+    notes.push(el('div', { className: 'row' }, el('span', { className: 'muted', textContent: t.jevOff }), fix));
+  } else if (auto.jevKey && s.grant === 'off') {
+    const fix = el('button', { type: 'button', className: 'link-button', textContent: t.jevText, name: 'quick-jev-text' });
+    fix.addEventListener('click', () => void save(next => { next.grant = 'D1'; }));
+    notes.push(el('div', { className: 'row' }, el('span', { className: 'muted', textContent: t.jevNoText }), fix));
+  }
+  return el('section', { dataset: { section: 'quick' } },
+    el('h2', { textContent: t.quick }),
+    el('div', { className: 'setting-group' },
+      settingRowOf(t.autoOn, t.autoOnHelp, toggleNode),
+      settingRowOf(t.orKey, `${auto.jevKey ? t.orKeySaved : t.orKeyMissing}. ${t.orKeyHelp}`, el('span', { className: 'row' }, input, saveKey)),
+      settingRowOf(t.prefer, t.preferHelp, prefer),
+      settingRowOf(t.dailyCap, t.dailyCapHelp, cap),
+      settingRowOf(t.today, '', today)),
+    ...notes);
 }
 
 function render(): void {
@@ -293,9 +387,9 @@ function render(): void {
   const backends = el('ul', { className: 'backends' });
   if (!s.backends.length) backends.append(el('li', { className: 'muted', textContent: t.none }));
   for (const entry of s.backends) backends.append(backendRow(entry));
-  root.replaceChildren(
-    el('h1', { textContent: t.title }),
-    el('p', { className: 'muted', textContent: t.lead }),
+  const advanced = el('details', { className: 'advanced', open: advancedOpen, name: 'advanced' });
+  advanced.addEventListener('toggle', () => { advancedOpen = advanced.open; });
+  advanced.append(el('summary', { textContent: t.advanced }),
     el('h2', { textContent: t.modes }),
     // Task triage needs the Assistant on; command review's own control keeps it on while review runs.
     row(t.triage, select(s.modes['task.route'], [['off', t.off], ['shadow', t.shadow], ['suggest', t.suggest], ['auto', t.auto]], value => void save(next => {
@@ -306,12 +400,13 @@ function render(): void {
     el('h2', { textContent: t.backends }),
     backends,
     addForm(),
-    smartSection(),
+    // The second reviewer is a local Ollama model: shown once an Ollama decision model is there.
+    ...(s.backends.some(entry => entry.preset === 'emulated') || s.smart.kind !== 'none' ? [smartSection()] : []),
     el('h2', { textContent: t.data }),
     row(t.engine, select(s.engine, [['auto', t.engineAuto], ['jev', t.engineJev], ['local', t.engineLocal]], value => void save(next => { next.engine = value; }), 'engine')),
     row(t.dataMode, select(s.dataClassMode, [['strict', t.strict], ['warn', t.warn], ['off', t.dataOff]], value => void save(next => { next.dataClassMode = value; }), 'data-mode')),
     row(t.grant, select(s.grant, [['off', t.grantOff], ['D1', t.grantD1], ['D2', t.grantD2]], value => void save(next => { next.grant = value; }), 'grant')),
-    row(t.defaultClass, select(s.defaultDataClass, [['D0', 'D0'], ['D1', 'D1'], ['D2', 'D2'], ['D3', 'D3']], value => void save(next => { next.defaultDataClass = value; }), 'default-class')),
+    row(t.defaultClass, select(s.defaultDataClass, (['D0', 'D1', 'D2', 'D3'] as const).map(c => [c, t.classes[c]!] as [typeof c, string]), value => void save(next => { next.defaultDataClass = value; }), 'default-class')),
     el('h2', { textContent: t.recent }),
     recentSection(),
     ...(autoState ? [renderAuto(autoState, autoStrings, {
@@ -326,9 +421,17 @@ function render(): void {
       forwardLimits,
       say,
       reload: () => { void load().catch(error => say(errorText(error))); }
-    })] : [])
+    })] : []));
+  root.replaceChildren(
+    el('h1', { textContent: t.title }),
+    el('p', { className: 'muted', textContent: t.lead }),
+    ...(autoState ? [quickSection()] : []),
+    advanced
   );
 }
+
+/** Advanced stays open or closed across re-renders while the page is open. */
+let advancedOpen = false;
 
 host.onContext(({ appearance }) => {
   const locale = applyAppearance(appearance);

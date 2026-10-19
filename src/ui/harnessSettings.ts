@@ -15,37 +15,37 @@ const STRINGS = {
     strict: 'Strict', basic: 'Basic rules', off: 'Off', custom: 'Custom',
     levels: {
       strict: 'Strict: anything but read-only commands waits for your answer.',
-      basic: 'Basic rules: blocks what the hard rules forbid (sudo, piping downloads into a shell, deleting or writing outside the project); the rest runs, with a hint on the card.',
+      basic: 'Basic rules: blocks sudo, piping downloads into a shell and writing outside the project; the rest runs.',
       off: 'Off: the Assistant does not review commands.'
     },
-    customHelp: (mode: string, strictness: string) => `Custom: set by an older version or the decision models page (mode ${mode}, strictness ${strictness}). It stays as it is until you choose a level.`,
+    customHelp: (mode: string, strictness: string) => `Set on the Decision models page (${mode}, ${strictness}). Choose a level to replace it.`,
     modes: { off: 'Off', shadow: 'Learning', suggest: 'Suggest', auto: 'Auto' } as Record<string, string>,
     strictness: { triage: 'by the task', strict: 'always strict' } as Record<string, string>,
     unavailable: 'The saved settings could not be read yet: command review is Off and nothing can be saved. The Assistant tries again by itself.',
-    chain: 'Trust the orchestrator\'s task for its subagents\' new files', chainHelp: 'When you typed the orchestrator\'s task yourself, its subagents may create new files inside the project without asking, if the review is at least 95% sure the file serves that task. Never for changes to existing files, files outside the project, secrets, or commands.',
+    chain: 'Let subagents create new files for a task you typed', chainHelp: 'Also lets them run their tests, look around the project and fix files they wrote. Never secrets, files outside the project, or other commands.',
     routing: 'Automatic routing', routingHelp: 'Orchestrators get a provider and model suggestion for each subagent.',
     loops: 'Loop alerts', loopsHelp: 'A "loop?" badge when a card repeats the same command in one turn with no file edits seen.',
-    flows: 'Flows', flowsHelp: 'An orchestrator may ask you to approve a flow (roles and tasks). This is a request it is told to follow, not a lock: CanvasTTY cannot yet stop an orchestrator that starts agents without it.',
+    flows: 'Flows', flowsHelp: 'An orchestrator may ask you to approve its roles and tasks first (a request, not a lock).',
     models: (n: number) => n ? `Decision models: ${n} on` : 'Decision models: none (simple rules are used)', openModels: 'Decision models…',
     saved: 'Saved.', notSaved: 'Not saved: '
   },
   ru: {
     lead: 'Здесь всё решаете вы. Проверка команд сначала выключена; включите её, если она нужна.',
     review: 'Проверка команд', reviewHelp: 'Проверяет команды и записи файлов агентов до запуска.',
-    strict: 'Строго', basic: 'Базовые правила', off: 'Выкл', custom: 'Особая',
+    strict: 'Строго', basic: 'Базовые правила', off: 'Выкл', custom: 'Своя',
     levels: {
       strict: 'Строго: всё, кроме команд чтения, ждёт вашего ответа.',
-      basic: 'Базовые правила: блокирует то, что запрещают жёсткие правила (sudo, загрузка прямо в оболочку, удаление или запись вне проекта); остальное выполняется с подсказкой на окне.',
+      basic: 'Базовые правила: блокирует sudo, загрузку прямо в оболочку и запись вне проекта; остальное выполняется.',
       off: 'Выкл: Помощник не проверяет команды.'
     },
-    customHelp: (mode: string, strictness: string) => `Особая: задана старой версией или на странице моделей решений (режим «${mode}», строгость «${strictness}»). Остаётся как есть, пока вы не выберете уровень.`,
+    customHelp: (mode: string, strictness: string) => `Задана на странице моделей решений («${mode}», «${strictness}»). Выберите уровень, чтобы заменить её.`,
     modes: { off: 'Выкл', shadow: 'Обучение', suggest: 'Подсказки', auto: 'Авто' },
     strictness: { triage: 'по задаче', strict: 'всегда строго' },
     unavailable: 'Сохранённые настройки пока не прочитаны: проверка команд выключена, сохранить ничего нельзя. Помощник попробует ещё раз сам.',
-    chain: 'Доверять задаче оркестратора для новых файлов его субагентов', chainHelp: 'Если задачу оркестратору вы написали сами, его субагенты могут без вопроса создавать новые файлы в проекте, когда проверка не меньше чем на 95% уверена, что файл нужен для этой задачи. Никогда — для изменения существующих файлов, файлов вне проекта, секретов и команд.',
+    chain: 'Разрешить субагентам создавать новые файлы для задачи, которую вы написали', chainHelp: 'А также запускать свои тесты, смотреть файлы проекта и исправлять файлы, которые они сами записали. Никогда — секреты, файлы вне проекта и другие команды.',
     routing: 'Автоматический выбор модели', routingHelp: 'Оркестратор получает предложение провайдера и модели для каждого субагента.',
     loops: 'Сигнал зацикливания', loopsHelp: 'Значок «цикл?», когда окно за один ход повторяет одну команду, а правок файлов не видно.',
-    flows: 'Сценарии', flowsHelp: 'Оркестратор может попросить вас одобрить сценарий (роли и задачи). Это просьба, которой его просят следовать, а не запрет: CanvasTTY пока не может остановить оркестратор, который запускает агентов без неё.',
+    flows: 'Сценарии', flowsHelp: 'Оркестратор может сначала попросить вас одобрить роли и задачи (это просьба, а не запрет).',
     models: (n: number) => n ? `Модели решений: включено ${n}` : 'Модели решений: нет (работают простые правила)', openModels: 'Модели решений…',
     saved: 'Сохранено.', notSaved: 'Не сохранено: '
   }
@@ -77,8 +77,9 @@ function save(change: Partial<State>): void {
 }
 
 function reviewHelp(s: State): HTMLDivElement {
-  const lines = [t.reviewHelp, t.levels.strict, t.levels.basic, t.levels.off];
-  if (s.commandReview === 'custom' && s.custom) lines.push(t.customHelp(t.modes[s.custom.mode] ?? s.custom.mode, t.strictness[s.custom.strictness] ?? s.custom.strictness));
+  // One line: what the chosen level does (the others are one click away).
+  const lines = [s.commandReview === 'custom' && s.custom ? t.customHelp(t.modes[s.custom.mode] ?? s.custom.mode, t.strictness[s.custom.strictness] ?? s.custom.strictness)
+    : s.commandReview === 'custom' ? t.reviewHelp : t.levels[s.commandReview]];
   return el('div', {}, ...lines.map(line => el('div', { textContent: line })));
 }
 

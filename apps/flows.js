@@ -4,6 +4,7 @@
   // src/ui/common.ts
   var host = window.CanvasTTYPlugin;
   var SERVICE = "assistant";
+  var lastLocale = null;
   function applyAppearance(appearance) {
     const locale = appearance.locale === "ru" ? "ru" : "en";
     const root2 = document.documentElement;
@@ -11,6 +12,10 @@
     root2.dataset.palette = appearance.palette === "lilac" || appearance.palette === "night" ? appearance.palette : "sage";
     const scale = typeof appearance.uiScale === "number" ? appearance.uiScale : typeof appearance.scale === "number" ? appearance.scale : null;
     if (scale !== null && Number.isFinite(scale) && scale >= 0.5 && scale <= 3) root2.style?.setProperty("--ui-scale", String(scale));
+    if (locale !== lastLocale) {
+      lastLocale = locale;
+      void host?.service?.request(SERVICE, "locale", { locale })?.catch?.(() => void 0);
+    }
     return locale;
   }
   function onContext(render2) {
@@ -50,7 +55,7 @@
       waiting: "Waiting for you",
       none: "No flow is waiting. When an orchestrator asks you to approve one, it appears here.",
       flow: "Flow",
-      builtIn: "Built in",
+      builtIn: "built-in",
       project: "From this project",
       what: "What it does",
       goal: "Goal",
@@ -83,7 +88,7 @@
       waiting: "\u0416\u0434\u0451\u0442 \u0432\u0430\u0441",
       none: "\u041D\u0435\u0442 \u0441\u0446\u0435\u043D\u0430\u0440\u0438\u0435\u0432, \u0436\u0434\u0443\u0449\u0438\u0445 \u0440\u0435\u0448\u0435\u043D\u0438\u044F. \u041A\u043E\u0433\u0434\u0430 \u043E\u0440\u043A\u0435\u0441\u0442\u0440\u0430\u0442\u043E\u0440 \u043F\u043E\u043F\u0440\u043E\u0441\u0438\u0442 \u043E\u0434\u043E\u0431\u0440\u0438\u0442\u044C \u0441\u0446\u0435\u043D\u0430\u0440\u0438\u0439, \u043E\u043D \u043F\u043E\u044F\u0432\u0438\u0442\u0441\u044F \u0437\u0434\u0435\u0441\u044C.",
       flow: "\u0421\u0446\u0435\u043D\u0430\u0440\u0438\u0439",
-      builtIn: "\u0412\u0441\u0442\u0440\u043E\u0435\u043D\u043D\u044B\u0439",
+      builtIn: "\u0432\u0441\u0442\u0440\u043E\u0435\u043D\u043D\u044B\u0439",
       project: "\u0418\u0437 \u044D\u0442\u043E\u0433\u043E \u043F\u0440\u043E\u0435\u043A\u0442\u0430",
       what: "\u0427\u0442\u043E \u0434\u0435\u043B\u0430\u0435\u0442",
       goal: "\u0426\u0435\u043B\u044C",

@@ -56,12 +56,11 @@ test('settings page: five controls (Strict/Basic rules/Off, the trust chain off 
   const rows = ui.app.all().filter(node => node.className === 'setting-row');
   assert.equal(rows.length, 5);
   assert.match(ui.app.text(), /Проверка команд .* Строго Базовые правила Выкл/u);
-  assert.match(ui.app.text(), /Доверять задаче оркестратора для новых файлов его субагентов/u);
+  assert.match(ui.app.text(), /Разрешить субагентам создавать новые файлы для задачи, которую вы написали/u);
   assert.equal(ui.app.all().find(node => node.name === 'trustChain').checked, false, 'off until the person turns it on');
-  // Each level in one line; Basic rules says it blocks.
-  assert.match(ui.app.text(), /Строго: всё, кроме команд чтения, ждёт вашего ответа\./u);
-  assert.match(ui.app.text(), /Базовые правила: блокирует то, что запрещают жёсткие правила/u);
+  // One line: what the chosen level does (Off now); the others are not spelled out.
   assert.match(ui.app.text(), /Выкл: Помощник не проверяет команды\./u);
+  assert.doesNotMatch(ui.app.text(), /Строго: всё, кроме|Базовые правила: блокирует/u);
   assert.doesNotMatch(ui.app.text(), /Предупреждать|до запуска ничего/u);
   assert.match(ui.app.text(), /Сценарии/u);
   assert.equal(ui.app.all().filter(node => node.tagName === 'INPUT').length, 4);
@@ -69,6 +68,7 @@ test('settings page: five controls (Strict/Basic rules/Off, the trust chain off 
   ui.app.all().find(node => node.tagName === 'BUTTON' && node.textContent === 'Строго').click();
   await settle();
   assert.deepEqual(ui.requests.find(request => request.method === 'harness.saveSettings').params, { settings: { commandReview: 'strict', routing: true, loopAlerts: true, flows: true, trustChain: false } });
+  assert.match(ui.app.text(), /Строго: всё, кроме команд чтения, ждёт вашего ответа\./u, 'the chosen level\'s line');
   // The trust chain: saved with everything else as it was.
   const chain = ui.app.all().find(node => node.name === 'trustChain');
   chain.checked = true;
@@ -76,9 +76,10 @@ test('settings page: five controls (Strict/Basic rules/Off, the trust chain off 
   await settle();
   assert.equal(ui.requests.filter(request => request.method === 'harness.saveSettings').at(-1).params.settings.trustChain, true);
   ui.context('en', 'sage');
-  assert.match(ui.app.text(), /Trust the orchestrator's task for its subagents' new files/u);
+  assert.match(ui.app.text(), /Let subagents create new files for a task you typed/u);
   assert.match(ui.app.text(), /Command review .* Strict Basic rules Off/u);
   assert.match(ui.app.text(), /not a lock/u, 'flows are described as a request, not a gate');
+  assert.doesNotMatch(ui.app.text(), /95%/u, 'no thresholds on the main page');
   assert.doesNotMatch(ui.app.text(), /Warn|before anything starts/u);
   assert.match(ui.app.text(), /Decision models: none/u);
   ui.app.all().find(node => node.tagName === 'BUTTON' && node.textContent === 'Decision models…').click();
@@ -96,7 +97,7 @@ test('settings page: a custom command review is shown read-only with what it is;
   await settle();
   ui.context('en', 'sage');
   assert.match(ui.app.text(), /Strict Basic rules Off Custom/u);
-  assert.match(ui.app.text(), /Custom: set by an older version or the decision models page \(mode Learning, strictness by the task\)/u);
+  assert.match(ui.app.text(), /Set on the Decision models page \(Learning, by the task\)\. Choose a level to replace it\./u);
   assert.match(ui.app.text(), /could not be read yet: command review is Off and nothing can be saved/u);
   const custom = ui.app.all().find(node => node.tagName === 'BUTTON' && node.textContent === 'Custom');
   assert.equal(custom.attributes['aria-checked'], 'true');
@@ -306,10 +307,13 @@ test('decision models page: Auto from data — catalog freshness and refresh, mo
   await settle();
   ui.context('en', 'sage');
   const text = ui.app.text();
-  assert.match(text, /Artificial Analysis — loaded .*v4\.3\.2, 221 measured of 690 rows — old — Artificial Analysis unavailable/u);
+  assert.match(text, /Artificial Analysis — loaded .*v4\.3\.2, 221 measured of 690 rows — old — unavailable; earlier scores kept/u);
   assert.match(text, /OpenRouter models — loaded/u);
-  assert.match(text, /vendor\/alpha-1 400k 1\.00 · 4\.00 \(OpenRouter\) 57\.5 @high · Artificial Analysis v4\.3\.2 · old high, low/u);
-  assert.match(text, /vendor\/gamma-3 64k 0\.2 · 0\.8 \(OpenRouter\) unknown/u);
+  // Two lines per model; the score's source and age and the measured efforts in its tooltip (no overflow).
+  assert.match(text, /vendor\/alpha-1 400k · \$1\.00 · \$4\.00 57\.5 @high \(old\)/u);
+  assert.match(text, /vendor\/gamma-3 64k · \$0\.2 · \$0\.8 unknown/u);
+  const alphaScore = ui.app.all().find(node => node.tagName === 'TD' && node.textContent === '57.5 @high (old)');
+  assert.equal(alphaScore.title, 'Artificial Analysis v4.3.2 · Measured at: high, low');
   assert.match(text, /abcd1234 · turn · coding · large \(0\.05\) · vendor\/alpha-1@high · 57\.5 Artificial Analysis v4\.3\.2 · \$1\.00\/\$4\.00 · Jev \(best score\) · 200/u);
   assert.match(text, /vendor\/beta-2 · 55\.0 Artificial Analysis v4\.3\.2 · \$0\.5\/\$2\.00 · Jev \(cheaper, within the allowed loss\) · 2\.5 points below vendor\/alpha-1@high \(57\.5\), 50% cheaper; allowed 5 · 200/u);
   assert.doesNotMatch(text, /alpha-1@high · 57\.5 Artificial Analysis v4\.3\.2 · \$1\.00\/\$4\.00 · Jev \(best score\) · [^2]/u, 'no trade-off shown for the best model itself');
@@ -474,4 +478,65 @@ test('decision models page: several models on hard turns — consensus Off/Auto/
   assert.match(ru, /консенсус, сведено, черновиков: 2 из 3/u);
   assert.match(ru, /Лучший из N|лучший из N/u);
   assert.doesNotMatch(ru, /Several models|Consensus|merged|drafts|best of N|per turn/u, 'no English left in the strategy rows');
+});
+
+test('decision models page: a short default view (Auto, one key, preference, daily limit, today) and everything else under Advanced; the key sets Jev and Auto up; ru/en', async () => {
+  const { DEFAULT_ASSISTANT_SETTINGS } = await import('../src/shared/settings.ts');
+  const at = Date.UTC(2026, 9, 19, 9, 0, 0);
+  let main = { settings: structuredClone(DEFAULT_ASSISTANT_SETTINGS), status: { enabled: false, backends: [] }, slots: {}, checks: {}, recent: [] };
+  const auto = {
+    jevKey: false,
+    settings: { upstreams: [], preference: 'balanced', cheaperFallback: false, decider: 'jev', dailyUsdCap: 1, perCardUsdCap: 0.4, catalog: { autoRefresh: true, refreshHours: 168 } },
+    readable: true, keys: {},
+    recent: [{ at, session: 'abcd1234', conversation: 'c', turn: 't', kind: 'turn', source: 'jev', tier: 'large', taskType: 'writing', difficulty: 'large', confidence: 0.05, why: 'best_score', upstream: 'openrouter', model: 'google/gemini-3.1-pro-preview', effort: 'high', score: 82.2, scoreSource: 'x', priceIn: 2, priceOut: 12, attempts: 1, failovers: [], status: 200, reason: 'jev', ttfbMs: 1, totalMs: 2, tokensIn: 1, tokensOut: 1, costUsd: 0.184, tradeoff: null, strategy: 'consensus', fanOut: null }],
+    stats: { requests: 14, turns: 3, continuations: 10, small: 1, jevAsked: 3, jevAnswered: 3, rules: 0, leaseReuses: 10, failovers: 0, hosts: [], spentToday: 0.39, listening: false, cards: 0 }
+  };
+  const secrets = [];
+  const ui = page('settings/assistant.js', {
+    state: () => main,
+    save: ({ settings }) => { main = { ...main, settings, slots: Object.fromEntries(settings.backends.map(b => [b.id, b.preset === 'openrouter' ? { secret: 'assistant-openrouter', origin: 'https://openrouter.ai' } : null])) }; return settings; },
+    quickKeySaved: () => { auto.jevKey = true; main.settings.modes['task.route'] = 'auto'; auto.settings.upstreams = [{ id: 'openrouter', preset: 'openrouter', baseUrl: 'https://openrouter.ai/api/v1', trust: 'D1', key: 'jev', models: [], allModels: true, excluded: [], enabled: true }]; return null; },
+    'auto.state': () => auto, 'auto.save': ({ settings }) => { auto.settings = settings; return settings; }, 'route.state': null
+  }, { secrets: { set: async (key, value) => { secrets.push({ key, value }); }, delete: async () => undefined } });
+  await settle();
+  ui.context('en', 'sage');
+  const outside = node => { for (let n = node; n; n = n.parent) if (n.tagName === 'DETAILS') return false; return true; };
+  const controls = () => ui.app.all().filter(node => ['INPUT', 'SELECT', 'BUTTON'].includes(node.tagName) && outside(node));
+  const advanced = ui.app.all().find(node => node.tagName === 'DETAILS');
+  assert.equal(advanced.open, false, 'Advanced starts closed');
+  assert.ok(controls().length <= 9, `a short default view (${controls().length} controls)`);
+  const quick = ui.app.all().find(node => node.dataset?.section === 'quick').text();
+  assert.match(quick, /Auto \(Jev\) Auto .* OpenRouter key not saved/u);
+  assert.match(quick, /Cheaper Balanced Better/u);
+  assert.match(quick, /Daily limit, \$/u);
+  assert.match(quick, /\$0\.39 · 14 calls google\/gemini-3\.1-pro-preview · writing, large · several models · \$0\.1840/u);
+  assert.doesNotMatch(quick, /D0|D1|D2|D3|tier|effort|upstream|cohort|8 \/ 5 \/ 3/u, 'no jargon in the default view');
+  // Paste the key: the Jev · OpenRouter decision model is added, the key stored for OpenRouter's address only, then the service sets Jev and Auto up.
+  const key = ['sk', 'or', 'v1', 'a'.repeat(24)].join('-');
+  const input = ui.app.all().find(node => node.name === 'quick-key');
+  input.value = key;
+  ui.app.all().find(node => node.name === 'quick-key-save').click();
+  await settle(); await settle();
+  assert.equal(main.settings.backends[0].preset, 'openrouter');
+  assert.deepEqual(secrets, [{ key: 'assistant-openrouter', value: JSON.stringify({ origin: 'https://openrouter.ai', value: key }) }]);
+  assert.ok(ui.requests.some(r => r.method === 'quickKeySaved' && r.params.backendId === main.settings.backends[0].id));
+  assert.equal(input.value, '', 'cleared once stored');
+  await settle();
+  assert.match(ui.app.all().find(node => node.dataset?.section === 'quick').text(), /OpenRouter key saved/u);
+  // Auto off: every upstream off (the person's list stays).
+  const toggle = ui.app.all().find(node => node.name === 'auto-on');
+  assert.equal(toggle.checked, true);
+  toggle.checked = false;
+  for (const listener of toggle.listeners.change) listener();
+  await settle();
+  assert.equal(auto.settings.upstreams[0].enabled, false);
+  // Russian: the same view, no English.
+  ui.context('ru', 'night');
+  const ru = ui.app.all().find(node => node.dataset?.section === 'quick').text();
+  assert.match(ru, /Ключ OpenRouter сохранён/u);
+  assert.match(ru, /Дешевле Сбалансированно Лучше/u);
+  assert.match(ru, /Предел в день, \$/u);
+  assert.match(ru, /исследование|тексты/u);
+  assert.doesNotMatch(ru, /Auto[^ ]|Cheaper|Daily|calls|several|saved|writing/u, 'no English in the Russian default view');
+  assert.match(ui.app.all().find(node => node.tagName === 'DETAILS').text(), /Дополнительно/u);
 });

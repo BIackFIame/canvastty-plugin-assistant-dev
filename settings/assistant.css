@@ -3,11 +3,13 @@ body { padding: 0.92rem 1.23rem 3.08rem; }
 h1 { font-size: 1.15rem; margin: 0 0 0.31rem; }
 h2 { font-size: 1rem; margin: 1.23rem 0 0.46rem; }
 .row { display: flex; gap: 0.62rem; align-items: center; flex-wrap: wrap; margin: 0.31rem 0; }
-.label { min-width: 14.62rem; }
+.label { flex: 0 1 14.62rem; min-width: 0; }
+main { max-width: 100%; overflow-wrap: anywhere; }
 .check { display: block; margin: 0.31rem 0; }
 select, input, button { font: inherit; color: inherit; }
 select, input:not([type]), input[type="password"], input[type="number"] { min-height: 2.31rem; padding: 0.23rem 0.62rem; border: 1px solid var(--line); border-radius: var(--radius-sm); background: var(--surface-soft); }
-input:not([type]), input[type="password"] { min-width: 12.31rem; }
+input:not([type]), input[type="password"] { width: 12.31rem; max-width: 100%; }
+select { max-width: 100%; }
 input[type="number"] { width: 7.69rem; }
 .auto .recent .row { margin: 0; }
 button { min-height: 2.31rem; padding: 0.31rem 0.92rem; border: 0; border-radius: var(--radius-sm); background: var(--surface-soft); cursor: pointer; }
@@ -20,7 +22,12 @@ button { min-height: 2.31rem; padding: 0.31rem 0.92rem; border: 0; border-radius
 .status { position: fixed; left: 0; right: 0; bottom: 0; padding: 0.46rem 1.23rem; min-height: 1.4em; background: var(--surface); border-top: 1px solid var(--line); }
 .table-wrap { overflow-x: auto; margin: 0.31rem 0; }
 .model-table { border-collapse: collapse; width: 100%; font-size: 0.92rem; }
-.model-table th, .model-table td { text-align: left; padding: 0.23rem 0.46rem; border-bottom: 1px solid var(--line); vertical-align: middle; white-space: nowrap; }
+.model-table th, .model-table td { text-align: left; padding: 0.23rem 0.46rem; border-bottom: 1px solid var(--line); vertical-align: top; overflow-wrap: anywhere; }
+.model-table code { overflow-wrap: anywhere; }
 .model-table th { font-weight: 600; }
 .model-table select { min-height: 1.85rem; padding: 0.08rem 0.31rem; }
 .models { margin-top: 0.46rem; }
+.advanced { margin-top: 1.23rem; }
+.advanced > summary { cursor: pointer; color: var(--text-muted); padding: 0.46rem 0; }
+.advanced[open] > summary { margin-bottom: 0.46rem; }
+.setting-row__control .row { margin: 0; }
