@@ -67,7 +67,7 @@ const EN = {
   report: {
     title: (title: string) => `Report: ${title}`,
     role: { agent: 'agent', orchestrator: 'orchestrator', subagent: 'subagent' } as Record<string, string>,
-    status: { idle: 'idle', working: 'working', needs_approval: 'waiting for approval', unavailable: 'not started', done: 'done', failed: 'failed' } as Record<string, string>,
+    status: { idle: 'idle', working: 'working', needs_approval: 'waiting for approval', unavailable: 'waiting for the first prompt', done: 'done', failed: 'failed' } as Record<string, string>,
     started: 'Started', ran: 'Ran', state: 'Status', exit: 'Exit code', turns: 'Turns', children: 'Subagents',
     commandsReviewed: 'Commands reviewed', commandsSeen: 'Commands seen', reviewed: (deny: number, ask: number) => `declined ${deny}, sent to you ${ask}`,
     loops: 'Loop alerts', tasks: 'Tasks', none: 'none',
@@ -144,7 +144,7 @@ const RU: Strings = {
   report: {
     title: title => `Отчёт: ${title}`,
     role: { agent: 'агент', orchestrator: 'оркестратор', subagent: 'субагент' },
-    status: { idle: 'ждёт', working: 'работает', needs_approval: 'ждёт подтверждения', unavailable: 'не запущен', done: 'завершён', failed: 'ошибка' },
+    status: { idle: 'ждёт', working: 'работает', needs_approval: 'ждёт подтверждения', unavailable: 'ждёт первого запроса', done: 'завершён', failed: 'ошибка' },
     started: 'Запущен', ran: 'Работал', state: 'Состояние', exit: 'Код выхода', turns: 'Ходов', children: 'Субагенты',
     commandsReviewed: 'Команд проверено', commandsSeen: 'Команд замечено', reviewed: (deny, ask) => `отклонено ${deny}, передано вам ${ask}`,
     loops: 'Сигналы цикла', tasks: 'Задачи', none: 'нет',

@@ -709,3 +709,46 @@ test('live run 11: two new files reviewed at once; the 2,026-character test file
   const big = await review.decide(call('textstats.big.mjs', `// textstats.big.mjs\n${'x'.repeat(17_000)}`), 10_000);
   assert.notEqual(big.verdict, 'allow');
 });
+
+test('short view: a saved Jev · OpenRouter key adds Auto\'s OpenRouter upstream only while Auto was never set up; saving it there lets Jev judge tasks; the service follows the page\'s language', async () => {
+  const jevKey = JSON.stringify({ origin: 'https://openrouter.ai', value: KEY });
+  {
+    const host = hostFake({}, { 'assistant-openrouter': jevKey });
+    const assistant = new Assistant({ host, dataDir: mkdtempSync(join(base, 'data-')), git: null, settings: { ...structuredClone(DEFAULT_ASSISTANT_SETTINGS), enabled: false, modes: { ...DEFAULT_ASSISTANT_SETTINGS.modes, 'task.route': 'off' }, backends: [{ id: 'openrouter-1', preset: 'openrouter', enabled: true, model: 'typesafe/jev-1.13' }] } });
+    const state = await assistant.auto.state();
+    assert.equal(state.jevKey, true);
+    assert.deepEqual(state.settings.upstreams.map(u => [u.id, u.preset, u.key, u.allModels, u.trust, u.enabled]), [['openrouter', 'openrouter', 'jev', true, 'D1', true]]);
+    assert.equal(host.storage.autoRouting.upstreams.length, 1, 'saved');
+    assert.ok(!JSON.stringify(state).includes(KEY), 'the page never sees the key');
+    // Triage was Off: the short view's key save lets Jev decide (the person's click); review is untouched.
+    assert.equal(assistant.settings.modes['task.route'], 'off');
+    await assistant.quickKeySaved('openrouter-1');
+    assert.equal(assistant.settings.modes['task.route'], 'auto');
+    assert.equal(assistant.settings.modes['command.review'], DEFAULT_ASSISTANT_SETTINGS.modes['command.review']);
+  }
+  {
+    // Auto was set up before (even with no upstream left): the person's list stays as it is.
+    const host = hostFake({}, { 'assistant-openrouter': jevKey });
+    const saved = { upstreams: [], preference: 'cheap', cheaperFallback: false, decider: 'jev', dailyUsdCap: 1, perCardUsdCap: 0.4 };
+    const assistant = new Assistant({ host, dataDir: mkdtempSync(join(base, 'data-')), git: null, autoRouting: saved });
+    assert.deepEqual((await assistant.auto.state()).settings.upstreams, []);
+  }
+  {
+    // A key saved for another address does not count.
+    const host = hostFake({}, { 'assistant-openrouter': JSON.stringify({ origin: 'https://evil.example', value: KEY }) });
+    const assistant = new Assistant({ host, dataDir: mkdtempSync(join(base, 'data-')), git: null });
+    const state = await assistant.auto.state();
+    assert.equal(state.jevKey, false);
+    assert.deepEqual(state.settings.upstreams, []);
+  }
+  {
+    // The language: CanvasTTY tells a service its locale only at start; the pages report changes.
+    const host = hostFake();
+    const assistant = new Assistant({ host, dataDir: mkdtempSync(join(base, 'data-')), git: null, locale: 'en' });
+    assert.equal(assistant.harness.strings.report.state, 'Status');
+    assert.equal(assistant.setLocale('ru'), 'ru');
+    assert.equal(assistant.harness.strings.report.state, 'Состояние');
+    assert.equal(assistant.harness.strings.report.status.unavailable, 'ждёт первого запроса');
+    assert.equal(assistant.setLocale('de'), 'en', 'anything else is English');
+  }
+});

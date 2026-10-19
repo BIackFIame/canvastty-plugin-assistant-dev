@@ -286,7 +286,7 @@ test('report card action: built from session events and decision calls; no cost 
   assert.match(report, /Ran: 3 min · Turns: 1/u);
   assert.match(report, /Commands seen: 2 \(declined 1, sent to you 0\)/u);
   assert.match(report, /Subagents: sub sub-a/u);
-  assert.match(report, /not available to plugins/u);
+  assert.doesNotMatch(report, /Tokens and cost/u, 'no line for what plugins cannot see');
   assert.ok(report.length < 2_000);
 });
 

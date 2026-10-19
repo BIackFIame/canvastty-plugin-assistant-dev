@@ -61,7 +61,7 @@ export class Assistant {
   private readonly generations = new Map<string, number>();
   private readonly checks = new Map<string, AssistantCheckResult | { running: true } | { error: string }>();
   private readonly registered = new Set<string>();
-  private readonly locale: Locale;
+  private locale: Locale;
   /**
    * False while the saved settings could not be read (a storage error, not "nothing saved"): command review is Off
    * meanwhile, and nothing is saved over what is stored until a read succeeds (`storageRecovered`).
@@ -155,6 +155,20 @@ export class Assistant {
   }
 
   get pageLocale(): Locale { return this.locale; }
+
+  /**
+   * The language the person's pages report (CanvasTTY tells a service its locale only at start; a page's context
+   * follows the app's language). Everything the service writes for the person follows from now on.
+   */
+  setLocale(value: unknown): Locale {
+    const locale = localeOf(value);
+    if (locale === this.locale) return locale;
+    this.locale = locale;
+    this.harness.setLocale(locale);
+    this.auto.setLocale(locale);
+    this.review.setLocale(locale);
+    return locale;
+  }
 
   /** A card's effective data class (its launch's, else the default). */
   classOf(sessionId: string): DataClass { return this.classes.get(sessionId) ?? this.settings.defaultDataClass; }
@@ -406,6 +420,22 @@ export class Assistant {
         this.host.emit('check', { backendId, ...failed });
       });
     return { running: true };
+  }
+
+  /**
+   * The short view's key was saved (the person's click): Jev decides turns from now on when task triage was Off, and
+   * Auto adds its OpenRouter upstream on that key while its settings were never saved. Nothing else changes.
+   */
+  async quickKeySaved(backendId: string): Promise<null> {
+    this.keyChanged(backendId);
+    if (this.settings.modes['task.route'] === 'off') {
+      const next = structuredClone(this.settings);
+      next.modes['task.route'] = 'auto';
+      next.enabled = true;
+      await this.save(next);
+    }
+    await this.auto.adoptJevKey().catch(() => false);
+    return null;
   }
 
   keyChanged(backendId: string): void {
