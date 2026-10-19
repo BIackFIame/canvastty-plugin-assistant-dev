@@ -76,6 +76,8 @@ export class Assistant {
   readonly routing: RouteService;
   /** Each card's effective data class, so a subagent's can be clamped to its parent's. */
   private readonly classes = new Map<string, DataClass>();
+  /** Each card's triage advice, so its badge can be written again in another language. */
+  private readonly triaged = new Map<string, Advice>();
 
   constructor(options: { host: Host; dataDir: string; settings?: unknown; settingsUnavailable?: boolean; harness?: unknown; harnessUnavailable?: boolean; autoRouting?: unknown; autoRoutingUnavailable?: boolean; routing?: unknown; routingUnavailable?: boolean; locale?: unknown; transport?: typeof fetch; catalogTransport?: typeof fetch; git?: null; now?: () => number; autoTimeouts?: RouterDeps['timeouts'] }) {
     this.host = options.host;
@@ -167,6 +169,8 @@ export class Assistant {
     this.harness.setLocale(locale);
     this.auto.setLocale(locale);
     this.review.setLocale(locale);
+    // Badges already on cards are written again in the new language.
+    for (const [sessionId, advice] of this.triaged) void this.harness.setBadge(sessionId, 'triage', triageBadge(advice, this.harness.strings));
     return locale;
   }
 
@@ -210,7 +214,7 @@ export class Assistant {
     if (!session || typeof session.id !== 'string') return;
     this.harness.sessionEvent(event);
     this.routing.sessionEvent(event);
-    if (event.type === 'closed') { this.sessions.delete(session.id); this.review.forget(session.id); this.classes.delete(session.id); this.auto.sessionClosed(session.id); return; }
+    if (event.type === 'closed') { this.sessions.delete(session.id); this.review.forget(session.id); this.classes.delete(session.id); this.triaged.delete(session.id); this.auto.sessionClosed(session.id); return; }
     this.sessions.set(session.id, session);
   }
 
@@ -279,6 +283,8 @@ export class Assistant {
     const advice = await this.advice(task, dataClass, cwd, sessionId).catch(() => null);
     if (!advice || advice.kind !== 'advice') { this.review.noteTriage(sessionId, false); return; }
     this.review.noteTriage(sessionId, advice.advice.reviewStrict);
+    this.triaged.delete(sessionId); this.triaged.set(sessionId, advice.advice);
+    while (this.triaged.size > 512) this.triaged.delete(this.triaged.keys().next().value!);
     await this.harness.setBadge(sessionId, 'triage', triageBadge(advice.advice, this.harness.strings));
   }
 

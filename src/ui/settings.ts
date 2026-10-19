@@ -34,10 +34,10 @@ const STRINGS = {
   en: {
     title: 'Decision models', lead: 'Optional: with a key, Jev judges tasks and Auto picks a model for each turn; without one, simple rules are used.',
     quick: 'Auto (Jev)', autoOn: 'Auto', autoOnHelp: 'Picks a model for each turn of OpenCode cards started with Model: Auto.',
-    orKey: 'OpenRouter key', orKeyHelp: 'One key for Jev and for Auto\'s models. Stored by CanvasTTY, never shown again.', orKeySaved: 'saved', orKeyMissing: 'not saved', change: 'Save',
+    orKey: 'OpenRouter key', orKeyHelp: 'One key for Jev and for Auto\'s models. Stored by CanvasTTY, never shown again.', orKeySaved: 'Saved', orKeyMissing: 'Not saved', change: 'Save',
     prefer: 'Prefer', prefCheap: 'Cheaper', prefBalanced: 'Balanced', prefBest: 'Better', preferHelp: 'How much quality to trade for price.',
     dailyCap: 'Daily limit, $', dailyCapHelp: 'Auto stops for the day when it is spent.',
-    today: 'Today', todayLine: (usd: number, calls: number) => `$${usd.toFixed(2)} · ${calls} calls`, noDecisions: 'No turns routed yet.',
+    today: 'Today', todayLine: (usd: number, calls: number) => `$${usd.toFixed(2)} · ${calls} calls`, todaySpend: (usd: number) => `$${usd.toFixed(2)}`, noDecisions: 'No turns routed yet.',
     jevOff: 'Jev does not judge tasks now (Task triage is Off).', jevOn: 'Let Jev decide',
     jevNoText: 'Jev reads no task text now (only code facts may leave this computer).', jevText: 'Allow internal texts',
     advanced: 'Advanced: models, catalog, several models, where agents run, data, review models',
@@ -54,16 +54,17 @@ const STRINGS = {
     checkOk: (r: AssistantCheckResult) => `OK: ${r.modelLabel ?? 'the model'} answered${r.latencyMs !== null ? ` in ${r.latencyMs} ms` : ''} (${r.requests} requests).`,
     checkFail: (r: AssistantCheckResult) => `Not usable: ${r.checks.filter(c => c.status === 'fail').map(c => c.detail).join(' ') || r.failure || 'the check failed'}`,
     smart: 'Second reviewer (larger local Ollama model)', smartNone: 'None', smartModel: 'Ollama model', smartAsk: 'While learning, also ask the second reviewer',
+    addLocal: 'Add a model on your own server…',
     recent: 'Recent reviews', noRecent: 'Nothing reviewed yet.', right: 'Right', wrong: 'Wrong', more: (n: number) => `and ${n} more`,
     saved: 'Saved.', notSaved: 'Not saved: '
   },
   ru: {
     title: 'Модели решений', lead: 'Необязательно: с ключом Jev разбирает задачи, а «Авто» выбирает модель на каждый ход; без ключа работают простые правила.',
     quick: 'Авто (Jev)', autoOn: 'Авто', autoOnHelp: 'Выбирает модель на каждый ход в окнах OpenCode, запущенных с «Модель: Авто».',
-    orKey: 'Ключ OpenRouter', orKeyHelp: 'Один ключ для Jev и для моделей «Авто». Хранится в CanvasTTY и больше не показывается.', orKeySaved: 'сохранён', orKeyMissing: 'не сохранён', change: 'Сохранить',
+    orKey: 'Ключ OpenRouter', orKeyHelp: 'Один ключ для Jev и для моделей «Авто». Хранится в CanvasTTY и больше не показывается.', orKeySaved: 'Сохранён', orKeyMissing: 'Не сохранён', change: 'Сохранить',
     prefer: 'Предпочтение', prefCheap: 'Дешевле', prefBalanced: 'Сбалансированно', prefBest: 'Лучше', preferHelp: 'Сколько качества можно уступить ради цены.',
     dailyCap: 'Предел в день, $', dailyCapHelp: 'Когда он потрачен, «Авто» останавливается до завтра.',
-    today: 'Сегодня', todayLine: (usd: number, calls: number) => `$${usd.toFixed(2)} · вызовов: ${calls}`, noDecisions: 'Ходов пока не было.',
+    today: 'Сегодня', todayLine: (usd: number, calls: number) => `$${usd.toFixed(2)} · вызовов: ${calls}`, todaySpend: (usd: number) => `$${usd.toFixed(2)}`, noDecisions: 'Ходов пока не было.',
     jevOff: 'Сейчас Jev не разбирает задачи (разбор задачи выключен).', jevOn: 'Пусть решает Jev',
     jevNoText: 'Сейчас Jev не читает текст задач (с компьютера уходят только служебные признаки).', jevText: 'Разрешить внутренние тексты',
     advanced: 'Дополнительно: модели, каталог, несколько моделей, где работают агенты, данные, модели проверки',
@@ -80,6 +81,7 @@ const STRINGS = {
     checkOk: (r: AssistantCheckResult) => `Работает: ${r.modelLabel ?? 'модель'} ответила${r.latencyMs !== null ? ` за ${r.latencyMs} мс` : ''} (запросов: ${r.requests}).`,
     checkFail: (r: AssistantCheckResult) => `Не подходит: ${r.checks.filter(c => c.status === 'fail').map(c => c.detail).join(' ') || r.failure || 'проверка не прошла'}`,
     smart: 'Второй проверяющий (большая локальная модель Ollama)', smartNone: 'Нет', smartModel: 'Модель Ollama', smartAsk: 'Во время обучения тоже спрашивать второго проверяющего',
+    addLocal: 'Добавить модель на своём сервере…',
     recent: 'Последние проверки', noRecent: 'Пока ничего не проверялось.', right: 'Верно', wrong: 'Неверно', more: (n: number) => `и ещё ${n}`,
     saved: 'Сохранено.', notSaved: 'Не сохранено: '
   }
@@ -98,7 +100,7 @@ const status = document.querySelector('#status')!;
 
 const PRESETS: Array<{ id: AssistantBackendPreset; label: string; keyed: boolean; url: string | null; model: string }> = [
   { id: 'emulated', label: 'Ollama', keyed: false, url: 'http://127.0.0.1:11434', model: 'qwen3.5:9b' },
-  { id: 'typesafe', label: 'Jev · TypeSafe', keyed: true, url: null, model: 'jev-1.13.0' },
+  { id: 'typesafe', label: 'Jev (direct)', keyed: true, url: null, model: 'jev-1.13.0' },
   { id: 'openrouter', label: 'Jev · OpenRouter', keyed: true, url: null, model: 'typesafe/jev-1.13' },
   { id: 'vercel', label: 'Jev · Vercel', keyed: true, url: null, model: 'typesafe-ai/jev' },
   { id: 'laya', label: 'Laya', keyed: false, url: 'http://127.0.0.1:8000', model: 'typed-decisions' },
@@ -188,7 +190,7 @@ function backendRow(entry: AssistantBackendSettings): HTMLLIElement {
   const check = state!.checks[entry.id];
   const item = el('li', { className: 'backend', dataset: { backend: entry.id } });
   const head = el('div', { className: 'row' },
-    el('strong', { textContent: `${preset?.label ?? entry.preset} · ${entry.model ?? ''}` }),
+    el('strong', { textContent: preset?.label ?? entry.preset, title: entry.model ?? '' }),
     el('span', { className: 'muted', textContent: `${entry.url ?? ''} — ${info ? t.where[info.target] : ''}` }));
   const controls = el('div', { className: 'row' });
   controls.append(checkbox(entry.enabled, t.enabledBackend, value => void save(s => { s.backends.find(b => b.id === entry.id)!.enabled = value; }), `enabled-${entry.id}`));
@@ -238,16 +240,21 @@ function backendRow(entry: AssistantBackendSettings): HTMLLIElement {
   return item;
 }
 
+/** Decision models on a server of your own (Ollama, Laya, Eikos, a System One server): behind their own link. */
+const LOCAL_PRESETS: ReadonlySet<AssistantBackendPreset> = new Set(['emulated', 'laya', 'eikos', 'custom']);
+let showLocal = false;
+
 function addForm(): HTMLDivElement {
   const form = el('div', { className: 'add' });
   const presetSelect = el('select', { name: 'preset' });
-  for (const preset of PRESETS) presetSelect.append(el('option', { value: preset.id, textContent: preset.label }));
-  const model = el('input', { name: 'model', placeholder: t.model, value: PRESETS[0]!.model });
-  const url = el('input', { name: 'url', placeholder: t.url, value: PRESETS[0]!.url ?? '' });
+  const offered = PRESETS.filter(preset => showLocal || !LOCAL_PRESETS.has(preset.id));
+  for (const preset of offered) presetSelect.append(el('option', { value: preset.id, textContent: preset.label }));
+  const model = el('input', { name: 'model', placeholder: t.model, value: offered[0]!.model });
+  const url = el('input', { name: 'url', placeholder: t.url, value: offered[0]!.url ?? '' });
   const localInput = el('input', { type: 'checkbox', name: 'local', checked: true });
   const local = el('label', { className: 'check' }, localInput, ` ${t.local}`);
   const sync = (): void => {
-    const preset = PRESETS.find(item => item.id === presetSelect.value)!;
+    const preset = PRESETS.find(item => item.id === presetSelect.value) ?? offered[0]!;
     model.value = preset.model;
     url.value = preset.url ?? '';
     url.disabled = preset.url === null;
@@ -273,6 +280,12 @@ function addForm(): HTMLDivElement {
     void save(s => { s.backends.push(entry); });
   });
   form.append(presetSelect, model, url, add, local);
+  sync();
+  if (!showLocal) {
+    const more = el('button', { type: 'button', className: 'link-button', textContent: t.addLocal, name: 'add-local' });
+    more.addEventListener('click', () => { showLocal = true; render(); });
+    form.append(more);
+  }
   return form;
 }
 
@@ -358,8 +371,11 @@ function quickSection(): HTMLElement {
   const cap = el('input', { type: 'number', name: 'quick-daily', min: '0', max: '100', step: '0.5', value: String(a.dailyUsdCap), className: 'input' });
   cap.addEventListener('change', () => { const value = Number(cap.value); if (Number.isFinite(value) && value >= 0 && value <= 100) saveAuto(next => { next.dailyUsdCap = value; }); });
   const turns = auto.recent.filter(record => record.kind === 'turn').slice(0, 5);
-  const today = el('div', {}, el('div', { textContent: t.todayLine(auto.stats.spentToday, auto.stats.requests) }),
-    ...(turns.length ? turns.map(record => el('div', { className: 'muted', textContent: autoStrings.turnLine(record) })) : [el('div', { className: 'muted', textContent: t.noDecisions })]));
+  // Spend and paid calls are kept per day across restarts; the turns come from the decision log.
+  const calls = auto.stats.callsToday;
+  const today = el('div', {}, el('div', { textContent: typeof calls === 'number' ? t.todayLine(auto.stats.spentToday, calls) : t.todaySpend(auto.stats.spentToday) }),
+    ...(turns.length ? turns.map(record => el('div', { className: 'muted', textContent: autoStrings.turnLine(record) }))
+      : auto.stats.spentToday > 0 ? [] : [el('div', { className: 'muted', textContent: t.noDecisions })]));
   const notes: HTMLElement[] = [];
   if (auto.jevKey && s.modes['task.route'] === 'off') {
     const fix = el('button', { type: 'button', className: 'link-button', textContent: t.jevOn, name: 'quick-jev-on' });

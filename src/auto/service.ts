@@ -262,7 +262,7 @@ export class AutoService {
   // The decision models page
   // ---------------------------------------------------------------------------------------------------------------
 
-  async state(): Promise<{ jevKey: boolean; settings: AutoRoutingSettings; readable: boolean; keys: Record<string, boolean>; recent: DecisionRecord[]; stats: RouterStats & { spentToday: number; listening: boolean; cards: number }; catalog: CatalogStatus; models: Record<string, ModelRow[]>; waitingForList: string[]; outcomes: Record<string, RouteOutcome> }> {
+  async state(): Promise<{ jevKey: boolean; settings: AutoRoutingSettings; readable: boolean; keys: Record<string, boolean>; recent: DecisionRecord[]; stats: RouterStats & { spentToday: number; callsToday?: number; listening: boolean; cards: number }; catalog: CatalogStatus; models: Record<string, ModelRow[]>; waitingForList: string[]; outcomes: Record<string, RouteOutcome> }> {
     await this.adoptJevKey().catch(() => false);
     const keys: Record<string, boolean> = {};
     for (const upstream of this.settings.upstreams) keys[upstream.id] = upstream.key === 'none' ? true : !!(await this.keyFor(upstream).catch(() => null));

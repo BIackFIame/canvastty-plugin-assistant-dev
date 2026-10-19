@@ -753,3 +753,17 @@ test('short view: a saved Jev · OpenRouter key adds Auto\'s OpenRouter upstream
     assert.equal(assistant.setLocale('de'), 'en', 'anything else is English');
   }
 });
+
+test('a language switch rewrites the triage badges already on cards', async () => {
+  const host = hostFake();
+  const assistant = new Assistant({ host, dataDir: mkdtempSync(join(base, 'data-')), git: null, locale: 'en' });
+  const badges = [];
+  assistant.harness.setBadge = async (sessionId, kind, badge) => { badges.push({ sessionId, kind, badge }); };
+  assistant['triaged'].set('card-1', { difficulty: 'hard', category: 'general', isolation: 'none', reviewStrict: false, strongModel: false, suggestOrchestrator: false, underspecified: false, reasons: [] });
+  assistant.setLocale('ru');
+  await new Promise(resolve => setTimeout(resolve, 10));
+  const triage = badges.find(entry => entry.kind === 'triage');
+  assert.ok(triage, 'rewritten');
+  assert.match(`${triage.badge.text} ${triage.badge.tooltip}`, /сложная|общее|Разбор/u);
+  assert.doesNotMatch(triage.badge.text, /hard|general/u);
+});
