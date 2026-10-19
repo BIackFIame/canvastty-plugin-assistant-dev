@@ -1,5 +1,5 @@
 import { createHash } from 'node:crypto';
-import { lstatSync } from 'node:fs';
+import { lstatSync, readFileSync } from 'node:fs';
 import { homedir, tmpdir } from 'node:os';
 import { isAbsolute, join, relative, resolve, sep } from 'node:path';
 import { REVIEW_LIMITS, type AcpPermissionDetail, type AcpToolKind, type ReviewReason } from '../shared/commandReview.ts';
@@ -8,6 +8,7 @@ import { ReviewCircuit } from '../engine/bands.ts';
 import type { ShadowLabel } from '../engine/ShadowRecorder.ts';
 import { askCommandReview, reviewSummary, type CommandReviewEngine, type CommandReviewVerdict } from './commandReview.ts';
 import { sha256, verifyTestRun } from './testChain.ts';
+import { plainInspection } from './inspection.ts';
 import { computeCommandFacts, defaultGit, factPhrases, isCredentialPath, isProtectedRel, pathContext, realish, SessionWriteTracker, commandFromArgv, type CommandFacts, type GitRunner, type ReviewAction } from './commandFacts.ts';
 import { tier1, type TIER1_DENY_RULES } from './commandRules.ts';
 import { collectReferencedFiles } from './referencedFiles.ts';
@@ -139,6 +140,52 @@ interface SessionState {
 }
 
 const MAX_SESSIONS = 512;
+
+/** The real absolute path a single-file write or edit names. */
+function targetOf(request: DecideRequest, action: ReviewAction): string | null {
+  const raw = record(request.input);
+  const path = raw ? [raw.file_path, raw.filePath, raw.path].find((value): value is string => typeof value === 'string' && value.length > 0) : undefined;
+  return path ? realish(resolve(isAbsolute(path) ? path : join(action.commandCwd ?? request.agentCwd ?? request.cwd, path))) : null;
+}
+
+interface OwnFile { abs: string; content: string }
+
+/**
+ * A write or edit of a file this card wrote whole earlier (its last reviewed content hash) whose current content is
+ * still exactly that (nobody changed it since): the file's whole resulting content. Whole-file writes (Write, write,
+ * write_file, create_file) give it directly; Claude's Edit (old_string/new_string, replace_all) and MultiEdit are
+ * applied to the current content (each old string must occur exactly once unless replace_all). OpenCode's bridge
+ * shape (`edit` with only file_path and content) on an existing file may be a partial edit whose old text is gone:
+ * never. Null otherwise.
+ */
+function ownFileResult(request: DecideRequest, state: SessionState, action: ReviewAction): OwnFile | null {
+  if (request.truncated || action.inputTruncated) return null;
+  const raw = record(request.input);
+  const abs = raw ? targetOf(request, action) : null;
+  if (!raw || !abs) return null;
+  const last = state.reviewed.get(abs);
+  if (!last) return null;
+  let current: string;
+  try { current = readFileSync(abs, 'utf8'); } catch { return null; }
+  if (sha256(current) !== last) return null;
+  const name = request.tool.name;
+  if (WHOLE_FILE_WRITES.has(name)) return typeof raw.content === 'string' ? { abs, content: raw.content } : null;
+  const apply = (text: string, edit: Record<string, unknown>): string | null => {
+    const from = edit.old_string ?? edit.oldString, to = edit.new_string ?? edit.newString;
+    if (typeof from !== 'string' || typeof to !== 'string' || !from.length) return null;
+    const parts = text.split(from);
+    if (parts.length < 2) return null;
+    if (edit.replace_all === true || edit.replaceAll === true) return parts.join(to);
+    return parts.length === 2 ? parts.join(to) : null;
+  };
+  if (name === 'Edit') return ((): OwnFile | null => { const result = apply(current, raw); return result === null ? null : { abs, content: result }; })();
+  if (name === 'MultiEdit' && Array.isArray(raw.edits) && raw.edits.length && raw.edits.length <= 32) {
+    let text: string | null = current;
+    for (const edit of raw.edits) { text = text === null ? null : apply(text, record(edit) ?? {}); }
+    return text === null ? null : { abs, content: text };
+  }
+  return null;
+}
 /** Whole contents remembered per card for test commands. */
 const MAX_REVIEWED = 256;
 /** Per card: the first user turn and the latest few; each text at most this long (the engine bounds it again). */
@@ -497,7 +544,11 @@ export class ReviewService {
       const git = this.options.git === null ? null : this.options.git ?? defaultGit;
       const home = this.options.home ?? homedir();
       // Before the facts: a whole-content write is read whole (FIELD_BOUNDS.wholeContent), so it can count as seen.
-      const visible = wholeContentWrite(request.tool.name, request.input, request.truncated, action.commandCwd ?? request.cwd) && !action.inputTruncated;
+      let visible = wholeContentWrite(request.tool.name, request.input, request.truncated, action.commandCwd ?? request.cwd) && !action.inputTruncated;
+      // Under the trust chain, an edit of a file this card wrote whole (unchanged since) is reviewed as the whole file
+      // it results in, so the review sees exactly what the file will hold.
+      const own = this.options.trustChain?.() === true ? ownFileResult(request, state, action) : null;
+      if (own && !visible) { action.content = own.content; visible = true; }
       const facts = await computeCommandFacts({
         action, root: request.cwd, sessionId: request.sessionId, requestTypedByPerson: personRequest?.byPerson === true, wholeContent: visible,
         tracker: this.tracker, git, home, agentRoots: [join(home, '.claude')],
@@ -526,11 +577,18 @@ export class ReviewService {
         return null;
       }
       const verdict = await run();
-      const chained = !verdict.act && !signal.aborted && this.trustChain(request, state, rules, facts, verdict);
+      const chained = !verdict.act && !signal.aborted ? this.trustChain(request, state, rules, facts, verdict, own) : false;
       if (chained) {
-        this.noteReviewed(state, request, action, visible);
-        this.rememberVerdict(request.sessionId, summary, mode, { ...verdict, act: 'allow', outcome: 'allow', by: 'assistant', reason: 'trust-chain' }, 'allow');
-        return { verdict: 'allow', reason: 'CanvasTTY Assistant: allowed by the trust chain: the person asked its orchestrator for this task, and this writes a new file inside the project that the review is sure serves it' };
+        this.noteReviewed(state, request, action, visible, own?.abs);
+        this.rememberVerdict(request.sessionId, summary, mode, { ...verdict, act: 'allow', outcome: 'allow', by: 'assistant', reason: chained === 'own' ? 'trust-chain-own-file' : 'trust-chain' }, 'allow');
+        return { verdict: 'allow', reason: chained === 'own'
+          ? 'CanvasTTY Assistant: allowed by the trust chain: the person asked its orchestrator for this task, and this rewrites a file this card wrote earlier (unchanged since), reviewed whole'
+          : 'CanvasTTY Assistant: allowed by the trust chain: the person asked its orchestrator for this task, and this writes a new file inside the project that the review is sure serves it' };
+      }
+      const inspected = !verdict.act && !signal.aborted ? await this.inspectionChain(request, state, rules, facts, verdict, action) : false;
+      if (inspected) {
+        this.rememberVerdict(request.sessionId, summary, mode, { ...verdict, act: 'allow', outcome: 'allow', by: 'assistant', reason: 'trust-chain-inspect' }, 'allow');
+        return { verdict: 'allow', reason: 'CanvasTTY Assistant: allowed by the trust chain: the person asked its orchestrator for this task, and this only looks at files inside the project' };
       }
       const tested = !verdict.act && !signal.aborted ? await this.testChain(request, state, rules, facts, verdict, action, signal) : null;
       if (tested) {
@@ -543,7 +601,7 @@ export class ReviewService {
         return answer;
       }
       if (verdict.act === 'allow') {
-        this.noteReviewed(state, request, action, visible);
+        this.noteReviewed(state, request, action, visible, own?.abs);
         this.rememberVerdict(request.sessionId, summary, mode, verdict, 'allow');
         return { verdict: 'allow', reason: verdict.by === 'rule' ? 'CanvasTTY Assistant: a read-only command' : 'CanvasTTY Assistant: both reviews agree it serves the task' };
       }
@@ -570,7 +628,7 @@ export class ReviewService {
    * every target is inside the project, not protected, not a credential path; no tier-1 rule spoke; the light review
    * is at least TRUST_CHAIN_MIN_SERVES sure it serves the request and did not say block; the session is not suspect.
    */
-  private trustChain(request: DecideRequest, state: SessionState, rules: ReturnType<typeof tier1>, facts: CommandFacts, verdict: CommandReviewVerdict): boolean {
+  private trustChain(request: DecideRequest, state: SessionState, rules: ReturnType<typeof tier1>, facts: CommandFacts, verdict: CommandReviewVerdict, own: OwnFile | null = null): 'new' | 'own' | false {
     if (this.options.trustChain?.() !== true) return false;
     if (!state.subagent || !state.parent || state.suspect || this.circuit.personOnly(request.sessionId)) return false;
     const above = this.sessions.get(state.parent);
@@ -578,32 +636,57 @@ export class ReviewService {
     if (rules.verdict || facts.actionClass !== 'edit_in_project' || facts.kind !== 'edit' || facts.writesOutside || facts.credentialAccess || facts.protectedWrite || facts.truncated) return false;
     if (verdict.outcome === 'deny' || verdict.modelDenied || typeof verdict.probability !== 'number' || verdict.probability < TRUST_CHAIN_NAMED_MIN_SERVES) return false;
     const action = actionFromDetail(detailFromHook(request.tool.name, request.input, request.truncated));
-    if (action.inputTruncated || (action.content?.length ?? 0) > REVIEW_LIMITS.contentChars) return false;
+    if (action.inputTruncated || (own ? own.content.length : action.content?.length ?? 0) > REVIEW_LIMITS.contentChars) return false;
     const cwd = action.commandCwd ?? request.agentCwd ?? request.cwd;
-    const targets = newFileTargets(request.tool.name, request.input, request.truncated, cwd);
+    // A new file, or a whole rewrite of a file this card wrote whole earlier and nobody changed since (ownFileResult).
+    const created = newFileTargets(request.tool.name, request.input, request.truncated, cwd);
+    const kind: 'new' | 'own' = created ? 'new' : 'own';
+    const targets = created ?? (own ? [own.abs] : null);
     if (!targets) return false;
     const root = realish(resolve(request.cwd));
     const inside = (dir: string, abs: string): boolean => abs.startsWith(`${dir}${sep}`);
     if (!targets.every(path => { const abs = realish(resolve(path)); return inside(root, abs) && !isCredentialPath(abs) && !isProtectedRel(relative(root, abs).split(sep).join('/')); })) return false;
-    if (verdict.probability >= TRUST_CHAIN_MIN_SERVES) return true;
-    // Below 0.95: only a file the trusted task names, in this card's folder or one the task names, with low risks.
     const risks = Object.entries(verdict.risks ?? {}).filter(([id]) => id !== 'effect_hidden');
-    if (!risks.length || risks.some(([, p]) => typeof p !== 'number' || p > TRUST_CHAIN_LOW_RISK)) return false;
+    const low = risks.length > 0 && risks.every(([, p]) => typeof p === 'number' && p <= TRUST_CHAIN_LOW_RISK);
+    // A rewrite also needs every other risk low, at either bar.
+    if (kind === 'own' && !low) return false;
+    if (verdict.probability >= TRUST_CHAIN_MIN_SERVES) return kind;
+    // Below 0.95: only a file the trusted task names, in this card's folder or one the task names, with low risks.
+    if (!low) return false;
     const texts = [...this.ownTexts(above), ...this.ownTexts(state)];
     const folders = [realish(resolve(request.agentCwd ?? request.cwd)), ...texts.flatMap(namedFolders).map(folder => realish(resolve(root, folder)))].filter(dir => dir === root || inside(root, dir));
     return targets.every(path => {
       const abs = realish(resolve(path));
       return texts.some(text => namesFile(text, abs)) && folders.some(dir => inside(dir, abs));
-    });
+    }) ? kind : false;
   }
 
-  /** An allowed write whose whole content the review saw: its content hash, for a later test command of this card. */
-  private noteReviewed(state: SessionState, request: DecideRequest, action: ReviewAction, visible: boolean): void {
+  /**
+   * Plain read-only inspection under the trust chain: `ls`, `cat`/`head`/`tail`/`wc` of files, `pwd`, `git
+   * status`/`diff`/`log` (inspection.ts decides what is plain), only inside the project and never a protected or
+   * private path, with every risk but effect_hidden low. The task need not name it: looking is how work starts.
+   */
+  private async inspectionChain(request: DecideRequest, state: SessionState, rules: ReturnType<typeof tier1>, facts: CommandFacts, verdict: CommandReviewVerdict, action: ReviewAction): Promise<boolean> {
+    if (this.options.trustChain?.() !== true) return false;
+    if (!state.subagent || !state.parent || state.suspect || this.circuit.personOnly(request.sessionId)) return false;
+    const above = this.sessions.get(state.parent);
+    if (!above || above.subagent || !this.ownTexts(above).length) return false;
+    if (rules.verdict || facts.kind !== 'execute' || facts.actionClass !== 'read_only' || facts.network !== 'none' || facts.truncated || action.inputTruncated || facts.credentialAccess || facts.protectedWrite || facts.writesOutside) return false;
+    if (verdict.outcome === 'deny' || verdict.modelDenied) return false;
+    const risks = Object.entries(verdict.risks ?? {}).filter(([id]) => id !== 'effect_hidden');
+    if (!risks.length || risks.some(([, p]) => typeof p !== 'number' || p > TRUST_CHAIN_LOW_RISK)) return false;
+    if (!action.command) return false;
+    return plainInspection(action.command, action.commandCwd ?? request.agentCwd ?? request.cwd, request.cwd);
+  }
+
+  /**
+   * An allowed write whose whole content the review saw: its content hash, for a later test command or rewrite of
+   * this card. An edit the review saw as its resulting whole file (`ownAbs`) records that result.
+   */
+  private noteReviewed(state: SessionState, request: DecideRequest, action: ReviewAction, visible: boolean, ownAbs?: string): void {
     if (!visible || action.inputTruncated || typeof action.content !== 'string') return;
-    const raw = record(request.input);
-    const path = raw ? [raw.file_path, raw.filePath, raw.path].find((value): value is string => typeof value === 'string' && value.length > 0) : undefined;
-    if (!path || request.tool.name === 'apply_patch' || request.tool.name === 'patch') return;
-    const abs = realish(resolve(isAbsolute(path) ? path : join(action.commandCwd ?? request.agentCwd ?? request.cwd, path)));
+    const abs = ownAbs ?? targetOf(request, action);
+    if (!abs || request.tool.name === 'apply_patch' || request.tool.name === 'patch') return;
     state.reviewed.delete(abs);
     state.reviewed.set(abs, sha256(action.content));
     while (state.reviewed.size > MAX_REVIEWED) state.reviewed.delete(state.reviewed.keys().next().value!);
