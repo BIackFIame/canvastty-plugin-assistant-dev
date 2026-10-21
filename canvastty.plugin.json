@@ -18,23 +18,25 @@
     "limits:read",
     "sessions:launch",
     "sessions:control",
-    "sessions:read"
+    "sessions:read",
+    "providers:read",
+    "usage:read"
   ],
   "coreFiles": [
     {
       "path": "README.md",
-      "bytes": 32012,
-      "sha256": "d7963f8f916f7b303abd5c05deba18cf19ca3e87975af5038f02011f9507b574"
+      "bytes": 33872,
+      "sha256": "03cb18ebfa36707d418e85daa0497bb16f368200dc7c80ab0ca6cf56619222df"
     },
     {
       "path": "README.ru.md",
-      "bytes": 56821,
-      "sha256": "bb196c15eb1cbebf9128196c5e6e7a2dadb943e68fbeca01caca26ceb09d33f2"
+      "bytes": 59674,
+      "sha256": "2420dbf7fcd781c40f3948925ef49b14f813e61e27af703221f45ae447edabde"
     },
     {
       "path": "services/assistant.mjs",
-      "bytes": 1018554,
-      "sha256": "6016dfc94098eea003ed3ca3d6e4859b2b8799e3a269619bb60954c774a84a25"
+      "bytes": 1051259,
+      "sha256": "04c3249653ec8a602d68754de61524967c4ade3cda8e7e2048cbbc9c28b3c5c8"
     },
     {
       "path": "settings/assistant.html",
@@ -43,8 +45,8 @@
     },
     {
       "path": "settings/assistant.js",
-      "bytes": 160477,
-      "sha256": "e671f3e66aac9b4b98628d4bd47ac5328b5dc2d1b7e4b0b81f0bc67600393f22"
+      "bytes": 163925,
+      "sha256": "ba23110e870f6d6a5fc8e3fe1e453a37a83aa9e9efa377b60c050b86b91c3325"
     },
     {
       "path": "settings/assistant.css",
@@ -63,8 +65,8 @@
     },
     {
       "path": "apps/harness.css",
-      "bytes": 9918,
-      "sha256": "9f849740eeec3105ed37c9e25aed27a07f0e0e843d27fab41fb1826ca7f28f24"
+      "bytes": 10013,
+      "sha256": "b474c22b2de1c1beda7aa7c8cc9ae379210ab2cb4f8338e7df64af3eaae0b686"
     },
     {
       "path": "apps/flows.html",
@@ -93,8 +95,8 @@
     },
     {
       "path": "apps/tree.js",
-      "bytes": 17241,
-      "sha256": "a7792f3efad256092f0e9ebcc7d11819bc453b0f4f97e4f6bacec63e926d1b9d"
+      "bytes": 19925,
+      "sha256": "343e8a6ea60bf663876350e09fe5c456cd2db1d86fc3704e1a96b07de3988ab0"
     }
   ],
   "services": [
@@ -225,7 +227,7 @@
               },
               "accountRoutes": {
                 "type": "array",
-                "description": "Optional: canvastty-accounts__list_routes rows, once; later calls may omit them or name ready accounts in `digest`.",
+                "description": "Optional, older setups: canvastty-accounts__list_routes rows. Where the person allowed the Assistant to read Accounts, it reads accounts, pools and quotas itself and ignores these.",
                 "items": {
                   "type": "object"
                 },
@@ -288,7 +290,7 @@
               },
               "accountRoutes": {
                 "type": "array",
-                "description": "Optional: canvastty-accounts__list_routes rows, once; later calls may omit them or name ready accounts in `digest`.",
+                "description": "Optional, older setups: canvastty-accounts__list_routes rows. Where the person allowed the Assistant to read Accounts, it reads accounts, pools and quotas itself and ignores these.",
                 "items": {
                   "type": "object"
                 },
@@ -733,5 +735,15 @@
       }
     }
   ],
-  "settingsContribution": "settings"
+  "settingsContribution": "settings",
+  "uses": [
+    {
+      "plugin": "canvastty-accounts",
+      "method": "accounts.routes"
+    },
+    {
+      "plugin": "canvastty-accounts",
+      "method": "accounts.quota"
+    }
+  ]
 }

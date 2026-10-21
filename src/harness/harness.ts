@@ -2,7 +2,7 @@ import { readFileSync } from 'node:fs';
 import { mkdir, rename, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import type { Host } from '../rpc.ts';
-import { BadgeBoard, type Badge, type BadgeKind } from './badges.ts';
+import { BadgeBoard, type Badge, type BadgeKind, type BadgeSource } from './badges.ts';
 import { approvedInstructions, builtInFlows, planFlow, PlanStore, projectFlows, type FlowFileProblem, type FlowPlan } from './flows.ts';
 import { RESERVED_KEYS, visibleText, type FlowDefinition } from './flowFile.ts';
 import { HarnessError, STRINGS, type ErrorCode, type Locale, type ServiceStrings } from './i18n.ts';
@@ -232,7 +232,7 @@ export class Harness {
     });
     if (!signal) return;
     this.journals.loop(sessionId);
-    void this.badges.set(sessionId, 'loop', { text: this.strings.loopBadge, tone: 'warn', tooltip: this.strings.loopTip(signal.count, signal.what) });
+    void this.badges.set(sessionId, 'loop', () => ({ text: this.strings.loopBadge, tone: 'warn', tooltip: this.strings.loopTip(signal.count, signal.what) }));
   }
 
   // ---------------------------------------------------------------------------------------------------------------
@@ -332,7 +332,7 @@ export class Harness {
     });
     this.plans.add(plan);
     this.focus.flows = caller.id;
-    void this.badges.set(caller.id, 'flow', { text: this.strings.flowBadge, tone: 'info', tooltip: this.strings.flowTip });
+    void this.badges.set(caller.id, 'flow', () => ({ text: this.strings.flowBadge, tone: 'info', tooltip: this.strings.flowTip }));
     this.surfacesChanged();
     return {
       content: [
@@ -400,7 +400,7 @@ export class Harness {
 
   private boardChanged(board: Board): void {
     const { done, total } = this.boards.progress(board.orchestratorId);
-    void this.badges.set(board.orchestratorId, 'tasks', total ? { text: this.strings.tasksBadge(done, total), tone: 'info', tooltip: this.strings.tasksTip } : null);
+    void this.badges.set(board.orchestratorId, 'tasks', total ? () => ({ text: this.strings.tasksBadge(done, total), tone: 'info', tooltip: this.strings.tasksTip }) : null);
     this.host.emit('board', { orchestratorId: board.orchestratorId });
   }
 
@@ -512,5 +512,7 @@ export class Harness {
 
   private surfacesChanged(): void { this.host.emit('changed', null); }
 
-  setBadge(sessionId: string, kind: BadgeKind, badge: Badge | null): Promise<void> { return this.badges.set(sessionId, kind, badge); }
+  setBadge(sessionId: string, kind: BadgeKind, badge: BadgeSource): Promise<void> { return this.badges.set(sessionId, kind, badge); }
+  /** Writes every badge again in the current language. */
+  relocalize(): Promise<void> { return this.badges.relocalize(); }
 }

@@ -22,6 +22,9 @@ import type { RouterDeps } from '../auto/router.ts';
 import { decisionFromTriage, type TurnDecision } from '../auto/select.ts';
 import { RouteService } from '../route/service.ts';
 import { LimitsFeed } from '../route/limitsFeed.ts';
+import { AccountsFeed, ProvidersFeed } from '../route/peers.ts';
+import { UsageMeter, measuredUsd, effectiveTokens } from '../route/usage.ts';
+import { apiPrice, TASK_TOKENS } from '../route/engine.ts';
 import { ACCOUNTS_ID, ASSISTANT_ID, type Spawn } from '../route/engine.ts';
 import { Bindings, expectedOf, isBoundValue, isTopValue, launchAsk, ownChoice, ownTarget, targetOf, type ChildTarget, type TopTarget } from '../autopilot/binding.ts';
 import { isOwnSignInCli, openCodePlanContribution, ownSignInArgs } from '../autopilot/topLevel.ts';
@@ -85,6 +88,8 @@ const planTask = (value: unknown): string => typeof value === 'string' ? value.r
  */
 function topTargetOf(spawn: Spawn, onServer: boolean): TopTarget | null {
   const account = spawn.launchOptions[ACCOUNTS_ID]?.account;
+  // An Accounts pool is the CLI's own sign-in in another home: the model and effort go as for the CLI's own sign-in.
+  if (typeof account === 'string' && account.startsWith('pool:')) return onServer ? null : isOwnSignInCli(spawn.provider) ? ownTarget(spawn.model ?? null, spawn.effort ?? null) : !spawn.model && !spawn.effort ? 'off' : null;
   if (typeof account === 'string' && account !== 'none') return onServer ? null : 'off';
   if (spawn.launchOptions[ASSISTANT_ID]?.model === 'auto') return onServer ? null : 'auto';
   if (spawn.provider === 'opencode' && spawn.model && spawn.model.includes('/')) return onServer ? null : `plan:${spawn.model}`;
@@ -118,6 +123,12 @@ export class Assistant {
   readonly routing: RouteService;
   /** Limit windows read by this service where the core allows it (else the page forwards them). */
   readonly limitsFeed: LimitsFeed;
+  /** Accounts' shared reads (routes, pools, quota) through plugins.request, after the person approved the pair. */
+  readonly accounts: AccountsFeed;
+  /** CanvasTTY's providers.list (providers:read). */
+  readonly providers: ProvidersFeed;
+  /** CanvasTTY's measured usage of this plugin's cards (usage:read). */
+  readonly usage: UsageMeter;
   /** Each card's effective data class, so a subagent's can be clamped to its parent's. */
   private readonly classes = new Map<string, DataClass>();
   /** Each card's triage advice, so its badge can be written again in another language. */
@@ -184,7 +195,12 @@ export class Assistant {
       ...(options.autoTimeouts ? { timeouts: options.autoTimeouts } : {})
     });
     this.bindings = new Bindings(options.now);
+    this.accounts = new AccountsFeed(options.host, options.now);
+    this.providers = new ProvidersFeed(options.host, options.now);
+    this.usage = new UsageMeter(options.host, options.now);
     this.routing = new RouteService({
+      accounts: this.accounts, providersFeed: this.providers, usage: this.usage,
+      serverLoad: label => [...this.leaves.values(), ...this.started.values()].filter(entry => entry.server === label).length,
       bindSpawn: (callerId, spawn, decisionId, orchestrate) => this.bindSpawn(callerId, spawn, decisionId, orchestrate),
       host: options.host, dataDir: options.dataDir, saved: options.routing, savedUnavailable: options.routingUnavailable === true,
       enabled: () => this.harness.settings.routing,
@@ -209,11 +225,25 @@ export class Assistant {
     this.review = new ReviewService({
       engine: this.engine, settings: () => this.settings, locale, trustChain: () => this.harness.settings.trustChain,
       ...(options.git === null ? { git: null } : {}),
-      suggest: (sessionId, verdict, summary) => { void this.harness.setBadge(sessionId, 'review', suggestionBadge(verdict, summary, this.harness.strings)); }
+      suggest: (sessionId, verdict, summary) => { void this.harness.setBadge(sessionId, 'review', () => suggestionBadge(verdict, summary, this.harness.strings)); }
     });
   }
 
   get pageLocale(): Locale { return this.locale; }
+
+  /**
+   * `canvastty.activity`: `limit.exhausted` (CanvasTTY saw the default login's window of a CLI used up, provider-wide)
+   * rests that CLI's own sign-in routes until the reset; other activity is ignored.
+   */
+  activity(params: unknown): void {
+    if (this.routing.limitExhausted(params)) void this.limitsFeed.read();
+  }
+
+  /** A card action: the toast in the language the person used when choosing it (CanvasTTY with the locale in invoke). */
+  cardAction(actionId: string, sessionId: string, session: SessionSummary | undefined, locale?: unknown): { message: string; tone: 'info' | 'warn' | 'error' } {
+    if (locale === 'en' || locale === 'ru') this.setLocale(locale);
+    return this.harness.cardAction(actionId, sessionId, session);
+  }
 
   /**
    * The language the person's pages report (CanvasTTY tells a service its locale only at start; a page's context
@@ -226,8 +256,8 @@ export class Assistant {
     this.harness.setLocale(locale);
     this.auto.setLocale(locale);
     this.review.setLocale(locale);
-    // Badges already on cards are written again in the new language.
-    for (const [sessionId, advice] of this.triaged) void this.harness.setBadge(sessionId, 'triage', triageBadge(advice, this.harness.strings));
+    // Badges already on cards are written again in the new language (each kept as how to write it).
+    void this.harness.relocalize();
     return locale;
   }
 
@@ -272,8 +302,8 @@ export class Assistant {
     this.harness.sessionEvent(event);
     this.routing.sessionEvent(event);
     const ended = event.type === 'closed' || event.type === 'exited' || session.status === 'exited';
-    if (ended) this.bindings.ended(session.id);
-    if (event.type === 'closed') { this.autoTop.delete(session.id); this.leaves.delete(session.id); this.started.delete(session.id); this.sessions.delete(session.id); this.review.forget(session.id); this.classes.delete(session.id); this.triaged.delete(session.id); this.auto.sessionClosed(session.id); return; }
+    if (ended) { this.bindings.ended(session.id); this.usage.ended(session.id); }
+    if (event.type === 'closed') { this.usage.closed(session.id); this.autoTop.delete(session.id); this.leaves.delete(session.id); this.started.delete(session.id); this.sessions.delete(session.id); this.review.forget(session.id); this.classes.delete(session.id); this.triaged.delete(session.id); this.auto.sessionClosed(session.id); return; }
     this.sessions.set(session.id, session);
   }
 
@@ -492,7 +522,7 @@ export class Assistant {
     const busy = (label: string): number => [...this.leaves.values(), ...this.started.values()].filter(entry => entry.server === label).length;
     const servers = onServer ? route.servers.filter(entry => busy(entry.label) < entry.maxParallel) : [];
     if (onServer && !servers.length) return { started: false, code: 'noServer' };
-    const { candidates, dropped } = this.routing.orchestratorRoutes(view, dataClass, onServer ? { clis: [...new Set(servers.flatMap(entry => entry.clis))], ownSignIn: true } : {});
+    const { candidates, dropped } = await this.routing.orchestratorRoutes(view, dataClass, onServer ? { clis: [...new Set(servers.flatMap(entry => entry.clis))], ownSignIn: true } : {});
     const chosen = candidates.map(candidate => ({ candidate, target: topTargetOf(candidate.spawn, onServer) })).find(entry => entry.target !== null);
     if (!chosen) return { started: false, code: 'noRoute', ...(dropped.length ? { detail: dropped.join('; ') } : {}) };
     const { candidate } = chosen;
@@ -605,7 +635,7 @@ export class Assistant {
     this.review.noteTriage(sessionId, advice.advice.reviewStrict);
     this.triaged.delete(sessionId); this.triaged.set(sessionId, advice.advice);
     while (this.triaged.size > 512) this.triaged.delete(this.triaged.keys().next().value!);
-    await this.harness.setBadge(sessionId, 'triage', triageBadge(advice.advice, this.harness.strings));
+    await this.harness.setBadge(sessionId, 'triage', () => triageBadge(advice.advice, this.harness.strings));
   }
 
   /** task.route + the policy. `kind` says why there is no advice (off, learning, no answer). */
@@ -691,9 +721,27 @@ export class Assistant {
    * The Agent tree card: who started whom, with each card's model, status, task, route cost and times. Built on
    * request from what the service already holds; nothing is stored for it.
    */
-  treeView(): TreeView & { focus: string | null; now: number } {
+  async treeView(): Promise<TreeView & { focus: string | null; now: number }> {
+    const cards = this.harness.cards();
+    // Measured tokens per card where the core says (usage:read), read within a short deadline; older answers stay.
+    await this.usage.refreshCards(cards.map(card => card.id).slice(0, 64));
+    const { catalog } = (() => { try { return this.auto.routingIndex(); } catch { return { catalog: null }; } })();
+    const perTask = TASK_TOKENS.medium.input + TASK_TOKENS.medium.output;
     const view = buildTree({
-      cards: this.harness.cards(),
+      cards,
+      usage: id => {
+        const used = this.usage.peekCard(id);
+        if (!used) return null;
+        const route = this.routing.routeOf(id);
+        const identity = route?.identity ?? null;
+        const usd = route && route.costBasis === 'api' && catalog ? measuredUsd(used.totals, apiPrice(catalog, identity)) : null;
+        const tokens = effectiveTokens(used.totals);
+        return {
+          tokens: Math.round(tokens), input: used.totals.input, output: used.totals.output, cached: used.totals.cached,
+          usd, share: Math.round((tokens * this.routing.settings.expectedShare.medium / perTask) * 100) / 100,
+          ...(used.totals.providerCostEstimate !== undefined ? { providerEstimate: Math.round(used.totals.providerCostEstimate * 10_000) / 10_000 } : {})
+        };
+      },
       route: id => this.routing.routeOf(id),
       task: id => this.review.taskOf(id),
       planChildren: id => this.bindings.planOf(id),

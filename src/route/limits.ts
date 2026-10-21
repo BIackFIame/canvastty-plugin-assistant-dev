@@ -93,10 +93,17 @@ export interface SubscriptionQuota {
 export const PER_LAUNCH_PERCENT = 2;
 
 /**
+ * This plugin's cards' measured use of a CLI's own sign-in since its windows were read (CanvasTTY's usage.summary):
+ * the tokens and the share of the window they stand for (tokens × the person's expected share per task ÷ a task's
+ * tokens). Replaces the per-launch estimate where the core measures usage.
+ */
+export interface MeasuredSpend { percent: number; tokens: number }
+
+/**
  * Reads one provider's windows under the reserve; stale or never read is `unknown`. `launchesSinceRead`: routed
  * launches on it since the read, each assumed to use PER_LAUNCH_PERCENT of the tightest window until the next read.
  */
-export function quotaOf(limits: ProviderLimits | undefined, reserve: number, now: number, launchesSinceRead = 0): SubscriptionQuota {
+export function quotaOf(limits: ProviderLimits | undefined, reserve: number, now: number, launchesSinceRead = 0, measured: MeasuredSpend | null = null): SubscriptionQuota {
   const unknown = (note: string, code: SubscriptionQuota['code'], readAt: number | null = null): SubscriptionQuota => ({ state: 'unknown', headroom: null, pace: null, window: null, readAt, note, code });
   if (!limits) return unknown('not read yet', 'unread');
   if (limits.state === 'unavailable') return unknown(limits.reason ? `not readable (${limits.reason})` : 'not readable', 'unreadable');
@@ -116,9 +123,12 @@ export function quotaOf(limits: ProviderLimits | undefined, reserve: number, now
     }
   }
   if (!tight) return { state: 'presumed-reset', headroom: null, pace: null, window: null, readAt: limits.fetchedAt, note: 'its windows have probably reset since the last read', code: 'reset' };
-  const spent = Math.max(0, Math.min(launchesSinceRead, 100)) * PER_LAUNCH_PERCENT;
+  // Measured tokens since the read where the core says (usage:read), else ~2 % per routed launch.
+  const spent = measured ? Math.max(0, Math.min(measured.percent, 100)) : Math.max(0, Math.min(launchesSinceRead, 100)) * PER_LAUNCH_PERCENT;
   if (spent > 0 && headroom > 0) headroom = Math.max(0.001, headroom - spent);
-  const estimated = spent > 0 ? `; ${launchesSinceRead} routed launch(es) since the read counted as ~${spent}%` : '';
+  const estimated = spent <= 0 ? '' : measured
+    ? `; ${Math.round(measured.tokens).toLocaleString('en-US')} tokens measured since the read counted as ~${Math.round(spent * 10) / 10}%`
+    : `; ${launchesSinceRead} routed launch(es) since the read counted as ~${spent}%`;
   const view = { label: tight.label, usedPercent: tight.usedPercent, minutes: tight.windowMinutes };
   if (headroom <= 0) return { state: 'exhausted', headroom: 0, pace: paced ? round(pace) : null, window: view, readAt: limits.fetchedAt, note: 'no headroom above the reserve', code: 'no-headroom' };
   return { state: presumed ? 'presumed-reset' : 'known', headroom: round(headroom), pace: paced ? round(pace) : null, window: view, readAt: limits.fetchedAt, note: `${presumed ? 'one window has probably reset since the last read' : ''}${estimated}`.replace(/^; /u, ''), code: presumed ? 'reset' : '' };

@@ -24,6 +24,16 @@ export function withoutPolicy(manifest) {
   }) };
 }
 
+/**
+ * The core-all keys (shared reads `uses`, the `providers:read` and `usage:read` permissions): an older core refuses
+ * them. Every read behind them is feature-detected at run time, so the tests use the manifest without them there,
+ * which is exactly how the service then runs (orchestrators' rows, ~2 % per launch).
+ */
+export function withoutCoreAllKeys(manifest) {
+  const { uses: _uses, ...rest } = manifest;
+  return { ...rest, permissions: manifest.permissions.filter(permission => permission !== 'providers:read' && permission !== 'usage:read') };
+}
+
 const declaresPolicy = manifest => manifest.services.some(service => service.launch?.policy !== undefined);
 
 /**
@@ -32,8 +42,8 @@ const declaresPolicy = manifest => manifest.services.some(service => service.lau
  * scoped form and it was dropped, or the manifest has none: the 1.8.x variant).
  */
 export function manifestForCore(validatePluginManifest, manifest) {
-  let current = manifest, localized = true, policy = true;
-  for (let attempt = 0; attempt < 3; attempt++) {
+  let current = manifest, localized = true, policy = true, coreAll = true;
+  for (let attempt = 0; attempt < 4; attempt++) {
     try {
       validatePluginManifest(current);
       return { manifest: current, localized, policy: policy && declaresPolicy(current) };
@@ -41,6 +51,7 @@ export function manifestForCore(validatePluginManifest, manifest) {
       const message = String(error?.message);
       if (localized && /unknown field: [A-Za-z]+\.(?:ru|en|zh-CN)\b/u.test(message)) { current = withoutLocalizedKeys(current); localized = false; continue; }
       if (policy && /launch policy/iu.test(message)) { current = withoutPolicy(current); policy = false; continue; }
+      if (coreAll && /unknown field: uses\b|permission[^.]*(providers:read|usage:read)|(providers:read|usage:read)/iu.test(message)) { current = withoutCoreAllKeys(current); coreAll = false; continue; }
       throw error;
     }
   }

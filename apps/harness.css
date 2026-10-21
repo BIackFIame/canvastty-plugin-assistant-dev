@@ -119,6 +119,7 @@ button, input, select, textarea { font: inherit; color: inherit; }
 .tree-node__meta { display: flex; flex-wrap: wrap; align-items: center; gap: 0.31rem 0.77rem; font-size: 0.92rem; }
 .tree-cost--plan { color: var(--secondary); }
 .tree-elapsed { color: var(--text-muted); font-variant-numeric: tabular-nums; }
+.tree-tokens, .tree-estimate { color: var(--text-muted); font-variant-numeric: tabular-nums; }
 .tree-toggle { display: inline-flex; align-items: center; gap: 0.38rem; min-height: 1.85rem; padding: 0.08rem 0.54rem; border: 0; border-radius: 0.54rem; background: var(--surface); color: var(--text); cursor: pointer; }
 .tree-toggle:focus-visible { outline: 0.15rem solid var(--secondary); outline-offset: 0.15rem; }
 .tree-chevron { width: 0.46rem; height: 0.46rem; border-right: 0.12rem solid currentColor; border-bottom: 0.12rem solid currentColor; transform: rotate(-45deg); transition: transform .12s; }

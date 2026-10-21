@@ -176,7 +176,7 @@ test('service: an Auto orchestrator and its routed child become a tree with mode
   assistant.sessionEvent({ type: 'created', session: { id: 'kid-00001', provider: spawn.provider, role: 'subagent', parentSessionId: 'orch-0001', title: 'Docs', status: 'working', exitCode: null, startedAt: now, cwd, workingDirectory: cwd } });
   assert.ok(emitted.some(entry => entry.event === 'changed'), 'an open tree reloads on new cards');
 
-  let view = assistant.treeView();
+  let view = await assistant.treeView();
   assert.equal(view.trees.length, 1);
   const top = view.trees[0].root;
   assert.equal(top.task, 'Ship the agent tree');
@@ -193,17 +193,17 @@ test('service: an Auto orchestrator and its routed child become a tree with mode
   // The child finishes: done, with the time it ended; then its card closes.
   now += 90_000;
   assistant.sessionEvent({ type: 'exited', session: { id: 'kid-00001', provider: spawn.provider, role: 'subagent', parentSessionId: 'orch-0001', title: 'Docs', status: 'idle', exitCode: 0, startedAt: now - 90_000, cwd, workingDirectory: cwd } });
-  view = assistant.treeView();
+  view = await assistant.treeView();
   assert.equal(view.trees[0].root.children[0].status, 'done');
   assert.equal(view.trees[0].root.children[0].endedAt, now);
   // The card action points an open tree at this card.
   const toast = assistant.harness.cardAction('agent-tree', 'kid-00001', undefined);
   assert.match(toast.message, /Agent tree now shows "Docs"/u);
-  assert.equal(assistant.treeView().focus, 'kid-00001');
+  assert.equal((await assistant.treeView()).focus, 'kid-00001');
   assert.ok(emitted.some(entry => entry.event === 'focus' && entry.data.tree === 'kid-00001'));
   assistant.sessionEvent({ type: 'closed', session: { id: 'kid-00001', role: 'subagent' } });
   assistant.sessionEvent({ type: 'closed', session: { id: 'orch-0001', role: 'orchestrator' } });
-  assert.deepEqual(assistant.treeView().trees, []);
+  assert.deepEqual((await assistant.treeView()).trees, []);
   await assistant.harness.flushWrites();
 });
 

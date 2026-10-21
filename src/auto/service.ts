@@ -1,7 +1,7 @@
 import { join } from 'node:path';
 import type { Host } from '../rpc.ts';
 import type { Locale } from '../harness/i18n.ts';
-import type { Badge } from '../harness/badges.ts';
+import type { BadgeSource } from '../harness/badges.ts';
 import type { DataClass, DataClassMode } from '../shared/settings.ts';
 import bundledCatalog from './catalog/bundled.json' with { type: 'json' };
 import { CatalogStore, type CatalogStatus, type RoutingCatalog } from './catalog/catalog.ts';
@@ -43,7 +43,7 @@ export interface AutoServiceOptions {
   decide?(text: string, grant: LaunchGrant, signal: AbortSignal): Promise<TurnDecision | null>;
   /** A new user turn of a card (its latest user text), for the card's command review. */
   turn?(text: string, grant: LaunchGrant): void;
-  publishBadge(sessionId: string, badge: Badge | null): void;
+  publishBadge(sessionId: string, badge: BadgeSource): void;
   /** The request-time OpenRouter check (tests pass one with their own lookup). */
   jevOnly?: JevOnlyHosts;
   /** At most this many calls at once on a subscription-like upstream (the person marked its address flat-rate). */
@@ -113,7 +113,7 @@ export class AutoService {
       key: upstream => this.keyFor(upstream),
       ...(options.decide ? { decide: options.decide } : {}),
       ...(options.turn ? { turn: options.turn } : {}),
-      badge: (sessionId, model) => options.publishBadge(sessionId, model ? { text: badgeText(model.model), tone: 'neutral', tooltip: AUTO_STRINGS[this.options.locale].badgeTip(model.tier, model.source) } : null),
+      badge: (sessionId, model) => options.publishBadge(sessionId, model ? () => ({ text: badgeText(model.model), tone: 'neutral', tooltip: AUTO_STRINGS[this.options.locale].badgeTip(model.tier, model.source) }) : null),
       log: (level, message) => options.host.log(level, message),
       ...(options.parallelCap ? { parallelCap: options.parallelCap } : {}),
       noProviderMessage: () => AUTO_STRINGS[this.options.locale].noProvider,

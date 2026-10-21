@@ -21,6 +21,10 @@ export interface RouteState {
   feed?: { mode: 'probing' | 'core' | 'page-only'; lastReadAt: number | null; lastError: string | null };
   quotaEvents?: Array<{ at: number; provider: string; kind: string; note: string }>;
   accounts: { at: number; rows: Array<{ provider: string; accountId: string; account?: string; model: string; endpoint: string; state: string }> } | null;
+  /** Accounts' pools of the person's own sign-ins, as Accounts shared them. */
+  pools?: { at: number; pools: Array<{ cli: string; label: string; members: number; ready: number; quota: { remainingPercent: number | null } | null }> } | null;
+  /** What the Assistant reads itself: Accounts' shared data (plugins.request), providers.list, measured usage. */
+  peers?: { accounts: { mode: string; reason: string | null; routesAt: number | null }; providers: string; usage: string };
   cooldowns: Array<{ signIn: string; until: number; reason: string }>;
   recent: RouteRecord[];
   exploration: Array<{ identity: string; n: number; ok: number; incumbent: number | null; verdict: 'pending' | 'use' | 'retire' }>;
@@ -59,6 +63,12 @@ export const ROUTE_PAGE_STRINGS = {
     resolved: (model: string, identity: string | null, from: string, asOf: string) => identity === null ? `${model} → no score (unknown model or alias)` : from === 'id' ? `${model} → scored as ${identity}` : `${model} → ${identity} (${from === 'person' ? 'your alias' : `alias table ${asOf}`})`,
     add: 'Add', newPlan: 'Declare a subscription or plan', name: 'Name (Max, Pro, GLM plan…)', cli: 'CLI', planKind: 'Kind',
     accounts: 'Model accounts (CanvasTTY Accounts)', accountsSeen: (age: string) => `As the orchestrator last passed them, ${age}.`, accountsNone: 'Not passed by an orchestrator since the Assistant started.',
+    accountsShared: (age: string) => `Read from CanvasTTY Accounts itself, ${age}.`,
+    accountsApprove: 'CanvasTTY Accounts can share its accounts, pools and their quota with the Assistant: allow it in Settings → Agents → Extension native code, under the Assistant.',
+    accountsChanged: 'Accounts changed what it shares since you allowed it: allow it again in Settings → Agents → Extension native code.',
+    accountsUnreadable: (reason: string) => `Accounts' data cannot be read now (${reason}).`,
+    pools: (label: string, ready: number, members: number, left: string) => `${label}: ${ready} of ${members} free${left}`,
+    poolLeft: (percent: number) => ` · ${percent}% left`,
     flatRate: 'flat-rate plan',
     servers: 'Servers', serversOn: 'Let orchestrators run independent leaf tasks on these servers', serverList: 'Servers (name=cli+cli/at once, …)',
     serversHelp: 'Names as in the Environments plugin\'s servers. A leaf card runs on the server\'s own CLI sign-in; nothing from this computer goes there.',
@@ -110,6 +120,12 @@ export const ROUTE_PAGE_STRINGS = {
     resolved: (model: string, identity: string | null, from: string, asOf: string) => identity === null ? `${model} → без оценки (неизвестная модель или псевдоним)` : from === 'id' ? `${model} → оценивается как ${identity}` : `${model} → ${identity} (${from === 'person' ? 'ваш псевдоним' : `таблица псевдонимов ${asOf}`})`,
     add: 'Добавить', newPlan: 'Объявить подписку или план', name: 'Название (Max, Pro, план GLM…)', cli: 'CLI', planKind: 'Вид',
     accounts: 'Аккаунты моделей (CanvasTTY Accounts)', accountsSeen: (age: string) => `Как их последний раз передал оркестратор, ${age}.`, accountsNone: 'С запуска Ассистента оркестратор их не передавал.',
+    accountsShared: (age: string) => `Прочитано у CanvasTTY Accounts напрямую, ${age}.`,
+    accountsApprove: 'CanvasTTY Accounts может передавать Ассистенту свои аккаунты, пулы и их квоты: разрешите это в Настройки → Агенты → Нативный код расширений, у Ассистента.',
+    accountsChanged: 'Accounts изменил то, чем делится, после вашего разрешения: разрешите снова в Настройки → Агенты → Нативный код расширений.',
+    accountsUnreadable: (reason: string) => `Данные Accounts сейчас не читаются (${reason}).`,
+    pools: (label: string, ready: number, members: number, left: string) => `${label}: свободно ${ready} из ${members}${left}`,
+    poolLeft: (percent: number) => ` · осталось ${percent}%`,
     flatRate: 'фиксированный тариф',
     servers: 'Серверы', serversOn: 'Разрешить оркестраторам запускать независимые листовые задачи на этих серверах', serverList: 'Серверы (имя=cli+cli/одновременно, …)',
     serversHelp: 'Имена — как у серверов в плагине Environments. Листовое окно работает на собственном входе CLI на сервере; с этого компьютера туда ничего не уходит.',
@@ -190,9 +206,18 @@ export function renderRouting(state: RouteState, t: Strings, page: RoutePageHost
 
   // Model accounts the orchestrator passed.
   section.append(el('h2', { textContent: t.accounts }));
+  const shared = state.peers?.accounts;
+  if (shared?.mode === 'refused') {
+    section.append(el('p', { className: 'muted', dataset: { route: 'accounts-share' }, textContent: shared.reason === 'not_approved' ? t.accountsApprove : shared.reason === 'approval_changed' ? t.accountsChanged : t.accountsUnreadable(shared.reason ?? '?') }));
+  }
+  if (state.pools?.pools.length) {
+    const pools = el('ul', { className: 'recent', dataset: { route: 'pools' } });
+    for (const pool of state.pools.pools) pools.append(el('li', { textContent: t.pools(pool.label, pool.ready, pool.members, pool.quota?.remainingPercent != null ? t.poolLeft(Math.round(pool.quota.remainingPercent)) : '') }));
+    section.append(pools);
+  }
   if (!state.accounts) section.append(el('p', { className: 'muted', textContent: t.accountsNone }));
   else {
-    section.append(el('p', { className: 'muted', textContent: t.accountsSeen(ago(state.accounts.at)) }));
+    section.append(el('p', { className: 'muted', textContent: shared?.mode === 'ready' ? t.accountsShared(ago(state.accounts.at)) : t.accountsSeen(ago(state.accounts.at)) }));
     const rows = el('ul', { className: 'recent', dataset: { route: 'accounts' } });
     for (const host of [...new Set(state.accounts.rows.map(row => row.endpoint))]) {
       const of = state.accounts.rows.filter(row => row.endpoint === host);

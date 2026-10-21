@@ -5,15 +5,15 @@ import { el, errorText, host, onContext, SERVICE, type PageLocale } from './comm
 
 type Status = 'running' | 'waiting' | 'approval' | 'done' | 'failed';
 type Cost =
-  | { kind: 'usd'; low: number; high: number }
-  | { kind: 'plan'; label: string; share: number | null; window: string | null }
+  | { kind: 'usd'; low: number; high: number; measured?: boolean }
+  | { kind: 'plan'; label: string; share: number | null; window: string | null; measured?: boolean }
   | { kind: 'launch'; label: string; used: number; allowance: number; windowHours: number }
   | { kind: 'flat'; label: string };
 interface TreeNode {
   id: string; title: string; role: string; provider: string; model: string | null; status: Status; task: string | null;
-  cost: Cost | null; startedAt: number | null; endedAt: number | null; planChildren: number | null; descendants: number; children: TreeNode[];
+  cost: Cost | null; usage?: { tokens: number; providerEstimate?: number } | null; startedAt: number | null; endedAt: number | null; planChildren: number | null; descendants: number; children: TreeNode[];
 }
-interface Totals { agents: number; running: number; usd: { low: number; high: number } | null; plans: Array<{ label: string; share: number | null; window: string | null; cards: number; launches: number }>; unpriced: number }
+interface Totals { agents: number; running: number; usd: { low: number; high: number } | null; plans: Array<{ label: string; share: number | null; window: string | null; cards: number; launches: number }>; unpriced: number; tokens?: number | null; providerEstimate?: number | null }
 interface View { trees: Array<{ root: TreeNode; totals: Totals }>; focus: string | null; now: number }
 
 const PROVIDERS: Record<string, string> = {
@@ -27,6 +27,7 @@ const ruPlural = (n: number, one: string, few: string, many: string): string => 
 };
 const money = (value: number): string => value === 0 ? '0' : value < 0.01 ? '<0.01' : value < 10 ? value.toFixed(2) : value.toFixed(0);
 const usdText = (cost: { low: number; high: number }): string => cost.low === cost.high ? `$${money(cost.low)}` : `$${money(cost.low)}–${money(cost.high)}`;
+const tokensText = (n: number): string => n >= 1_000_000 ? `${(n / 1_000_000).toFixed(1)}M` : n >= 1_000 ? `${Math.round(n / 1_000)}k` : String(Math.round(n));
 const share = (value: number): string => value < 1 ? '<1' : String(Math.round(value));
 /** Limit windows come labelled in English ("5 h", "7 d"): the Russian page says ч and д. */
 const ruWindow = (label: string | null): string => (label ?? '').replace(/(\d+)\s*h\b/gu, '$1 ч').replace(/(\d+)\s*d\b/gu, '$1 д').replace(/\bweek\b/gu, 'неделя');
@@ -47,7 +48,9 @@ const STRINGS = {
       if (cost.kind === 'launch') return `plan · 1 launch (${cost.used}/${cost.allowance} in ${cost.windowHours} h)`;
       return 'plan · flat rate';
     },
-    costTip: (cost: Cost | null): string => !cost ? 'The Assistant did not route this card, so it has no estimate.' : cost.kind === 'usd' ? 'Estimated price of one task on this model.' : `Runs on ${cost.label}: a share of the plan, not money.`,
+    costTip: (cost: Cost | null): string => !cost ? 'The Assistant did not route this card, so it has no estimate.' : cost.kind === 'usd' ? (cost.measured ? 'Measured tokens of this card at the model\'s listed price (cache reads at a tenth).' : 'Estimated price of one task on this model.') : cost.kind === 'plan' && cost.measured ? `Runs on ${cost.label}: its measured tokens as a share of the plan, not money.` : `Runs on ${cost.label}: a share of the plan, not money.`,
+    tokens: (n: number) => `${tokensText(n)} tokens`, tokensTip: 'Measured by CanvasTTY from the agent\'s own usage log.',
+    providerEstimate: (usd: number) => `≈$${money(usd)} (agent's estimate)`, providerEstimateTip: 'The agent\'s own price estimate from its model list (OpenCode), not a bill.',
     elapsed: (ms: number): string => {
       const s = Math.max(0, Math.floor(ms / 1000)), m = Math.floor(s / 60), h = Math.floor(m / 60);
       return h ? `${h}h ${String(m % 60).padStart(2, '0')}m` : m ? `${m}m ${String(s % 60).padStart(2, '0')}s` : `${s}s`;
@@ -72,7 +75,9 @@ const STRINGS = {
       if (cost.kind === 'launch') return `план · 1 запуск (${cost.used}/${cost.allowance} за ${cost.windowHours} ч)`;
       return 'план · без лимита по цене';
     },
-    costTip: (cost: Cost | null): string => !cost ? 'Помощник не выбирал маршрут для этого окна, оценки нет.' : cost.kind === 'usd' ? 'Оценка цены одной задачи на этой модели.' : `Работает на «${cost.label}»: доля плана, а не деньги.`,
+    costTip: (cost: Cost | null): string => !cost ? 'Помощник не выбирал маршрут для этого окна, оценки нет.' : cost.kind === 'usd' ? (cost.measured ? 'Измеренные токены этого окна по цене модели из каталога (чтение кэша — десятая часть).' : 'Оценка цены одной задачи на этой модели.') : cost.kind === 'plan' && cost.measured ? `Работает на «${cost.label}»: измеренные токены как доля плана, а не деньги.` : `Работает на «${cost.label}»: доля плана, а не деньги.`,
+    tokens: (n: number) => `${tokensText(n)} токенов`, tokensTip: 'Измерено CanvasTTY по журналу расхода самого агента.',
+    providerEstimate: (usd: number) => `≈$${money(usd)} (оценка агента)`, providerEstimateTip: 'Собственная оценка цены агента по его списку моделей (OpenCode), не счёт.',
     elapsed: (ms: number): string => {
       const s = Math.max(0, Math.floor(ms / 1000)), m = Math.floor(s / 60), h = Math.floor(m / 60);
       return h ? `${h} ч ${String(m % 60).padStart(2, '0')} мин` : m ? `${m} мин ${String(s % 60).padStart(2, '0')} с` : `${s} с`;
@@ -128,6 +133,8 @@ function nodeCard(node: TreeNode): HTMLElement {
   const elapsed = elapsedOf(node);
   const meta: Array<HTMLElement | null> = [
     el('span', { className: `tree-cost${node.cost && node.cost.kind !== 'usd' ? ' tree-cost--plan' : ''}`, textContent: t.cost(node.cost), title: t.costTip(node.cost) }),
+    node.usage ? el('span', { className: 'tree-tokens', textContent: t.tokens(node.usage.tokens), title: t.tokensTip }) : null,
+    node.usage?.providerEstimate !== undefined ? el('span', { className: 'tree-estimate', textContent: t.providerEstimate(node.usage.providerEstimate), title: t.providerEstimateTip }) : null,
     elapsed ? el('span', { className: 'tree-elapsed', textContent: elapsed, dataset: { started: String(node.startedAt), ...(node.endedAt !== null ? { ended: String(node.endedAt) } : {}) } }) : null
   ];
   if (node.children.length) {
@@ -166,6 +173,7 @@ function summary(totals: Totals): string {
   const parts = [t.agents(totals.agents), t.running(totals.running)];
   if (totals.usd) parts.push(usdText(totals.usd));
   if (totals.plans.length) parts.push(totals.usd ? `+ ${t.plan}` : t.plan);
+  if (totals.tokens) parts.push(t.tokens(totals.tokens));
   return parts.join(' · ');
 }
 

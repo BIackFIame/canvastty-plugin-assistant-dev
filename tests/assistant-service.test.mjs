@@ -761,16 +761,42 @@ test('OpenRouter serves only Jev: the short view\'s key adds no Auto upstream; a
   }
 });
 
-test('a language switch rewrites the triage badges already on cards', async () => {
+test('a language switch (canvastty.locale.changed or a page) rewrites the badges already on cards: triage, tasks, loop', async () => {
   const host = hostFake();
   const assistant = new Assistant({ host, dataDir: mkdtempSync(join(base, 'data-')), git: null, locale: 'en' });
-  const badges = [];
-  assistant.harness.setBadge = async (sessionId, kind, badge) => { badges.push({ sessionId, kind, badge }); };
-  assistant['triaged'].set('card-1', { difficulty: 'hard', category: 'general', isolation: 'none', reviewStrict: false, strongModel: false, suggestOrchestrator: false, underspecified: false, reasons: [] });
+  assistant.advice = async () => ({ kind: 'advice', model: null, advice: { difficulty: 'hard', category: 'general', isolation: 'direct', reviewStrict: false, strongModel: false, suggestOrchestrator: false, underspecified: false, reasons: [] } });
+  await assistant['triage']('card-1', 'Refactor the cache', null, base);
+  const last = id => host.calls.filter(call => call.method === 'cards.setBadge' && call.params.sessionId === id).at(-1)?.params.badge;
+  assert.doesNotMatch(last('card-1').text, /[а-я]/u, 'English first');
   assistant.setLocale('ru');
   await new Promise(resolve => setTimeout(resolve, 10));
-  const triage = badges.find(entry => entry.kind === 'triage');
+  const triage = last('card-1');
   assert.ok(triage, 'rewritten');
-  assert.match(`${triage.badge.text} ${triage.badge.tooltip}`, /сложная|общее|Разбор/u);
-  assert.doesNotMatch(triage.badge.text, /hard|general/u);
+  assert.match(`${triage.text} ${triage.tooltip}`, /сложная|общее|Разбор/u);
+  assert.doesNotMatch(triage.text, /hard|general/u);
+  // A second switch to the same language writes nothing again.
+  const count = host.calls.filter(call => call.method === 'cards.setBadge').length;
+  assistant.setLocale('ru');
+  await new Promise(resolve => setTimeout(resolve, 10));
+  assert.equal(host.calls.filter(call => call.method === 'cards.setBadge').length, count);
+  // A badge set as a plain value (no way to write it again) stays as it is; one given as a function follows.
+  await assistant.harness.setBadge('card-2', 'tasks', () => ({ text: assistant.harness.strings.tasksBadge(1, 3), tone: 'info' }));
+  const ru = last('card-2').text;
+  assistant.setLocale('en');
+  await new Promise(resolve => setTimeout(resolve, 10));
+  assert.notEqual(last('card-2').text, ru);
+  assert.equal(last('card-2').text, assistant.harness.strings.tasksBadge(1, 3));
+});
+
+test('a card action answers in the language CanvasTTY sent with it (cards.invoke locale)', async () => {
+  const host = hostFake();
+  const assistant = new Assistant({ host, dataDir: mkdtempSync(join(base, 'data-')), git: null, locale: 'en' });
+  const session = { id: 'card-9', provider: 'claude', role: 'orchestrator', title: 'Lead', status: 'idle', cwd: base, workingDirectory: base };
+  const en = assistant.cardAction('task-board', 'card-9', session, 'en');
+  const ru = assistant.cardAction('task-board', 'card-9', session, 'ru');
+  assert.notEqual(en.message, ru.message);
+  assert.match(ru.message, /[а-я]/u);
+  assert.equal(assistant.pageLocale, 'ru', 'the app language is the service\'s from now on');
+  // Without a locale (an older core) the current one is kept.
+  assert.equal(assistant.cardAction('task-board', 'card-9', session).message, ru.message);
 });

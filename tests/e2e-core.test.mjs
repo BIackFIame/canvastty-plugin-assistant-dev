@@ -125,9 +125,12 @@ test('the built plugin installs into CanvasTTY\'s PluginManager and its tools, h
   t.after(() => supervisor.dispose());
   sessions = new PluginSessions({ terminals, notify: (pluginId, serviceId, method, params) => supervisor.notify(pluginId, serviceId, method, params) });
   const call = (pluginId, serviceId, method, params, budget) => supervisor.hostCall(pluginId, serviceId, method, params, budget);
+  let cardLocale = 'en';
   cards = new PluginCards({
     providers: () => manager.cardActionProviders(), trustedPlugins: () => new Set(['canvastty-assistant']), call,
-    session: id => sessions.summary(id), redact: text => text, changed: decorations => badges.push(decorations.badges)
+    session: id => sessions.summary(id), redact: text => text, changed: decorations => badges.push(decorations.badges),
+    // CanvasTTY with the language in card actions (older cores ignore it).
+    locale: () => cardLocale
   });
   const tools = new PluginAgentTools({ providers: () => manager.agentToolProviders(), call, caller: id => sessions.summary(id), redact: text => text });
   const hookDeps = {

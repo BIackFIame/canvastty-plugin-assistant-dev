@@ -15,8 +15,8 @@ export const TREE_STATUSES: readonly TreeStatus[] = ['running', 'waiting', 'appr
  * subscription, a coding plan or a flat-rate account (never dollars: the person already paid for the plan).
  */
 export type TreeCost =
-  | { kind: 'usd'; low: number; high: number }
-  | { kind: 'plan'; label: string; share: number | null; window: string | null }
+  | { kind: 'usd'; low: number; high: number; measured?: boolean }
+  | { kind: 'plan'; label: string; share: number | null; window: string | null; measured?: boolean }
   | { kind: 'launch'; label: string; used: number; allowance: number; windowHours: number }
   | { kind: 'flat'; label: string };
 
@@ -27,7 +27,14 @@ export interface TreeCard {
 }
 
 /** The route a card was started on, from the Assistant's route records. */
-export interface TreeRoute { model: string | null; kind: string; label: string; costBasis: string; estimate: Estimate | null }
+export interface TreeRoute { model: string | null; identity?: string | null; kind: string; label: string; costBasis: string; estimate: Estimate | null }
+
+/**
+ * A card's measured tokens (CanvasTTY's usage.session, where the core measures it): counts, the price of a paid
+ * route's tokens at the catalog price (null: not a paid route or no price), their share of a plan's window, and the
+ * agent's own price estimate (OpenCode's `cost`), which is an estimate, not a bill.
+ */
+export interface TreeUsage { tokens: number; input: number; output: number; cached: number; usd: number | null; share: number; providerEstimate?: number }
 
 export interface TreeInputs {
   cards: readonly TreeCard[];
@@ -39,6 +46,8 @@ export interface TreeInputs {
   endedAt(id: string): number | null;
   /** An Auto card on its CLI's own sign-in: the model the Assistant chose and the plan it runs on. */
   autoTop?(id: string): { model: string | null; label: string } | null;
+  /** Measured usage of a card (null: not measured here). */
+  usage?(id: string): TreeUsage | null;
 }
 
 export interface TreeNode {
@@ -50,6 +59,8 @@ export interface TreeNode {
   status: TreeStatus;
   task: string | null;
   cost: TreeCost | null;
+  /** Measured tokens (null: not measured). */
+  usage: TreeUsage | null;
   startedAt: number | null;
   endedAt: number | null;
   /** The autopilot plan's child count (null: none). */
@@ -67,6 +78,9 @@ export interface TreeTotals {
   /** Plan shares by plan: the sum of each task's estimated share of the plan's window. */
   plans: Array<{ label: string; share: number | null; window: string | null; cards: number; launches: number }>;
   unpriced: number;
+  /** Measured tokens over the tree (null: none measured), and the agents' own price estimates (OpenCode). */
+  tokens: number | null;
+  providerEstimate: number | null;
 }
 
 export interface TreeView { trees: Array<{ root: TreeNode; totals: TreeTotals }> }
@@ -106,6 +120,17 @@ export function costOf(route: TreeRoute | null): TreeCost | null {
   }
 }
 
+/**
+ * The route's estimate replaced by what the card measurably used: a paid route's tokens at the catalog price, a
+ * plan's window share from its tokens. Launch-counted plans and flat-rate accounts stay as they are.
+ */
+export function measuredCost(cost: TreeCost | null, usage: TreeUsage | null): TreeCost | null {
+  if (!cost || !usage) return cost;
+  if (cost.kind === 'usd' && usage.usd !== null) return { kind: 'usd', low: usage.usd, high: usage.usd, measured: true };
+  if (cost.kind === 'plan') return { ...cost, share: usage.share, measured: true };
+  return cost;
+}
+
 /** Model ids as people say them: "claude-opus-5-5" → "Opus 5.5", "glm-5.3-flash" → "GLM-5.3-flash", "gpt-5.4" → "GPT-5.4". */
 export function modelLabel(model: string | null | undefined): string | null {
   if (typeof model !== 'string' || !model.trim()) return null;
@@ -127,11 +152,15 @@ export function modelLabel(model: string | null | undefined): string | null {
 function priceKey(cost: TreeCost): string | null { return cost.kind === 'plan' || cost.kind === 'launch' || cost.kind === 'flat' ? cost.label : null; }
 
 function totalsOf(root: TreeNode): TreeTotals {
-  const totals: TreeTotals = { agents: 0, running: 0, usd: null, plans: [], unpriced: 0 };
+  const totals: TreeTotals = { agents: 0, running: 0, usd: null, plans: [], unpriced: 0, tokens: null, providerEstimate: null };
   const plans = new Map<string, TreeTotals['plans'][number]>();
   const visit = (node: TreeNode): void => {
     totals.agents++;
     if (node.status === 'running') totals.running++;
+    if (node.usage) {
+      totals.tokens = (totals.tokens ?? 0) + node.usage.tokens;
+      if (node.usage.providerEstimate !== undefined) totals.providerEstimate = round((totals.providerEstimate ?? 0) + node.usage.providerEstimate);
+    }
     const cost = node.cost;
     if (!cost) totals.unpriced++;
     else if (cost.kind === 'usd') totals.usd = { low: round((totals.usd?.low ?? 0) + cost.low), high: round((totals.usd?.high ?? 0) + cost.high) };
@@ -177,7 +206,8 @@ export function buildTree(input: TreeInputs, options: { focus?: string | null } 
       .filter(child => !placed.has(child.id))
       .sort((a, b) => (a.startedAt ?? 0) - (b.startedAt ?? 0) || a.id.localeCompare(b.id))
       .map(child => node(child, depth + 1));
-    const cost = costOf(route) ?? (top ? { kind: 'plan', label: top.label, share: null, window: null } as const : null);
+    const usage = input.usage?.(card.id) ?? null;
+    const cost = measuredCost(costOf(route) ?? (top ? { kind: 'plan', label: top.label, share: null, window: null } as const : null), usage);
     return {
       id: card.id,
       title: oneLine(card.title, TREE_LIMITS.title) ?? card.id.slice(0, 8),
@@ -187,6 +217,7 @@ export function buildTree(input: TreeInputs, options: { focus?: string | null } 
       status: statusOf(card),
       task: oneLine(input.task(card.id), TREE_LIMITS.task),
       cost,
+      usage,
       startedAt: typeof card.startedAt === 'number' && Number.isFinite(card.startedAt) ? card.startedAt : null,
       endedAt: input.endedAt(card.id),
       planChildren: card.role === 'orchestrator' || children.length ? input.planChildren(card.id) : null,
