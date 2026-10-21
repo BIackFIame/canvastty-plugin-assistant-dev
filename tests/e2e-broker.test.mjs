@@ -2,12 +2,12 @@
 // (CANVASTTY_REPO) and the Accounts plugin's built package (CANVASTTY_ACCOUNTS): both packages are installed by the
 // real PluginManager and run under the real PluginServiceSupervisor; the real PluginAccountBroker carries the call.
 // A person-started OpenCode card on "Model: Auto (Jev)" sends one turn: the Assistant's router -> CanvasTTY's broker
-// -> a fake Z.AI endpoint on 127.0.0.1, with the Accounts key added by CanvasTTY. Every byte CanvasTTY writes to the
+// -> a fake Z.AI endpoint (https name, served on 127.0.0.1 by a test transport), with the Accounts key added by CanvasTTY. Every byte CanvasTTY writes to the
 // Assistant's process is scanned: the key never reaches it. No model, no network beyond loopback, no real secret.
 import assert from 'node:assert/strict';
 import { cp, mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import { readFileSync } from 'node:fs';
-import { createServer } from 'node:http';
+import { createServer, request as httpRequest } from 'node:http';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import test from 'node:test';
@@ -67,7 +67,17 @@ async function fakeZai() {
     });
   });
   await new Promise(resolve => server.listen(0, '127.0.0.1', resolve));
-  return { url: `http://127.0.0.1:${server.address().port}`, posts, close: () => new Promise(resolve => server.close(resolve)) };
+  const port = server.address().port;
+  // CanvasTTY sends a key over https only. The endpoint is named https://zai.example.test (never resolvable) and this
+  // test transport delivers exactly the request CanvasTTY built to the fake server; TLS rules are core-tested.
+  const transport = request => new Promise((resolve, reject) => {
+    const outgoing = httpRequest({ host: '127.0.0.1', port, method: request.method, path: `${request.url.pathname}${request.url.search}`, agent: false, signal: request.signal,
+      headers: { ...request.headers, ...(request.body ? { 'content-length': String(request.body.length) } : {}) } },
+    response => resolve({ status: response.statusCode ?? 0, headers: response.headers, body: response }));
+    outgoing.on('error', reject);
+    outgoing.end(request.body);
+  });
+  return { url: 'https://zai.example.test', posts, transport, close: () => new Promise(resolve => server.close(resolve)) };
 }
 
 async function packageFrom(source, target, validatePluginManifest) {
@@ -148,7 +158,8 @@ test('a person-started OpenCode card on Auto (Jev) answers through the person\'s
     secret: secretOf,
     registerSecret: (owner, value) => redaction.add(`plugin:${owner}`, [value]),
     redact: text => redaction.redact(text),
-    audit: (pluginId, serviceId, level, message) => supervisor.audit(pluginId, serviceId, level, message)
+    audit: (pluginId, serviceId, level, message) => supervisor.audit(pluginId, serviceId, level, message),
+    transport: zai.transport
   });
   supervisor = new PluginServiceSupervisor({
     command: process.execPath, hostVersion: '9.9.9', locale: () => 'en', stopGraceMs: 300,
