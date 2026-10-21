@@ -20,7 +20,7 @@ export interface RouteState {
   /** How the service gets limit windows: `core` (it reads them itself), `page-only` (this page forwards them). */
   feed?: { mode: 'probing' | 'core' | 'page-only'; lastReadAt: number | null; lastError: string | null };
   quotaEvents?: Array<{ at: number; provider: string; kind: string; note: string }>;
-  accounts: { at: number; rows: Array<{ provider: string; accountId: string; account?: string; model: string; endpoint: string; state: string }> } | null;
+  accounts: { at: number; rows: Array<{ provider: string; accountId: string; account?: string; model: string; endpoint: string; state: string; quota?: { remainingPercent: number | null } }> } | null;
   /** Accounts' pools of the person's own sign-ins, as Accounts shared them. */
   pools?: { at: number; pools: Array<{ cli: string; label: string; members: number; ready: number; quota: { remainingPercent: number | null } | null }> } | null;
   /** What the Assistant reads itself: Accounts' shared data (plugins.request), providers.list, measured usage. */
@@ -224,7 +224,7 @@ export function renderRouting(state: RouteState, t: Strings, page: RoutePageHost
       const key = `host:${host}`;
       rows.append(el('li', { className: 'row', dataset: { host } },
         el('code', { textContent: host }),
-        el('span', { textContent: of.map(row => `${row.account ?? row.accountId} · ${row.model} · ${cliName(row.provider)} · ${row.state}`).join('; ') }),
+        el('span', { textContent: of.map(row => `${row.account ?? row.accountId} · ${row.model} · ${cliName(row.provider)} · ${row.state}${row.quota?.remainingPercent != null ? t.poolLeft(Math.round(row.quota.remainingPercent)) : ''}`).join('; ') }),
         selectOf(`route-allow-${host}`, settings.allow[key] ?? 'allow', allowOptions, value => save(next => { if (value === 'allow') delete next.allow[key]; else next.allow[key] = value; })),
         labelled(t.trust, selectOf(`route-trust-${host}`, settings.trust[key] ?? 'unset', trustOptions, value => save(next => { if (value === 'unset') delete next.trust[key]; else next.trust[key] = value; }))),
         flatToggle(host, settings, t, save)));

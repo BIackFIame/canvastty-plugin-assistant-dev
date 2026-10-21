@@ -148,6 +148,14 @@ function serve({ methods, notifications = {}, onInitialize, input = process.stdi
     }
     if (typeof method === "string" && message.id === void 0) {
       if (stopping) return;
+      if (method.startsWith("canvastty.accounts.") && Object.hasOwn(notifications, method)) {
+        try {
+          void notifications[method](record4(message.params), host);
+        } catch (error2) {
+          host.log("warn", `${method}: ${errorText3(error2)}`);
+        }
+        return;
+      }
       if (active >= limit2.activeHandlers) {
         host.log("warn", `${method}: dropped, the service is busy`);
         return;
@@ -8263,7 +8271,7 @@ var ReviewService = class {
   state(sessionId) {
     let state = this.sessions.get(sessionId);
     if (!state) {
-      state = { suspect: false, launchTask: null, turns: [], subagent: false, parent: null, dataClass: null, strict: false, reviewed: /* @__PURE__ */ new Map() };
+      state = { suspect: false, launchTask: null, turns: [], startTask: null, subagent: false, parent: null, dataClass: null, strict: false, reviewed: /* @__PURE__ */ new Map() };
       this.sessions.set(sessionId, state);
       while (this.sessions.size > MAX_SESSIONS) this.forget(this.sessions.keys().next().value);
     }
@@ -8282,6 +8290,21 @@ var ReviewService = class {
       state.subagent = launch.role === "subagent";
       state.parent = state.subagent ? launch.parentSessionId ?? null : null;
     }
+    if (state.subagent) state.startTask = null;
+  }
+  /**
+   * "Start with Auto (Jev)": the person typed `task` on the Assistant's page, and this plugin started the orchestrator
+   * `sessionId` (core B8) with it. Recorded for that card only (its full session id, as sessions.create answered it),
+   * as the person's own text for its reviews and for the trust chain of its subagents, the same as a task typed in
+   * the launcher's Task field or a turn its Auto router saw. Memory only, until the card closes.
+   */
+  notePersonStart(sessionId, task) {
+    const value = task.trim().slice(0, MAX_REQUEST_CHARS);
+    if (!sessionId || !value) return;
+    const state = this.state(sessionId);
+    state.subagent = false;
+    state.parent = null;
+    state.startTask = value;
   }
   /**
    * A new user turn of a card on Auto (Jev), as its router read it (the latest user text, envelopes stripped). Kept
@@ -8302,11 +8325,11 @@ var ReviewService = class {
   /** The task a card was given, for the agent tree: the launcher's task, else its first turn. */
   taskOf(sessionId) {
     const state = this.sessions.get(sessionId);
-    return state ? state.launchTask ?? state.turns[0] ?? null : null;
+    return state ? state.launchTask ?? state.startTask ?? state.turns[0] ?? null : null;
   }
   /** A card's own texts, most recent first: its latest turn, its earlier turns, then the launcher's task. */
   ownTexts(state) {
-    return distinct([...[...state.turns].reverse(), state.launchTask]);
+    return distinct([...[...state.turns].reverse(), state.launchTask, state.subagent ? null : state.startTask]);
   }
   /** The texts the person typed for this card or, for a subagent, for the nearest card above it that is not one. */
   personTexts(state) {
@@ -10144,10 +10167,11 @@ function priceKey(cost) {
   return cost.kind === "plan" || cost.kind === "launch" || cost.kind === "flat" ? cost.label : null;
 }
 function totalsOf(root) {
-  const totals = { agents: 0, running: 0, usd: null, plans: [], unpriced: 0, tokens: null, providerEstimate: null };
+  const totals = { agents: 0, refused: 0, running: 0, usd: null, plans: [], unpriced: 0, tokens: null, providerEstimate: null };
   const plans = /* @__PURE__ */ new Map();
   const visit = (node) => {
     totals.agents++;
+    totals.refused += node.refused;
     if (node.status === "running") totals.running++;
     if (node.usage) {
       totals.tokens = (totals.tokens ?? 0) + node.usage.tokens;
@@ -10190,7 +10214,10 @@ function buildTree(input, options = {}) {
     placed.add(card.id);
     const route = input.route(card.id);
     const top = input.autoTop?.(card.id) ?? null;
-    const children = depth >= TREE_LIMITS.depth ? [] : (kids.get(card.id) ?? []).filter((child) => !placed.has(child.id)).sort((a, b) => (a.startedAt ?? 0) - (b.startedAt ?? 0) || a.id.localeCompare(b.id)).map((child) => node(child, depth + 1));
+    const below = (kids.get(card.id) ?? []).filter((child) => !placed.has(child.id));
+    const refused = below.filter((child) => input.refused?.(child.id) === true && !kids.has(child.id));
+    for (const child of refused) placed.add(child.id);
+    const children = depth >= TREE_LIMITS.depth ? [] : below.filter((child) => !refused.includes(child)).sort((a, b) => (a.startedAt ?? 0) - (b.startedAt ?? 0) || a.id.localeCompare(b.id)).map((child) => node(child, depth + 1));
     const usage = input.usage?.(card.id) ?? null;
     const cost = measuredCost(costOf(route) ?? (top ? { kind: "plan", label: top.label, share: null, window: null } : null), usage);
     return {
@@ -10205,8 +10232,9 @@ function buildTree(input, options = {}) {
       usage,
       startedAt: typeof card.startedAt === "number" && Number.isFinite(card.startedAt) ? card.startedAt : null,
       endedAt: input.endedAt(card.id),
-      planChildren: card.role === "orchestrator" || children.length ? input.planChildren(card.id) : null,
+      planChildren: card.role === "orchestrator" || children.length || refused.length ? input.planChildren(card.id) : null,
       descendants: children.reduce((sum, child) => sum + 1 + child.descendants, 0),
+      refused: refused.length,
       children
     };
   };
@@ -11774,6 +11802,7 @@ function buildInventory(settings, catalog, index = new BenchmarkIndex(catalog)) 
       const measuredEfforts = bare ? index.measuredEfforts(bare) : [];
       const catalogModel = index.catalogModel(id, context);
       const priced = person2?.priceIn !== void 0 || person2?.priceOut !== void 0;
+      const plan3 = !priced && upstream.preset === "account" && upstream.flatRate === true;
       const listPriceIn = listing && !catalog.openRouterPricesStale ? listing.priceIn : null;
       const listPriceOut = listing && !catalog.openRouterPricesStale ? listing.priceOut : null;
       const devPriceIn = catalogModel && !catalog.pricesStale ? catalogModel.inputPrice : null;
@@ -11785,9 +11814,9 @@ function buildInventory(settings, catalog, index = new BenchmarkIndex(catalog)) 
         listed: !!person2,
         excluded: excluded.has(id),
         fromList: openRouter && upstream.allModels && !!listing && offeredByDefault(listing),
-        priceIn: priced ? person2.priceIn ?? null : listPriceIn ?? devPriceIn,
-        priceOut: priced ? person2.priceOut ?? null : listPriceOut ?? devPriceOut,
-        priceSource: priced ? "person" : listPriceIn !== null || listPriceOut !== null ? "openrouter" : devPriceIn !== null || devPriceOut !== null ? "models.dev" : null,
+        priceIn: plan3 ? 0 : priced ? person2.priceIn ?? null : listPriceIn ?? devPriceIn,
+        priceOut: plan3 ? 0 : priced ? person2.priceOut ?? null : listPriceOut ?? devPriceOut,
+        priceSource: plan3 ? "plan" : priced ? "person" : listPriceIn !== null || listPriceOut !== null ? "openrouter" : devPriceIn !== null || devPriceOut !== null ? "models.dev" : null,
         context: person2?.context ?? listing?.context ?? catalogModel?.context ?? null,
         output: person2?.output ?? listing?.maxOutput ?? catalogModel?.output ?? null,
         known: !!catalogModel || (bare ? index.rows(bare).length > 0 : false),
@@ -11854,6 +11883,8 @@ var DEFAULT_AUTO_SETTINGS = {
 };
 var OPTIONAL_KEYS = ["catalog", "strategy"];
 var ID4 = /^[a-z0-9][a-z0-9-]{0,23}$/u;
+var BROKER_REF = /^[a-z0-9][a-z0-9.-]{1,78}[a-z0-9]:[a-z0-9][a-z0-9._-]{0,63}$/u;
+var validBrokerRef = (value) => typeof value === "string" && value.length <= 160 && BROKER_REF.test(value);
 var MODEL_ID = /^[A-Za-z0-9][A-Za-z0-9._:/@+-]{0,159}$/u;
 var CLASSES = ["D0", "D1", "D2", "D3"];
 function isRecord7(value) {
@@ -11882,19 +11913,22 @@ function originOf3(baseUrl) {
 }
 function validateAutoUpstream(value) {
   if (!isRecord7(value)) fail4("Invalid upstream.");
-  only(value, ["id", "preset", "baseUrl", "trust", "key", "models", "allModels", "excluded", "enabled"], "Upstream");
+  only(value, ["id", "preset", "baseUrl", "trust", "key", "models", "allModels", "excluded", "enabled", "account", "flatRate"], "Upstream");
   if (typeof value.id !== "string" || !ID4.test(value.id)) fail4("Upstream id: lowercase letters, digits and dashes, at most 24.");
-  if (value.preset !== "openrouter" && value.preset !== "openai-compatible") fail4("Unknown upstream kind.");
+  if (value.preset !== "openrouter" && value.preset !== "openai-compatible" && value.preset !== "account") fail4("Unknown upstream kind.");
+  const brokered = value.preset === "account";
+  if (brokered ? !validBrokerRef(value.account) : value.account !== void 0) fail4("An account upstream names one account another extension offers.");
+  if (value.flatRate !== void 0 && (!brokered || typeof value.flatRate !== "boolean")) fail4("Invalid upstream.");
   if (typeof value.enabled !== "boolean") fail4("Invalid upstream.");
   const baseUrl = value.preset === "openrouter" ? OPENROUTER_BASE_URL : value.baseUrl;
   if (value.preset === "openrouter" && value.baseUrl !== void 0 && value.baseUrl !== OPENROUTER_BASE_URL) fail4("OpenRouter has a fixed address.");
   if (typeof baseUrl !== "string" || !validUrl(baseUrl.replace(/\/+$/u, "")) || !/^https?:\/\/[^/]+(?:\/[A-Za-z0-9._~-]+)*\/?$/u.test(baseUrl)) fail4("Invalid upstream address (https, or http on this computer only).");
   if (!CLASSES.includes(value.trust)) fail4("Invalid upstream trust.");
   if (value.trust === "D3" && !isLoopbackUrl2(baseUrl)) fail4("D3 stays on this computer: only a server on 127.0.0.1 can take it.");
-  const key = value.key ?? "own";
+  const key = brokered ? "none" : value.key ?? "own";
   if (key !== "own" && key !== "jev" && key !== "none") fail4("Invalid upstream key choice.");
   if (key === "jev" && value.preset !== "openrouter") fail4("Only an OpenRouter upstream can use the Jev \xB7 OpenRouter key.");
-  if (key === "none" && !isLoopbackUrl2(baseUrl)) fail4("Only a server on this computer can work without a key.");
+  if (key === "none" && !brokered && !isLoopbackUrl2(baseUrl)) fail4("Only a server on this computer can work without a key.");
   if (!Array.isArray(value.models) || value.models.length > MAX_AUTO_MODELS) fail4(`At most ${MAX_AUTO_MODELS} models per upstream.`);
   const models = [];
   const seen = /* @__PURE__ */ new Set();
@@ -11918,7 +11952,18 @@ function validateAutoUpstream(value) {
   const excluded = value.excluded ?? [];
   if (!Array.isArray(excluded) || excluded.length > MAX_EXCLUDED || excluded.some((id) => typeof id !== "string" || !MODEL_ID.test(id))) fail4(`At most ${MAX_EXCLUDED} excluded models, by their ids.`);
   if (value.enabled && (value.preset === "openrouter" || modelTrafficForbidden(baseUrl))) fail4(JEV_ONLY_MESSAGE);
-  return { id: value.id, preset: value.preset, baseUrl: baseUrl.replace(/\/+$/u, ""), trust: value.trust, key, models, allModels, excluded: [...new Set(excluded)], enabled: value.enabled };
+  return {
+    id: value.id,
+    preset: value.preset,
+    baseUrl: baseUrl.replace(/\/+$/u, ""),
+    trust: value.trust,
+    key,
+    models,
+    allModels,
+    excluded: [...new Set(excluded)],
+    enabled: value.enabled,
+    ...brokered ? { account: value.account, ...value.flatRate === true ? { flatRate: true } : {} } : {}
+  };
 }
 function validateAutoSettings(value) {
   if (!isRecord7(value)) fail4("Invalid Auto (Jev) settings.");
@@ -13110,10 +13155,20 @@ var AutoRouter = class {
     }
     return rules(settings.decider === "rules" ? "rules_only" : "no_text");
   }
+  /** An account upstream only while CanvasTTY's broker lists it (granted and offered); every other one always. */
+  reachable(upstream) {
+    return upstream.preset !== "account" || (this.deps.broker?.ready(upstream) ?? false);
+  }
+  /** The model call: fetch for a direct upstream, CanvasTTY's broker for another extension's account. */
+  send(upstream, url, init) {
+    if (upstream.preset !== "account") return this.transport(url, init);
+    if (!this.deps.broker) return Promise.reject(new Error("No broker for account upstreams."));
+    return this.deps.broker.send(upstream, "/chat/completions", init);
+  }
   /** Who may take this request now: enabled, allowed, trusted with the card's class, not cooling down, large enough. */
   usable(grant, promptTokens, maxTokens) {
     const mode = this.deps.dataClassMode();
-    const healthy = this.deps.inventory().entries.filter((entry) => entry.upstream.enabled && !entry.excluded && !modelTrafficForbidden(entry.upstream.baseUrl) && upstreamAllowed(entry.upstream, grant.dataClass, mode) && !this.coolingDown(entry.upstream.id, entry.model));
+    const healthy = this.deps.inventory().entries.filter((entry) => entry.upstream.enabled && !entry.excluded && !modelTrafficForbidden(entry.upstream.baseUrl) && this.reachable(entry.upstream) && upstreamAllowed(entry.upstream, grant.dataClass, mode) && !this.coolingDown(entry.upstream.id, entry.model));
     const wanted = typeof maxTokens === "number" && maxTokens > 0 ? maxTokens : 0;
     const fits = healthy.filter((entry) => (entry.context === null || entry.context >= promptTokens + Math.min(wanted, 4096)) && (entry.output === null || !wanted || entry.output >= Math.min(wanted, 32768)));
     return fits.length ? fits : healthy;
@@ -13219,6 +13274,7 @@ var AutoRouter = class {
         this.leases.set(keys.conversation, { sessionId: grant.sessionId, turn: keys.turn, contract: keys.contract, view, model: preferred, source: record4.source, decidedAt: record4.source === "lease" && lease ? lease.decidedAt : this.now() });
         while (this.leases.size > ROUTER_LIMITS.conversations) this.leases.delete(this.leases.keys().next().value);
       }
+      if (settings.upstreams.some((upstream) => upstream.enabled && upstream.preset === "account")) await this.deps.broker?.refresh().catch(() => void 0);
       const chosen = plan(this.usable(grant, Math.ceil(raw.length / 4), body.max_tokens), request2, { preference: settings.preference, cheaperFallback: settings.cheaperFallback });
       record4.why = chosen.why;
       if (chosen.bestEntry && chosen.best !== null) {
@@ -13356,7 +13412,7 @@ var AutoRouter = class {
         this.hosts.add(new URL(url).host);
         let upstream;
         try {
-          upstream = await this.transport(url, {
+          upstream = await this.send(candidate.upstream, url, {
             method: "POST",
             body: payload,
             signal: attempt.signal,
@@ -13577,7 +13633,7 @@ data: [DONE]
     try {
       let upstream;
       try {
-        upstream = await this.transport(url, {
+        upstream = await this.send(entry.upstream, url, {
           method: "POST",
           body: Buffer.from(JSON.stringify({ ...body, model: entry.model, ...effort }), "utf8"),
           signal: attempt.signal,
@@ -13831,15 +13887,273 @@ function upstreamMessage(text6) {
   }
 }
 
+// src/auto/broker.ts
+var LIST_FRESH_MS = 15e3;
+var UNSUPPORTED_REST_MS = 30 * 6e4;
+var FAILING_REST_MS = 6e4;
+var INLINE_BODY_CHARS = 512 * 1024;
+var PART_CHARS = 512 * 1024;
+var isRecord8 = (value) => !!value && typeof value === "object" && !Array.isArray(value);
+var unsupportedError = (error) => isRecord8(error) && error.code === -32601 || /unknown host method|does not have the [a-z:]+ permission/iu.test(error instanceof Error ? error.message : String(error));
+var sharedReadReason = (error) => {
+  const data = isRecord8(error) ? error.data : void 0;
+  return isRecord8(data) && typeof data.reason === "string" && /^[a-z_]{1,40}$/u.test(data.reason) ? data.reason : null;
+};
+var clean3 = (value, max) => typeof value === "string" ? value.replace(/[\u0000-\u001f\u007f]+/gu, " ").trim().slice(0, max) : "";
+function brokeredAccountOf(value) {
+  if (!isRecord8(value) || !validBrokerRef(value.ref)) return null;
+  if (value.protocol !== "openai" && value.protocol !== "anthropic") return null;
+  let origin;
+  try {
+    origin = new URL(String(value.origin)).origin;
+  } catch {
+    return null;
+  }
+  if (origin !== value.origin || !/^https:|^http:\/\/(?:127\.0\.0\.1|\[::1\])(?::\d+)?$/u.test(origin)) return null;
+  const strings3 = (list, max) => Array.isArray(list) ? list.filter((item) => typeof item === "string" && item.length > 0 && item.length <= 200).slice(0, max) : [];
+  const models = strings3(value.models, 64);
+  if (!models.length) return null;
+  return {
+    ref: value.ref,
+    owner: clean3(value.owner, 80),
+    ownerName: clean3(value.ownerName, 80) || clean3(value.owner, 80),
+    id: clean3(value.id, 64),
+    label: clean3(value.label, 80) || clean3(value.id, 64),
+    protocol: value.protocol,
+    origin,
+    paths: strings3(value.paths, 8),
+    models,
+    flatRate: value.flatRate === true
+  };
+}
+var AccountBroker = class {
+  host;
+  now;
+  log;
+  status = "unknown";
+  restUntil = 0;
+  cached = null;
+  listing = null;
+  pending = /* @__PURE__ */ new Map();
+  next = 1;
+  prefix = `auto-${Math.random().toString(36).slice(2, 10)}`;
+  encoder = new TextEncoder();
+  constructor(host, options = {}) {
+    this.host = host;
+    this.now = options.now ?? Date.now;
+    this.log = options.log ?? ((level, message) => host.log(level, message));
+  }
+  get mode() {
+    return this.status;
+  }
+  /** The granted, offered accounts (cached for 15 s); empty on a core without brokered requests. */
+  list() {
+    const now = this.now();
+    if (this.cached && now - this.cached.at < LIST_FRESH_MS) return Promise.resolve(this.cached.accounts);
+    if (now < this.restUntil) return Promise.resolve(this.cached?.accounts ?? []);
+    this.listing ??= this.host.callHost("accounts.list", {}).then((answer) => {
+      const raw = isRecord8(answer) && Array.isArray(answer.accounts) ? answer.accounts : [];
+      const accounts = raw.map(brokeredAccountOf).filter((entry) => entry !== null);
+      this.status = "ready";
+      this.cached = { at: this.now(), accounts };
+      return accounts;
+    }, (error) => {
+      const reason = sharedReadReason(error);
+      if (!reason && unsupportedError(error)) {
+        this.status = "unsupported";
+        this.restUntil = this.now() + UNSUPPORTED_REST_MS;
+      } else {
+        this.status = "failing";
+        this.restUntil = this.now() + FAILING_REST_MS;
+      }
+      this.cached = { at: this.now(), accounts: [] };
+      return [];
+    }).finally(() => {
+      this.listing = null;
+    });
+    return this.listing;
+  }
+  /** The last list without waiting (for synchronous checks such as which upstreams are usable now). */
+  known(ref) {
+    return this.cached?.accounts.find((account) => account.ref === ref) ?? null;
+  }
+  /** The list changed (a grant, an owner change): the next call asks again. */
+  invalidate() {
+    this.cached = null;
+    this.restUntil = 0;
+  }
+  /**
+   * A fetch-like call through the broker. `path` is the account's path (`/chat/completions`, `/models`); the body is
+   * the JSON the router would send. Resolves with the provider's answer as a Response.
+   */
+  async send(ref, path, init) {
+    if (this.status === "unsupported") return this.refusal(503, "This CanvasTTY cannot send requests through other extensions' accounts.");
+    const requestId = `${this.prefix}-${this.next++}`;
+    const text6 = init.body === void 0 || init.body === null ? null : typeof init.body === "string" ? init.body : Buffer.from(init.body).toString("utf8");
+    let body;
+    if (text6 !== null && text6.length <= INLINE_BODY_CHARS) {
+      try {
+        const parsed = JSON.parse(text6);
+        if (isRecord8(parsed)) body = parsed;
+      } catch {
+      }
+    }
+    const stream = body ? body.stream === true : text6 !== null && /"stream"\s*:\s*true/u.test(text6.slice(0, 4096));
+    const signal = init.signal ?? null;
+    if (signal?.aborted) throw abortError();
+    return new Promise((resolve9, reject) => {
+      const entry = { resolve: resolve9, reject, controller: null, headed: false, done: false };
+      this.pending.set(requestId, entry);
+      const onAbort = () => {
+        if (entry.done) return;
+        void this.host.callHost("accounts.cancel", { requestId }).catch(() => void 0);
+        this.finish(requestId, abortError());
+      };
+      signal?.addEventListener("abort", onAbort, { once: true });
+      const start = async () => {
+        if (text6 !== null && !body) {
+          for (let at = 0; at < text6.length; at += PART_CHARS) {
+            await this.host.callHost("accounts.body", { requestId, data: text6.slice(at, at + PART_CHARS) });
+          }
+        }
+        await this.host.callHost("accounts.request", { requestId, ref, path, ...body ? { body } : {}, stream });
+      };
+      start().catch((error) => {
+        signal?.removeEventListener("abort", onAbort);
+        if (entry.done) return;
+        const reason = sharedReadReason(error);
+        if (!reason && unsupportedError(error)) {
+          this.status = "unsupported";
+          this.restUntil = this.now() + UNSUPPORTED_REST_MS;
+        }
+        this.pending.delete(requestId);
+        entry.done = true;
+        const message = clean3(error instanceof Error ? error.message : String(error), 300);
+        resolve9(this.refusalFor(reason, message));
+      });
+    });
+  }
+  /** `canvastty.accounts.head|chunk|end` from CanvasTTY. */
+  notification(kind, params) {
+    const requestId = typeof params.requestId === "string" ? params.requestId : "";
+    const entry = this.pending.get(requestId);
+    if (!entry || entry.done) return;
+    if (kind === "head") {
+      if (entry.headed) return;
+      entry.headed = true;
+      const headers = new Headers();
+      const contentType = clean3(params.contentType, 120);
+      if (contentType) headers.set("content-type", contentType);
+      if (typeof params.retryAfter === "number") headers.set("retry-after", String(params.retryAfter));
+      const status = typeof params.status === "number" && params.status >= 200 && params.status < 600 ? params.status : 200;
+      const body = new ReadableStream({ start: (controller) => {
+        entry.controller = controller;
+      } });
+      entry.resolve(new Response(body, { status, headers }));
+      return;
+    }
+    if (kind === "chunk") {
+      if (entry.headed && entry.controller && typeof params.data === "string") {
+        try {
+          entry.controller.enqueue(this.encoder.encode(params.data));
+        } catch {
+        }
+      }
+      return;
+    }
+    const error = isRecord8(params.error) ? params.error : null;
+    if (!entry.headed) {
+      this.pending.delete(requestId);
+      entry.done = true;
+      if (!error) {
+        entry.resolve(new Response("", { status: typeof params.status === "number" && params.status >= 200 && params.status < 600 ? params.status : 200 }));
+        return;
+      }
+      const reason = typeof error.reason === "string" ? error.reason : "network";
+      if (reason === "upstream" && typeof error.status === "number" && error.status >= 400 && error.status < 600) {
+        const headers = new Headers({ "content-type": "application/json" });
+        if (typeof error.retryAfter === "number") headers.set("retry-after", String(error.retryAfter));
+        entry.resolve(new Response(JSON.stringify({ error: { message: clean3(error.message, 300) } }), { status: error.status, headers }));
+        return;
+      }
+      if (reason === "network" || reason === "timeout" || reason === "cancelled") {
+        entry.reject(new Error(`brokered request: ${reason}`));
+        return;
+      }
+      entry.resolve(this.refusalFor(reason, clean3(error.message, 300)));
+      return;
+    }
+    if (error) this.finish(requestId, new Error(`brokered request ended: ${clean3(error.reason, 40)}`));
+    else this.finish(requestId, null);
+  }
+  /** Every open request ends (the service stops). */
+  close() {
+    for (const requestId of [...this.pending.keys()]) this.finish(requestId, new Error("The service stopped."));
+  }
+  finish(requestId, error) {
+    const entry = this.pending.get(requestId);
+    if (!entry || entry.done) return;
+    entry.done = true;
+    this.pending.delete(requestId);
+    if (!entry.headed) {
+      entry.reject(error ?? new Error("brokered request ended"));
+      return;
+    }
+    try {
+      if (error) entry.controller?.error(error);
+      else entry.controller?.close();
+    } catch {
+    }
+  }
+  refusalFor(reason, message) {
+    switch (reason) {
+      // A plan used up (the owner said so) or the local per-account rate: the router's quota cooldown.
+      case "budget_refused":
+        return this.refusal(429, message || "The account's plan is used up.");
+      case "rate_limited":
+        return this.refusal(429, message, 60);
+      case "model_refused":
+      case "path_refused":
+        return this.refusal(404, message);
+      case "owner_unavailable":
+        return this.refusal(503, message);
+      case "too_large":
+        return this.refusal(413, message);
+      case "not_granted":
+      case "grant_changed":
+      case "caller_unavailable":
+      case "account_unknown":
+        this.invalidate();
+        return this.refusal(403, message);
+      default:
+        return this.refusal(503, message || "The brokered request failed.");
+    }
+  }
+  refusal(status, message, retryAfter) {
+    const headers = new Headers({ "content-type": "application/json" });
+    if (retryAfter !== void 0) headers.set("retry-after", String(retryAfter));
+    return new Response(JSON.stringify({ error: { message } }), { status, headers });
+  }
+};
+function abortError() {
+  const error = new Error("The operation was aborted.");
+  error.name = "AbortError";
+  return error;
+}
+
 // src/auto/service.ts
 var AUTO_STORAGE_KEY = "autoRouting";
 var PLUGIN_ID = "canvastty-assistant";
 var TEST_TIMEOUT_MS = 1e4;
+var BROKER_PARALLEL = 4;
+var BROKER_LIST_MS = 2e3;
 var AutoService = class {
   settings;
   readable;
   router;
   catalog;
+  /** Accounts other extensions keep, called through CanvasTTY without their keys (an older core lists none). */
+  broker;
   options;
   memo = null;
   index = null;
@@ -13858,6 +14172,8 @@ var AutoService = class {
       }
     });
     this.configureCatalog();
+    this.broker = new AccountBroker(options.host, { ...options.now ? { now: options.now } : {}, log: (level, message) => options.host.log(level, message) });
+    const parallelCap = options.parallelCap;
     this.router = new AutoRouter({
       directory: join14(options.dataDir, "auto"),
       settings: () => this.settings,
@@ -13868,7 +14184,14 @@ var AutoService = class {
       ...options.turn ? { turn: options.turn } : {},
       badge: (sessionId, model) => options.publishBadge(sessionId, model ? () => ({ text: badgeText(model.model), tone: "neutral", tooltip: AUTO_STRINGS[this.options.locale].badgeTip(model.tier, model.source) }) : null),
       log: (level, message) => options.host.log(level, message),
-      ...options.parallelCap ? { parallelCap: options.parallelCap } : {},
+      parallelCap: (upstream) => upstream.preset === "account" ? BROKER_PARALLEL : parallelCap?.(upstream) ?? null,
+      broker: {
+        send: (upstream, path, init) => this.broker.send(upstream.account ?? "", path, init),
+        ready: (upstream) => this.accountReady(upstream),
+        refresh: async () => {
+          await this.broker.list();
+        }
+      },
       noProviderMessage: () => AUTO_STRINGS[this.options.locale].noProvider,
       ...options.jevOnly ? { jevOnly: options.jevOnly } : {},
       ...options.transport ? { transport: options.transport } : {},
@@ -13882,6 +14205,17 @@ var AutoService = class {
     const stored = await this.options.readKey(upstream.key === "jev" ? JEV_OPENROUTER_SECRET : upstreamSecret(upstream.id));
     if (!stored) return null;
     return stored.origin === originOf3(upstream.baseUrl) ? stored.value : null;
+  }
+  /** An account upstream CanvasTTY lists now (granted by the person, offered by its owner) for a model it offers. */
+  accountReady(upstream) {
+    if (upstream.preset !== "account" || !upstream.account) return false;
+    const account = this.broker.known(upstream.account);
+    return !!account && account.protocol === "openai" && account.paths.includes("/chat/completions");
+  }
+  /** The inventory without account upstreams CanvasTTY does not list now (no grant, owner off, older core). */
+  reachableInventory(inventory) {
+    if (!inventory.entries.some((entry) => entry.upstream.preset === "account")) return inventory;
+    return { ...inventory, entries: inventory.entries.filter((entry) => entry.upstream.preset !== "account" || this.accountReady(entry.upstream)) };
   }
   setLocale(locale) {
     this.options.locale = locale;
@@ -13919,7 +14253,10 @@ var AutoService = class {
   /** `model: "auto"` for this launch: refuse with a reason, or the contribution with a fresh key. Never waits on a model. */
   async prepare(input) {
     const strings3 = AUTO_STRINGS[this.options.locale];
-    const inventory = this.inventory();
+    if (this.settings.upstreams.some((upstream) => upstream.enabled && upstream.preset === "account")) {
+      await Promise.race([this.broker.list(), new Promise((resolve9) => setTimeout(resolve9, BROKER_LIST_MS).unref?.())]);
+    }
+    const inventory = this.reachableInventory(this.inventory());
     const refusal = autoRefusal({ provider: input.provider, role: input.role, cwd: input.cwd, environment: input.environment, dataClass: input.dataClass, settings: this.settings, mode: this.options.dataClassMode(), inventory });
     if (refusal === "listLoading") void this.catalog.refresh().catch(() => void 0);
     if (refusal) return { refuse: { reason: strings3[refusal] } };
@@ -13944,7 +14281,10 @@ var AutoService = class {
   async expectation(view, cardClass) {
     const mode = this.options.dataClassMode();
     const keyed2 = [];
-    for (const upstream of this.settings.upstreams) if (upstream.enabled && (upstream.key === "none" || await this.keyFor(upstream).catch(() => null))) keyed2.push(upstream);
+    for (const upstream of this.settings.upstreams) {
+      if (!upstream.enabled) continue;
+      if (upstream.preset === "account" ? this.accountReady(upstream) : upstream.key === "none" || await this.keyFor(upstream).catch(() => null)) keyed2.push(upstream);
+    }
     if (!keyed2.length || this.settings.dailyUsdCap <= 0) return null;
     const ids = new Set(keyed2.map((upstream) => upstream.id));
     const entries = this.inventory().entries.filter((entry) => ids.has(entry.upstream.id) && !entry.excluded);
@@ -13972,6 +14312,7 @@ var AutoService = class {
   }
   stop() {
     this.catalog.dispose();
+    this.broker.close();
     return this.router.stop();
   }
   /** «Обновить каталог»: downloads every source now (fixed public addresses; no task text, no key). */
@@ -14021,9 +14362,22 @@ var AutoService = class {
   // The decision models page
   // ---------------------------------------------------------------------------------------------------------------
   async state() {
+    const accounts = await this.broker.list();
     const keys = {};
-    for (const upstream of this.settings.upstreams) keys[upstream.id] = upstream.key === "none" ? true : !!await this.keyFor(upstream).catch(() => null);
-    return { jevKey: await this.jevKey(), settings: this.settings, readable: this.readable, keys, recent: this.router.recent(), stats: this.router.statsView(), catalog: this.catalog.status(), models: this.modelRows(), waitingForList: this.inventory().waitingForList, outcomes: this.router.routeOutcomes() };
+    for (const upstream of this.settings.upstreams) keys[upstream.id] = upstream.preset === "account" ? this.accountReady(upstream) : upstream.key === "none" ? true : !!await this.keyFor(upstream).catch(() => null);
+    return {
+      jevKey: await this.jevKey(),
+      settings: this.settings,
+      readable: this.readable,
+      keys,
+      recent: this.router.recent(),
+      stats: this.router.statsView(),
+      catalog: this.catalog.status(),
+      models: this.modelRows(),
+      waitingForList: this.inventory().waitingForList,
+      outcomes: this.router.routeOutcomes(),
+      brokered: { mode: this.broker.mode, accounts }
+    };
   }
   async save(value) {
     if (!this.readable) throw new Error(this.options.locale === "ru" ? "\u0421\u043E\u0445\u0440\u0430\u043D\u0451\u043D\u043D\u044B\u0435 \u043D\u0430\u0441\u0442\u0440\u043E\u0439\u043A\u0438 \u0435\u0449\u0451 \u043D\u0435 \u043F\u0440\u043E\u0447\u0438\u0442\u0430\u043D\u044B, \u043F\u043E\u044D\u0442\u043E\u043C\u0443 \u043D\u0438\u0447\u0435\u0433\u043E \u043D\u0435 \u0438\u0437\u043C\u0435\u043D\u0435\u043D\u043E." : "The saved settings could not be read yet, so nothing is changed.");
@@ -14049,6 +14403,7 @@ var AutoService = class {
     const upstream = this.settings.upstreams.find((entry) => entry.id === upstreamId);
     if (!upstream) throw new Error("Unknown upstream.");
     if (isJevOnlyUpstream(upstream)) throw new Error(AUTO_STRINGS[this.options.locale].jevOnly);
+    if (upstream.preset === "account") return this.testAccount(upstream);
     const key = await this.keyFor(upstream);
     if (upstream.key !== "none" && !key) return { ok: false, status: null, missing: [], listed: null };
     const controller = new AbortController();
@@ -14066,6 +14421,25 @@ var AutoService = class {
       return { ok: true, status: answer.status, missing: ids.size ? upstream.models.map((model) => model.id).filter((id) => !ids.has(id)) : [], listed: ids.size };
     } catch {
       return { ok: false, status: null, missing: [], listed: null };
+    } finally {
+      clearTimeout(timer);
+    }
+  }
+  /** «Проверить» for an account upstream: CanvasTTY's GET /models through the broker (no prompt, no tokens). */
+  async testAccount(upstream) {
+    this.broker.invalidate();
+    const account = (await this.broker.list()).find((entry) => entry.ref === upstream.account);
+    if (!account) return { ok: false, status: null, missing: [], listed: null };
+    const missing = upstream.models.map((model) => model.id).filter((id) => !account.models.includes(id));
+    if (!account.paths.includes("/models")) return { ok: true, status: null, missing, listed: account.models.length };
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), TEST_TIMEOUT_MS);
+    try {
+      const answer = await this.broker.send(account.ref, "/models", { method: "GET", signal: controller.signal });
+      await answer.text().catch(() => "");
+      return { ok: answer.ok, status: answer.status, missing, listed: account.models.length };
+    } catch {
+      return { ok: false, status: null, missing, listed: null };
     } finally {
       clearTimeout(timer);
     }
@@ -14356,7 +14730,7 @@ var RouteSettingsError = class extends Error {
 var fail5 = (message) => {
   throw new RouteSettingsError(message);
 };
-var isRecord8 = (value) => !!value && typeof value === "object" && !Array.isArray(value);
+var isRecord9 = (value) => !!value && typeof value === "object" && !Array.isArray(value);
 var ID5 = /^[a-z0-9][a-z0-9-]{0,39}$/u;
 var MODEL2 = /^[A-Za-z0-9][A-Za-z0-9._:/@+*-]{0,199}$/u;
 var KEY = /^(?:cli:[a-z0-9-]{1,40}|host:[A-Za-z0-9.:[\]-]{1,120}|auto)$/u;
@@ -14366,7 +14740,7 @@ var intIn = (value, min, max) => typeof value === "number" && Number.isInteger(v
 var trustOk = (value) => value === "unset" || DATA_CLASSES.includes(value);
 var PROTO = /* @__PURE__ */ new Set(["__proto__", "constructor", "prototype"]);
 function plan2(value) {
-  if (!isRecord8(value)) fail5("Invalid plan.");
+  if (!isRecord9(value)) fail5("Invalid plan.");
   const v = value;
   const allowed = ["id", "cli", "kind", "label", "models", "reserve", "maxParallel", "allowance", "windowHours", "allow", "trust", "quotaBy", "multipliers"];
   if (Object.keys(v).some((key) => !allowed.includes(key))) fail5("Invalid plan field.");
@@ -14402,13 +14776,13 @@ function plan2(value) {
 var weights = (value, what) => map(value, MAX_PINS, (k) => IDENTITY.test(k), (x) => typeof x === "number" && Number.isFinite(x) && x >= 0.01 && x <= 100, what);
 function map(value, max, key, item, what) {
   if (value === void 0) return {};
-  if (!isRecord8(value)) fail5(`Invalid ${what}.`);
+  if (!isRecord9(value)) fail5(`Invalid ${what}.`);
   const entries = Object.entries(value);
   if (entries.length > max || entries.some(([k, v]) => PROTO.has(k) || !key(k) || !item(v))) fail5(`Invalid ${what}.`);
   return Object.fromEntries(entries);
 }
 function validateRouteSettings(value) {
-  if (!isRecord8(value)) fail5("Invalid routing settings.");
+  if (!isRecord9(value)) fail5("Invalid routing settings.");
   const v = value;
   const allowed = Object.keys(DEFAULT_ROUTE_SETTINGS);
   if (Object.keys(v).some((key) => !allowed.includes(key))) fail5("Invalid routing settings field.");
@@ -14418,7 +14792,7 @@ function validateRouteSettings(value) {
   if (new Set(plans.map((entry) => entry.id)).size !== plans.length) fail5("Two plans have the same id.");
   if (typeof v.preferSubscriptions !== "boolean") fail5("Invalid prefer subscriptions.");
   const share = v.expectedShare;
-  if (!isRecord8(share) || Object.keys(share).sort().join() !== "large,medium,small" || ![share.small, share.medium, share.large].every((n) => intIn(n, 1, 100))) fail5("Invalid expected share.");
+  if (!isRecord9(share) || Object.keys(share).sort().join() !== "large,medium,small" || ![share.small, share.medium, share.large].every((n) => intIn(n, 1, 100))) fail5("Invalid expected share.");
   const allow = map(v.allow, MAX_MAP, (k) => KEY.test(k), (x) => ROUTE_ALLOWS.includes(x), "allow list");
   const trust = map(v.trust, MAX_MAP, (k) => /^host:/u.test(k) && KEY.test(k), trustOk, "trust list");
   const pins = map(v.pins, MAX_PINS, (k) => IDENTITY.test(k), (x) => AUTO_TIERS.includes(x), "pins");
@@ -14427,7 +14801,7 @@ function validateRouteSettings(value) {
   if (typeof v.exploreShare !== "number" || !Number.isFinite(v.exploreShare) || v.exploreShare < 0.01 || v.exploreShare > 0.2) fail5("Invalid exploration share.");
   if (!Array.isArray(v.aliases) || v.aliases.length > MAX_ALIASES) fail5("Invalid aliases.");
   const aliases = v.aliases.map((entry) => {
-    if (!isRecord8(entry) || Object.keys(entry).sort().join() !== "alias,cli,identity") fail5("Invalid alias.");
+    if (!isRecord9(entry) || Object.keys(entry).sort().join() !== "alias,cli,identity") fail5("Invalid alias.");
     const e = entry;
     if (!ROUTE_CLIS.includes(e.cli) || typeof e.alias !== "string" || !MODEL2.test(e.alias) || typeof e.identity !== "string" || !IDENTITY.test(e.identity)) fail5("Invalid alias.");
     return { cli: e.cli, alias: e.alias, identity: e.identity };
@@ -14470,7 +14844,7 @@ function validateRouteSettings(value) {
   const servers = v.servers ?? [];
   if (!Array.isArray(servers) || servers.length > MAX_SERVERS) fail5("Invalid servers.");
   result.servers = servers.map((entry) => {
-    if (!isRecord8(entry) || Object.keys(entry).some((key) => !["label", "clis", "maxParallel"].includes(key))) fail5("Invalid server.");
+    if (!isRecord9(entry) || Object.keys(entry).some((key) => !["label", "clis", "maxParallel"].includes(key))) fail5("Invalid server.");
     const e = entry;
     if (!plain(e.label, 64) || !/^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$/u.test(e.label)) fail5("Invalid server name.");
     if (!Array.isArray(e.clis) || !e.clis.length || e.clis.length > 8 || e.clis.some((cli) => !ROUTE_CLIS.includes(cli))) fail5("Invalid server CLIs.");
@@ -14727,15 +15101,13 @@ function decide(ctx) {
   const types = view.type === "chat" ? ["chat"] : [view.type, "chat"];
   const maps = scoreMaps(raws, ctx.index, types);
   const mapOf = (raw, type) => raw.resolved.identity ? maps.get(variantKey(raw.resolved.identity, raw.effort, raw.context))?.get(type) : void 0;
-  const scoredAs = raws.some((raw) => (mapOf(raw, view.type)?.size ?? 0) > 0) ? view.type : "chat";
-  const cohort = chooseCohort(raws.filter((raw) => raw.resolved.identity).map((raw) => ({ model: raw.resolved.identity, scores: mapOf(raw, scoredAs) ?? /* @__PURE__ */ new Map() })));
-  const chatCohort = chooseCohort(raws.filter((raw) => raw.resolved.identity).map((raw) => ({ model: raw.resolved.identity, scores: mapOf(raw, "chat") ?? /* @__PURE__ */ new Map() })));
   const policy = ctx.settings.newModels;
   const fits = /* @__PURE__ */ new Map();
   const level = view.level;
   const tier = tierFor(view.difficulty, view.strong, ctx.preference);
   const share = ctx.settings.expectedShare[level];
   const candidates = [];
+  const usable2 = [];
   for (const raw of raws) {
     const entry = ctx.providers.find((provider) => provider.id === raw.cli);
     const key = `${raw.cli}|${raw.signIn}|${raw.model ?? ""}|${raw.effort ?? ""}`;
@@ -14800,23 +15172,8 @@ function decide(ctx) {
       drop(raw.trust === "auto" ? `no Auto upstream is trusted with ${ctx.cardClass}` : `trust ${raw.trust} is below this card's ${ctx.cardClass} (${ctx.mode === "strict" ? "Strict" : "D3 stays on this computer"})`);
       continue;
     }
-    const scores = mapOf(raw, scoredAs);
     const boost = raw.resolved.identity ? ctx.settings.boosts[raw.resolved.identity] ?? 0 : 0;
     const pin = raw.resolved.identity ? ctx.settings.pins[raw.resolved.identity] ?? null : null;
-    let score2 = null;
-    const measured = cohort ? scores?.get(cohort) : void 0;
-    if (measured) score2 = { value: measured.value + boost, raw: measured.value, label: measured.label, source: "measured", historical: measured.historical };
-    else if (cohort && scores?.size && policy !== "wait") {
-      for (const [other, value] of scores) {
-        const fitKey = `${scoredAs}|${other}`;
-        if (!fits.has(fitKey)) fits.set(fitKey, anchorFit(ctx.index, scoredAs, other, cohort));
-        const fit = fits.get(fitKey);
-        if (!fit) continue;
-        const mappedValue = Math.round((fit.a * value.value + fit.b) * 100) / 100;
-        score2 = { value: mappedValue - PROVISIONAL_PENALTY + boost, raw: mappedValue, label: `${value.label} \u2192 mapped`, source: "provisional", historical: value.historical, mapped: { from: value.label, anchors: fit.anchors, r2: fit.r2 } };
-        break;
-      }
-    }
     const ref = taskUsd(level, raw.kind === "auto" ? { priceIn: ctx.auto.priceIn, priceOut: ctx.auto.priceOut } : apiPrice(ctx.catalog, raw.resolved.identity));
     let cost = null;
     let costBasis = "unpriced";
@@ -14894,7 +15251,7 @@ function decide(ctx) {
     spawn.launchOptions = launchOptionsFor(raw.cli, plugins, { kind: raw.kind, account: accountOptions });
     if ((raw.kind === "subscription" || raw.kind === "coding-plan") && raw.model) spawn.model = raw.model;
     if (raw.effort && raw.effortVia === "spawn" && raw.kind !== "auto") spawn.effort = raw.effort;
-    candidates.push({
+    const candidate = {
       key,
       cli: raw.cli,
       kind: raw.kind,
@@ -14907,10 +15264,10 @@ function decide(ctx) {
       identity: raw.resolved.identity,
       resolvedFrom: raw.resolved.from,
       effort: raw.effort,
-      scoredEffort: measured?.effort ?? raw.effort,
-      overall: chatCohort ? mapOf(raw, "chat")?.get(chatCohort)?.value ?? null : null,
+      scoredEffort: raw.effort,
+      overall: null,
       planPreferred: null,
-      score: score2,
+      score: null,
       pin,
       boost,
       cost,
@@ -14923,8 +15280,36 @@ function decide(ctx) {
       demoted: null,
       planCost: null,
       spawn,
-      newModel: !!raw.model && raw.kind !== "auto" && (score2 === null || score2.source === "provisional")
-    });
+      newModel: false
+    };
+    candidates.push(candidate);
+    usable2.push({ raw, candidate });
+  }
+  const usableRaws = usable2.map((entry) => entry.raw);
+  const scoredAs = usableRaws.some((raw) => (mapOf(raw, view.type)?.size ?? 0) > 0) ? view.type : "chat";
+  const cohort = chooseCohort(usableRaws.filter((raw) => raw.resolved.identity).map((raw) => ({ model: raw.resolved.identity, scores: mapOf(raw, scoredAs) ?? /* @__PURE__ */ new Map() })));
+  const chatCohort = chooseCohort(usableRaws.filter((raw) => raw.resolved.identity).map((raw) => ({ model: raw.resolved.identity, scores: mapOf(raw, "chat") ?? /* @__PURE__ */ new Map() })));
+  for (const { raw, candidate } of usable2) {
+    const scores = mapOf(raw, scoredAs);
+    const boost = candidate.boost;
+    let score2 = null;
+    const measured = cohort ? scores?.get(cohort) : void 0;
+    if (measured) score2 = { value: measured.value + boost, raw: measured.value, label: measured.label, source: "measured", historical: measured.historical };
+    else if (cohort && scores?.size && policy !== "wait") {
+      for (const [other, value] of scores) {
+        const fitKey = `${scoredAs}|${other}`;
+        if (!fits.has(fitKey)) fits.set(fitKey, anchorFit(ctx.index, scoredAs, other, cohort));
+        const fit = fits.get(fitKey);
+        if (!fit) continue;
+        const mappedValue = Math.round((fit.a * value.value + fit.b) * 100) / 100;
+        score2 = { value: mappedValue - PROVISIONAL_PENALTY + boost, raw: mappedValue, label: `${value.label} \u2192 mapped`, source: "provisional", historical: value.historical, mapped: { from: value.label, anchors: fit.anchors, r2: fit.r2 } };
+        break;
+      }
+    }
+    candidate.score = score2;
+    candidate.scoredEffort = measured?.effort ?? raw.effort;
+    candidate.overall = chatCohort ? mapOf(raw, "chat")?.get(chatCohort)?.value ?? null : null;
+    candidate.newModel = !!raw.model && raw.kind !== "auto" && (score2 === null || score2.source === "provisional");
   }
   planCosts(candidates, ctx, raws);
   const measuredIdentities = new Set(candidates.filter((c) => c.score?.source === "measured" && c.identity).map((c) => c.identity));
@@ -15222,7 +15607,7 @@ var RouteRecords = class {
   save;
   constructor(saved, save) {
     this.save = save;
-    this.list = Array.isArray(saved) ? saved.filter(isRecord9).slice(-MAX_RECORDS) : [];
+    this.list = Array.isArray(saved) ? saved.filter(isRecord10).slice(-MAX_RECORDS) : [];
   }
   add(record4) {
     this.list.push(record4);
@@ -15331,7 +15716,7 @@ var RouteRecords = class {
     });
   }
 };
-function isRecord9(value) {
+function isRecord10(value) {
   if (!value || typeof value !== "object") return false;
   const r = value;
   return typeof r.id === "string" && typeof r.at === "number" && typeof r.card === "string" && Array.isArray(r.options);
@@ -15340,36 +15725,36 @@ function isRecord9(value) {
 // src/route/peers.ts
 var ACCOUNTS_PLUGIN = "canvastty-accounts";
 var SHARED_METHODS = Object.freeze({ routes: "accounts.routes", quota: "accounts.quota" });
-var isRecord10 = (value) => !!value && typeof value === "object" && !Array.isArray(value);
+var isRecord11 = (value) => !!value && typeof value === "object" && !Array.isArray(value);
 var errorText = (error) => error instanceof Error ? error.message : String(error);
-var clean3 = (value, max) => typeof value === "string" ? value.replace(/[\u0000-\u001f\u007f]+/gu, " ").trim().slice(0, max) : "";
-function unsupportedError(error) {
-  const code = isRecord10(error) ? error.code : void 0;
+var clean4 = (value, max) => typeof value === "string" ? value.replace(/[\u0000-\u001f\u007f]+/gu, " ").trim().slice(0, max) : "";
+function unsupportedError2(error) {
+  const code = isRecord11(error) ? error.code : void 0;
   return code === -32601 || /unknown host method|does not have the [a-z:]+ permission|not allowed|permission/iu.test(errorText(error));
 }
-function sharedReadReason(error) {
-  const data = isRecord10(error) ? error.data : void 0;
-  if (isRecord10(data) && typeof data.reason === "string" && /^[a-z_]{1,40}$/u.test(data.reason)) return data.reason;
+function sharedReadReason2(error) {
+  const data = isRecord11(error) ? error.data : void 0;
+  if (isRecord11(data) && typeof data.reason === "string" && /^[a-z_]{1,40}$/u.test(data.reason)) return data.reason;
   const prefix = /^([a-z_]{3,40}):/u.exec(errorText(error));
   return prefix ? prefix[1] : null;
 }
 function poolRoutesFrom(value) {
-  const raw = isRecord10(value) && Array.isArray(value.pools) ? value.pools : Array.isArray(value) ? value : [];
+  const raw = isRecord11(value) && Array.isArray(value.pools) ? value.pools : Array.isArray(value) ? value : [];
   const pools = [];
   for (const entry of raw.slice(0, 16)) {
-    if (!isRecord10(entry) || typeof entry.agent !== "string" || !/^[a-z0-9-]{1,40}$/u.test(entry.agent)) continue;
+    if (!isRecord11(entry) || typeof entry.agent !== "string" || !/^[a-z0-9-]{1,40}$/u.test(entry.agent)) continue;
     const count3 = (n) => typeof n === "number" && Number.isInteger(n) && n >= 0 ? Math.min(n, 1e4) : 0;
-    const best = isRecord10(entry.best) ? entry.best : null;
+    const best = isRecord11(entry.best) ? entry.best : null;
     const quota = best ? accountQuotaFrom(best) ?? null : null;
     const trust = typeof entry.trust === "string" && /^(D[0-3]|unset)$/u.test(entry.trust) ? entry.trust : "unset";
     if (pools.some((pool) => pool.cli === entry.agent)) continue;
     pools.push({
       cli: entry.agent,
-      label: clean3(entry.label, 60) || `${entry.agent} pool`,
+      label: clean4(entry.label, 60) || `${entry.agent} pool`,
       members: count3(entry.members),
       ready: count3(entry.ready),
       quota,
-      window: best ? clean3(best.window, 40) || null : null,
+      window: best ? clean4(best.window, 40) || null : null,
       trust,
       launchOptions: { [ACCOUNTS_PLUGIN]: { account: `pool:${entry.agent}`, effort: "default", trustFolder: false } }
     });
@@ -15402,20 +15787,20 @@ var AccountsFeed = class {
       pending = this.host.callHost("plugins.request", { plugin: ACCOUNTS_PLUGIN, method, params }).then((answer) => {
         this.mode = "ready";
         this.reason = null;
-        return isRecord10(answer) && "data" in answer ? answer.data : answer;
+        return isRecord11(answer) && "data" in answer ? answer.data : answer;
       }, (error) => {
-        const reason = sharedReadReason(error);
+        const reason = sharedReadReason2(error);
         if (reason && reason !== "timeout" && reason !== "busy" && reason !== "rate_limited" && reason !== "provider_error") {
           this.mode = "refused";
           this.reason = reason;
           this.refusedAt = this.now();
-        } else if (unsupportedError(error)) {
+        } else if (unsupportedError2(error)) {
           this.mode = "unsupported";
           this.reason = null;
           this.refusedAt = this.now();
         } else {
           this.mode = this.mode === "ready" ? "ready" : "failing";
-          this.reason = reason ?? clean3(errorText(error), 120);
+          this.reason = reason ?? clean4(errorText(error), 120);
         }
         throw error;
       }).finally(() => this.inflight.delete(key));
@@ -15429,7 +15814,7 @@ var AccountsFeed = class {
     if (this.routesCache && now - this.routesCache.at <= maxAgeMs) return { ...this.routesCache.value, at: this.routesCache.at };
     if (this.resting()) return this.routesCache ? { ...this.routesCache.value, at: this.routesCache.at } : null;
     const read2 = this.request(SHARED_METHODS.routes, {}).then((data) => {
-      if (!isRecord10(data) || !Array.isArray(data.routes)) {
+      if (!isRecord11(data) || !Array.isArray(data.routes)) {
         this.mode = "failing";
         this.reason = "unexpected answer";
         throw new Error("Accounts answered accounts.routes in an unknown shape.");
@@ -15455,24 +15840,48 @@ var AccountsFeed = class {
     read2.catch(() => void 0);
     return await within2(read2, deadlineMs) ?? this.quotaCache?.value ?? null;
   }
+  /**
+   * The first reads of a service run (at its start, and when the person first opens the settings page), so neither
+   * waits for the first routing decision: the routes (on that read Accounts reads its accounts' quota) and the quota.
+   * Accounts answers the routes before its own quota read ends, so while a model account's quota says it was not
+   * read yet both are read once more `retryMs` later. Bounded: two rounds at most, each within its deadline.
+   */
+  async warm(retryMs = 2500, wait = (ms) => new Promise((resolve9) => {
+    const timer = setTimeout(resolve9, ms);
+    timer.unref?.();
+  })) {
+    const round5 = async () => {
+      const routes = await this.routes(-1, 3e3);
+      const quota = await this.quota(0, 3e3, true);
+      return { routes: routes !== null, quota: quota !== null, unread: unreadQuota(quota) };
+    };
+    const first = await round5();
+    if (!first.unread || this.mode !== "ready") return first;
+    await wait(retryMs);
+    return round5();
+  }
   state() {
     return { mode: this.mode, reason: this.reason, routesAt: this.routesCache?.at ?? null, quotaAt: this.quotaCache?.at ?? null };
   }
 };
+function unreadQuota(answer) {
+  const accounts = isRecord11(answer) && Array.isArray(answer.accounts) ? answer.accounts : [];
+  return accounts.filter((entry) => isRecord11(entry) && isRecord11(entry.quota) && entry.quota.observedAt == null && entry.quota.state === "unknown" && !/not readable/iu.test(String(entry.quota.note ?? ""))).length;
+}
 function environmentsFrom(value) {
-  const raw = isRecord10(value) && Array.isArray(value.environments) ? value.environments : [];
+  const raw = isRecord11(value) && Array.isArray(value.environments) ? value.environments : [];
   const out = [];
   const id = (v, max) => typeof v === "string" && /^[A-Za-z0-9][A-Za-z0-9._:-]*$/u.test(v) && v.length <= max ? v : null;
   for (const entry of raw.slice(0, 16)) {
-    if (!isRecord10(entry)) continue;
+    if (!isRecord11(entry)) continue;
     const pluginId = id(entry.pluginId, 80), kind = id(entry.kind, 40);
     if (!pluginId || !kind) continue;
     const maxParallel = typeof entry.maxParallel === "number" && Number.isInteger(entry.maxParallel) && entry.maxParallel > 0 ? Math.min(entry.maxParallel, 64) : 1;
-    const servers = Array.isArray(entry.servers) ? entry.servers.filter(isRecord10).map((server) => ({ name: id(server.name, 64), running: typeof server.running === "number" && server.running >= 0 ? Math.floor(server.running) : 0 })).filter((server) => server.name !== null).slice(0, 64) : [];
+    const servers = Array.isArray(entry.servers) ? entry.servers.filter(isRecord11).map((server) => ({ name: id(server.name, 64), running: typeof server.running === "number" && server.running >= 0 ? Math.floor(server.running) : 0 })).filter((server) => server.name !== null).slice(0, 64) : [];
     out.push({
       pluginId,
       kind,
-      name: clean3(entry.name, 60) || kind,
+      name: clean4(entry.name, 60) || kind,
       providers: Array.isArray(entry.providers) ? entry.providers.filter((p2) => typeof p2 === "string" && /^[a-z0-9-]{1,40}$/u.test(p2)).slice(0, 16) : null,
       capBy: id(entry.capBy, 40),
       maxParallel,
@@ -15509,7 +15918,7 @@ var ProvidersFeed = class {
       this.mode = "ready";
       return value;
     }, (error) => {
-      if (unsupportedError(error)) {
+      if (unsupportedError2(error)) {
         this.mode = "unsupported";
         this.refusedAt = this.now();
       } else this.mode = "failing";
@@ -15537,10 +15946,10 @@ function within2(work, ms) {
 }
 
 // src/route/usage.ts
-var isRecord11 = (value) => !!value && typeof value === "object" && !Array.isArray(value);
+var isRecord12 = (value) => !!value && typeof value === "object" && !Array.isArray(value);
 var count2 = (value) => typeof value === "number" && Number.isFinite(value) && value >= 0 ? value : 0;
 function countsFrom(value) {
-  if (!isRecord11(value)) return null;
+  if (!isRecord12(value)) return null;
   const cost = typeof value.providerCostEstimate === "number" && Number.isFinite(value.providerCostEstimate) && value.providerCostEstimate > 0 && value.providerCostEstimate < 1e3 ? value.providerCostEstimate : void 0;
   return { input: count2(value.input), output: count2(value.output), cached: Math.min(count2(value.cached), count2(value.input)), events: count2(value.events), ...cost !== void 0 ? { providerCostEstimate: cost } : {} };
 }
@@ -15578,14 +15987,14 @@ var UsageMeter = class {
     let pending = this.pending.get(key);
     if (!pending) {
       pending = this.host.callHost(method, params).then((answer) => {
-        if (!isRecord11(answer) || (method === "usage.summary" ? !Array.isArray(answer.rows) : typeof answer.measured !== "boolean")) {
+        if (!isRecord12(answer) || (method === "usage.summary" ? !Array.isArray(answer.rows) : typeof answer.measured !== "boolean")) {
           this.mode = "failing";
           throw new Error(`${method}: unknown answer`);
         }
         this.mode = "ready";
         return answer;
       }, (error) => {
-        if (unsupportedError(error)) {
+        if (unsupportedError2(error)) {
           this.mode = "unsupported";
           this.refusedAt = this.now();
         }
@@ -15605,8 +16014,8 @@ var UsageMeter = class {
     if (!this.pending.has(`usage.summary:${JSON.stringify({ since, groupBy: ["provider"] })}`) && !this.allowed()) return cached?.rows ?? null;
     const read2 = this.call("usage.summary", { since, groupBy: ["provider"] }).then((answer) => {
       const rows = /* @__PURE__ */ new Map();
-      if (isRecord11(answer) && Array.isArray(answer.rows)) for (const row of answer.rows.slice(0, 64)) {
-        if (!isRecord11(row) || typeof row.provider !== "string") continue;
+      if (isRecord12(answer) && Array.isArray(answer.rows)) for (const row of answer.rows.slice(0, 64)) {
+        if (!isRecord12(row) || typeof row.provider !== "string") continue;
         const counts = countsFrom(row);
         if (counts) rows.set(row.provider, counts);
       }
@@ -15643,7 +16052,7 @@ var UsageMeter = class {
     const reads = due.map((id) => {
       if (!this.allowed()) return Promise.resolve();
       return this.call("usage.session", { cardId: id }).then((answer) => {
-        const value = isRecord11(answer) ? answer : {};
+        const value = isRecord12(answer) ? answer : {};
         const totals = value.measured === true ? countsFrom(value.totals) : null;
         if (!totals) {
           this.cards.set(id, { measured: false, at: this.now() });
@@ -15651,7 +16060,7 @@ var UsageMeter = class {
         }
         const models = Array.isArray(value.models) ? value.models.slice(0, 16).map((entry) => {
           const counts = countsFrom(entry);
-          const model = isRecord11(entry) && typeof entry.model === "string" && entry.model.length <= 120 ? entry.model : null;
+          const model = isRecord12(entry) && typeof entry.model === "string" && entry.model.length <= 120 ? entry.model : null;
           return counts ? { ...counts, model } : null;
         }).filter((entry) => entry !== null) : [];
         const usage = { measured: true, totals, models, at: this.now(), ...this.finished.has(id) ? { done: true } : {} };
@@ -15679,6 +16088,24 @@ function digestOf(providers, rows) {
   const accounts = rows.filter((row) => row.state === "ready").map((row) => `@${row.accountId}`);
   return [.../* @__PURE__ */ new Set([...clis, ...accounts])].join(" ").slice(0, 300);
 }
+function droppedReasons(dropped, max) {
+  const own = [];
+  const byReason = /* @__PURE__ */ new Map();
+  for (const entry of dropped) {
+    if (entry.model) {
+      const line = `${entry.cli} ${entry.model}: ${entry.reason}`;
+      if (!own.includes(line)) own.push(line);
+      continue;
+    }
+    const clis = byReason.get(entry.reason) ?? [];
+    if (!clis.includes(entry.cli)) clis.push(entry.cli);
+    byReason.set(entry.reason, clis);
+  }
+  const grouped = [...byReason].map(([reason, clis]) => `${clis.join(", ")}: ${reason}`);
+  const unscored = (line) => line.includes(": no measured score");
+  const all = [...own.filter(unscored), ...own.filter((line) => !unscored(line)), ...grouped];
+  return all.length > max ? [...all.slice(0, max - 1), `and ${all.length - max + 1} more`] : all;
+}
 var trimSlash = (path) => path.length > 1 ? path.replace(/[\\/]+$/u, "") : path;
 function parseDigest(value) {
   if (typeof value !== "string" || !value.trim()) return null;
@@ -15695,17 +16122,17 @@ function parseDigest(value) {
   }
   return clis.length || accounts.length ? { clis, accounts } : null;
 }
-var clean4 = (value, max) => typeof value === "string" ? value.replace(/[\u0000-\u001f\u007f]+/gu, " ").trim().slice(0, max) : "";
-var isRecord12 = (value) => !!value && typeof value === "object" && !Array.isArray(value);
+var clean5 = (value, max) => typeof value === "string" ? value.replace(/[\u0000-\u001f\u007f]+/gu, " ").trim().slice(0, max) : "";
+var isRecord13 = (value) => !!value && typeof value === "object" && !Array.isArray(value);
 var strings2 = (value, max, length = 200) => Array.isArray(value) ? value.filter((item) => typeof item === "string" && item.length > 0 && item.length <= length).slice(0, max) : [];
 function providersFrom(input) {
-  const raw = Array.isArray(input) ? input : isRecord12(input) && Array.isArray(input.providers) ? input.providers : null;
+  const raw = Array.isArray(input) ? input : isRecord13(input) && Array.isArray(input.providers) ? input.providers : null;
   if (!raw) return { list: [], given: false };
   const list = [];
   for (const candidate of raw.slice(0, 16)) {
-    if (!isRecord12(candidate) || typeof candidate.id !== "string" || !/^[a-z0-9-]{1,40}$/u.test(candidate.id)) continue;
-    const model = isRecord12(candidate.model) ? candidate.model : null;
-    const plugins = Array.isArray(candidate.launchOptions) ? candidate.launchOptions.filter(isRecord12).map((entry) => entry.pluginId).filter((id) => typeof id === "string" && id.length <= 80).slice(0, 16) : void 0;
+    if (!isRecord13(candidate) || typeof candidate.id !== "string" || !/^[a-z0-9-]{1,40}$/u.test(candidate.id)) continue;
+    const model = isRecord13(candidate.model) ? candidate.model : null;
+    const plugins = Array.isArray(candidate.launchOptions) ? candidate.launchOptions.filter(isRecord13).map((entry) => entry.pluginId).filter((id) => typeof id === "string" && id.length <= 80).slice(0, 16) : void 0;
     list.push({
       id: candidate.id,
       ...typeof candidate.installed === "boolean" || candidate.installed === null ? { installed: candidate.installed } : {},
@@ -15722,14 +16149,14 @@ function providersFrom(input) {
   return { list, given: raw.length > 0 && list.length > 0 };
 }
 function accountRowsFrom(input) {
-  const raw = Array.isArray(input) ? input : isRecord12(input) && Array.isArray(input.routes) ? input.routes : [];
+  const raw = Array.isArray(input) ? input : isRecord13(input) && Array.isArray(input.routes) ? input.routes : [];
   const rows = [];
   for (const candidate of raw.slice(0, 48)) {
-    if (!isRecord12(candidate)) continue;
+    if (!isRecord13(candidate)) continue;
     const { provider, accountId, model, endpoint, state } = candidate;
     if (typeof provider !== "string" || !/^[a-z0-9-]{1,40}$/u.test(provider) || typeof accountId !== "string" || !/^[A-Za-z0-9._-]{1,64}$/u.test(accountId)) continue;
     if (typeof model !== "string" || !model || model.length > 200 || typeof endpoint !== "string" || !/^[A-Za-z0-9.:[\]-]{1,120}$/u.test(endpoint) || typeof state !== "string" || state.length > 40) continue;
-    const options = isRecord12(candidate.launchOptions) && isRecord12(candidate.launchOptions["canvastty-accounts"]) ? candidate.launchOptions["canvastty-accounts"] : null;
+    const options = isRecord13(candidate.launchOptions) && isRecord13(candidate.launchOptions["canvastty-accounts"]) ? candidate.launchOptions["canvastty-accounts"] : null;
     const launch = options && options.account === accountId ? { "canvastty-accounts": { account: accountId, effort: typeof options.effort === "string" && /^[a-z]{1,12}$/u.test(options.effort) ? options.effort : "default", trustFolder: false } } : void 0;
     const quota = accountQuotaFrom(candidate.quota);
     rows.push({
@@ -15739,15 +16166,15 @@ function accountRowsFrom(input) {
       endpoint,
       state,
       ...quota ? { quota } : {},
-      ...typeof candidate.account === "string" ? { account: clean4(candidate.account, 60) } : {},
-      ...typeof candidate.reason === "string" ? { reason: clean4(candidate.reason, 160) } : {},
+      ...typeof candidate.account === "string" ? { account: clean5(candidate.account, 60) } : {},
+      ...typeof candidate.reason === "string" ? { reason: clean5(candidate.reason, 160) } : {},
       ...launch ? { launchOptions: launch } : {}
     });
   }
   return rows;
 }
 function accountQuotaFrom(value) {
-  if (!isRecord12(value)) return void 0;
+  if (!isRecord13(value)) return void 0;
   const states = ["ok", "low", "exhausted", "presumed-reset", "unknown", "stale"];
   const state = states.find((entry) => entry === value.state);
   if (!state) return void 0;
@@ -15758,9 +16185,9 @@ function accountQuotaFrom(value) {
     remainingPercent: percent2,
     resetsAt: time2(value.resetsAt),
     observedAt: time2(value.observedAt),
-    source: clean4(value.source, 40) || null,
+    source: clean5(value.source, 40) || null,
     confidence: value.confidence === "exact" || value.confidence === "estimated" ? value.confidence : "none",
-    note: clean4(value.note, 160)
+    note: clean5(value.note, 160)
   };
 }
 var optionRecord = (c, decision, now) => ({
@@ -15841,7 +16268,7 @@ var RouteService = class {
       const parsed = typeof kept.receivedAt === "number" ? parseLimits(kept.snapshot, kept.receivedAt) : null;
       if (parsed) this.limits = { ...parsed, source: "saved" };
       if (Array.isArray(kept.events)) for (const event of kept.events.slice(-MAX_QUOTA_EVENTS)) {
-        if (isRecord12(event) && typeof event.at === "number" && typeof event.provider === "string" && typeof event.kind === "string" && typeof event.note === "string" && ["early-reset", "reset", "exhausted", "recovered", "limit-exit"].includes(event.kind)) this.quotaEvents.push({ at: event.at, provider: clean4(event.provider, 40), kind: event.kind, note: clean4(event.note, 400) });
+        if (isRecord13(event) && typeof event.at === "number" && typeof event.provider === "string" && typeof event.kind === "string" && typeof event.note === "string" && ["early-reset", "reset", "exhausted", "recovered", "limit-exit"].includes(event.kind)) this.quotaEvents.push({ at: event.at, provider: clean5(event.provider, 40), kind: event.kind, note: clean5(event.note, 400) });
       }
     } catch {
     }
@@ -15945,7 +16372,7 @@ var RouteService = class {
   }
   /** The decision for a task, without recording it (tests and the offline replay use it too). */
   async decideFor(caller, input) {
-    const task = clean4(input.task, 4e3);
+    const task = clean5(input.task, 4e3);
     if (!task) return { error: "Give the subagent's task in `task`." };
     let decision = null;
     try {
@@ -15998,7 +16425,7 @@ var RouteService = class {
       spentSinceRead: (cli) => this.measured.get(cli) ?? null,
       pools: peers.pools,
       tokenFactor: (identity) => this.records.tokenFactor(identity, (level) => TASK_TOKENS[level].input + TASK_TOKENS[level].output),
-      prefer: clean4(input.prefer, 200) || null,
+      prefer: clean5(input.prefer, 200) || null,
       orchestrate: input.orchestrate === true,
       explore: { roll: this.random(), retired, highRisk: ruleDifficulty(task) === "hard" }
     });
@@ -16100,8 +16527,12 @@ var RouteService = class {
     });
     const seen = /* @__PURE__ */ new Set();
     const candidates = [decision.top, ...decision.alternatives, ...decision.groups.flat()].filter((c) => !!c && !seen.has(c.key) && !!seen.add(c.key)).filter((c) => !limit2.ownSignIn || c.kind === "subscription" && !c.signIn.startsWith("pool:") || c.kind === "cli-default");
-    const dropped = [...new Set(decision.dropped.map((entry) => `${entry.cli}${entry.model ? ` ${entry.model}` : ""}: ${entry.reason}`))].slice(0, 4);
+    const dropped = droppedReasons(decision.dropped, 4);
     return { candidates, dropped };
+  }
+  /** Accounts' routes and pools, CanvasTTY's provider list and measured use, read now (start, page open). */
+  async refreshPeers() {
+    await this.peerInputs();
   }
   /**
    * What the Assistant reads itself before a decision (each where the core and the person allow it, within a short
@@ -16196,7 +16627,7 @@ var RouteService = class {
     return { providers, accountRows };
   }
   async route(caller, input, name = "route") {
-    if (!clean4(input.task, 4e3)) return { content: "Give the subagent's task in `task`.", isError: true };
+    if (!clean5(input.task, 4e3)) return { content: "Give the subagent's task in `task`.", isError: true };
     if (!this.options.enabled()) return { content: "Automatic routing is off in the Assistant settings: choose the provider and model yourself." };
     const decided = await this.decideFor(caller, input);
     if ("error" in decided) return { content: decided.error, isError: true };
@@ -16209,7 +16640,7 @@ var RouteService = class {
     }
     const serverLines = servers.map((entry) => `On your server ${entry.server} (${entry.spawn.provider}, its own sign-in there): spawn_agent ${JSON.stringify(entry.spawn)}.`);
     if (!decision.top) {
-      const reasons = [...new Set(decision.dropped.map((entry) => `${entry.cli}${entry.model ? ` ${entry.model}` : ""}: ${entry.reason}`))].slice(0, 6);
+      const reasons = droppedReasons(decision.dropped, 6);
       if (servers.length) return { content: `No route on this computer is usable now${reasons.length ? ` (${reasons.join("; ")})` : ""}.
 ${serverLines.join("\n")}
 ${JSON.stringify({ servers })}` };
@@ -16243,8 +16674,8 @@ ${JSON.stringify({ servers })}` };
     }
     const now2 = this.now();
     for (const [id, kept] of this.tasks) if (now2 - kept.at > MATCH_MS) this.tasks.delete(id);
-    const cwd = clean4(input.cwd, 4096);
-    this.tasks.set(record4.id, { text: clean4(input.task, 2e3), cwd: cwd ? trimSlash(cwd) : null, at: now2 });
+    const cwd = clean5(input.cwd, 4096);
+    this.tasks.set(record4.id, { text: clean5(input.task, 2e3), cwd: cwd ? trimSlash(cwd) : null, at: now2 });
     while (this.tasks.size > 64) this.tasks.delete(this.tasks.keys().next().value);
     const compact = input.compact === true || input.compact !== false && name === "pick_route";
     if (compact) {
@@ -16317,11 +16748,11 @@ ${JSON.stringify({
     return out;
   }
   outcome(caller, input) {
-    const id = clean4(input.decisionId, 40);
-    const session = clean4(input.sessionId, 80);
+    const id = clean5(input.decisionId, 40);
+    const session = clean5(input.sessionId, 80);
     const record4 = (id ? this.records.get(id) : void 0) ?? (session ? this.bySessionFull(session) : void 0);
     if (!record4 || this.owners.get(record4.id) !== caller.id) return { content: "No route decision of yours with that decisionId (or sessionId).", isError: true };
-    const status = clean4(input.status, 20).toLowerCase();
+    const status = clean5(input.status, 20).toLowerCase();
     if (!["done", "failed", "error", "cancelled", "canceled", "timeout", "idle", "exited"].includes(status)) return { content: "status must be done, failed, cancelled or timeout (from wait_for_agent / get_agent_result).", isError: true };
     const result = classifyOutcome(status === "timeout" ? "failed" : status, strings2(input.exitLines, 40, 400));
     const ok = typeof input.ok === "boolean" ? input.ok && result === "done" : void 0;
@@ -16357,12 +16788,12 @@ ${JSON.stringify({
    * sign-ins and keep running. A later read with room or a reset ends the rest, as for a limit exit.
    */
   limitExhausted(event) {
-    if (!isRecord12(event) || event.type !== "limit.exhausted" || typeof event.provider !== "string" || !/^[a-z0-9-]{1,40}$/u.test(event.provider)) return false;
+    if (!isRecord13(event) || event.type !== "limit.exhausted" || typeof event.provider !== "string" || !/^[a-z0-9-]{1,40}$/u.test(event.provider)) return false;
     if (event.accountId !== void 0 && event.accountId !== "default") return false;
     const now = this.now();
     const cli = event.provider;
-    const window = isRecord12(event.window) ? event.window : {};
-    const label2 = clean4(window.label, 40) || clean4(window.id, 60) || "a window";
+    const window = isRecord13(event.window) ? event.window : {};
+    const label2 = clean5(window.label, 40) || clean5(window.id, 60) || "a window";
     const stated = typeof event.resetAt === "number" && Number.isFinite(event.resetAt) && event.resetAt > now ? event.resetAt : null;
     const windowReset = this.limits?.providers.find((entry) => entry.provider === cli)?.windows.map((w) => w.resetsAt).filter((at) => at !== null && at > now).sort((a, b) => a - b)[0];
     const reset = stated ?? windowReset;
@@ -16576,7 +17007,7 @@ var FEED = Object.freeze({
   reprobeMs: 30 * 6e4,
   jitter: 0.15
 });
-var isRecord13 = (value) => !!value && typeof value === "object" && !Array.isArray(value);
+var isRecord14 = (value) => !!value && typeof value === "object" && !Array.isArray(value);
 var errorText2 = (error) => error instanceof Error ? error.message : String(error);
 var LimitsFeed = class {
   mode = "probing";
@@ -16647,7 +17078,7 @@ var LimitsFeed = class {
       }
       this.subscribed = true;
       this.mode = "core";
-      if (isRecord13(last) && last.state === "ready" && last.snapshot) this.options.sink.receiveLimits(last, "core");
+      if (isRecord14(last) && last.state === "ready" && last.snapshot) this.options.sink.receiveLimits(last, "core");
     }
     let answer;
     try {
@@ -16658,7 +17089,7 @@ var LimitsFeed = class {
       this.lastError = errorText2(error).slice(0, 160);
       return false;
     }
-    const outer = isRecord13(answer) ? answer : null;
+    const outer = isRecord14(answer) ? answer : null;
     if (outer && outer.state !== void 0 && outer.state !== "ready" && !("snapshot" in outer)) {
       this.mode = "core";
       this.failures++;
@@ -16684,7 +17115,7 @@ var LimitsFeed = class {
    */
   changed(params) {
     if (this.stopped) return;
-    const value = isRecord13(params) ? params : {};
+    const value = isRecord14(params) ? params : {};
     if (value.home !== void 0) return;
     this.mode = "core";
     this.subscribed = true;
@@ -17072,6 +17503,8 @@ var Assistant = class {
   leaves = /* @__PURE__ */ new Map();
   /** Orchestrators "Start with Auto (Jev)" started: where they run. */
   started = /* @__PURE__ */ new Map();
+  /** Launches this service refused (they never started), by full session id, for the agent tree's counts. */
+  refused = /* @__PURE__ */ new Set();
   /** Whether this CanvasTTY lets a plugin start an orchestrator (B8): null until asked. */
   b8 = null;
   constructor(options) {
@@ -17186,6 +17619,29 @@ var Assistant = class {
   get pageLocale() {
     return this.locale;
   }
+  warming = null;
+  pageWarmed = false;
+  /**
+   * The first reads of this service run, so the settings page and the first decisions see Accounts' routes and quota
+   * and the limit windows at once, not "not read yet" until something routes: limits.get (the feed's read, shared
+   * when one runs), Accounts' accounts.routes and accounts.quota (plugins.request, where the person allowed it), and
+   * what the routing view keeps of them. At service start and when the person first opens the settings page.
+   */
+  warmReads() {
+    this.warming ??= (async () => {
+      await Promise.allSettled([this.limitsFeed.read(), this.accounts.warm()]);
+      await this.routing.refreshPeers().catch(() => void 0);
+    })().finally(() => {
+      this.warming = null;
+    });
+    return this.warming;
+  }
+  /** The settings page asked for its state the first time this run: the same reads, then it is told to reload. */
+  pageOpened() {
+    if (this.pageWarmed) return;
+    this.pageWarmed = true;
+    void this.warmReads().then(() => this.host.emit("settings", null), () => void 0);
+  }
   /**
    * `canvastty.activity`: `limit.exhausted` (CanvasTTY saw the default login's window of a CLI used up, provider-wide)
    * rests that CLI's own sign-in routes until the reset; other activity is ignored.
@@ -17280,6 +17736,7 @@ var Assistant = class {
       this.autoTop.delete(session.id);
       this.leaves.delete(session.id);
       this.started.delete(session.id);
+      this.refused.delete(session.id);
       this.sessions.delete(session.id);
       this.review.forget(session.id);
       this.classes.delete(session.id);
@@ -17311,6 +17768,14 @@ var Assistant = class {
    * (which counted it as one) is gone and a saved value of it is ignored.
    */
   async launch(context) {
+    const answer = await this.launchAnswer(context);
+    if (answer && "refuse" in answer && answer.refuse) {
+      this.refused.add(context.sessionId);
+      while (this.refused.size > 1024) this.refused.delete(this.refused.keys().next().value);
+    } else this.refused.delete(context.sessionId);
+    return answer;
+  }
+  async launchAnswer(context) {
     const ask = launchAsk(context);
     if (context.chosen === false) return ask ? this.policy(context) : null;
     const options = context.options ?? {};
@@ -17534,7 +17999,9 @@ ${JSON.stringify({ ...plan3, type: view.type, level: view.level, shape: shaped.s
     if (!sessionId) return { started: false, code: "refused" };
     this.bindings.markAuto(sessionId);
     this.bindings.setPlan(sessionId, plan3.children);
-    this.started.set(sessionId, { server, provider: spawn.provider });
+    this.review.notePersonStart(sessionId, task);
+    const treeRoute = { model: candidate.model, identity: candidate.identity, kind: candidate.kind, label: candidate.label, costBasis: candidate.costBasis, estimate: candidate.estimate };
+    this.started.set(sessionId, { server, provider: spawn.provider, route: treeRoute });
     while (this.started.size > 64) this.started.delete(this.started.keys().next().value);
     void this.host.callHost("sessions.send", { sessionId, text: `${task.replace(/\s*\n\s*/gu, " ")} \u2014 ${AUTOPILOT_PROMPT} ${planText(plan3)}` }).catch(() => void 0);
     return { started: true, sessionId, provider: spawn.provider, route: label2, kind: candidate.kind, server, plan: { mode: plan3.mode, children: plan3.children } };
@@ -17744,7 +18211,8 @@ ${JSON.stringify({ ...a, model: answer.model })}` };
           ...used.totals.providerCostEstimate !== void 0 ? { providerEstimate: Math.round(used.totals.providerCostEstimate * 1e4) / 1e4 } : {}
         };
       },
-      route: (id) => this.routing.routeOf(id),
+      route: (id) => this.routing.routeOf(id) ?? this.started.get(id)?.route ?? null,
+      refused: (id) => this.refused.has(id),
       task: (id) => this.review.taskOf(id),
       planChildren: (id) => this.bindings.planOf(id),
       endedAt: (id) => this.harness.finished(id),
@@ -17961,6 +18429,7 @@ serve({
     await assistant.auto.resume();
     resolveReady(assistant);
     void assistant.limitsFeed.start().catch((error) => host.log("warn", `limits: ${error instanceof Error ? error.message : String(error)}`));
+    void assistant.warmReads();
     if (failed.length) retryStored(host, failed, (stored) => assistant?.storageRecovered(stored));
     try {
       const answer = await host.callHost("sessions.subscribe", {});
@@ -17984,6 +18453,16 @@ serve({
     // limit.exhausted (provider-wide, the default login): that CLI's own sign-in routes rest until the reset.
     "canvastty.activity": (params) => {
       assistant?.activity(params);
+    },
+    // Brokered requests (Auto through another extension's account): the answer, then its chunks, then the end.
+    "canvastty.accounts.head": (params) => {
+      assistant?.auto.broker.notification("head", params);
+    },
+    "canvastty.accounts.chunk": (params) => {
+      assistant?.auto.broker.notification("chunk", params);
+    },
+    "canvastty.accounts.end": (params) => {
+      assistant?.auto.broker.notification("end", params);
     }
   },
   methods: {
@@ -18018,6 +18497,7 @@ serve({
     // "Where agents run" on the decision models page (route v2).
     "route.state": async () => {
       const a = await ready;
+      a.pageOpened();
       return {
         ...a.routing.state(),
         feed: { mode: a.limitsFeed.mode, lastReadAt: a.limitsFeed.lastReadAt, lastError: a.limitsFeed.lastError },
@@ -18027,6 +18507,7 @@ serve({
     // Accounts' quota through plugins.request (after the person approved the pair), for the page.
     "route.accountsQuota": async (params) => {
       const a = await ready;
+      a.pageOpened();
       const quota = await a.accounts.quota(6e4, 3e3, params?.force === true);
       return { ...a.accounts.state(), quota };
     },

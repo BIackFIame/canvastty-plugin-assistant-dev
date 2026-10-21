@@ -129,6 +129,12 @@ interface SessionState {
   launchTask: string | null;
   /** The card's user turns as the Auto router saw them: the first one, then the latest few (oldest first). */
   turns: string[];
+  /**
+   * The task the person typed on "Start with Auto (Jev)" for the orchestrator this plugin then started (core B8),
+   * bound to that card by its full session id: the person's own text like the launcher's Task field. Never set for
+   * a subagent; the launcher's own task does not replace it.
+   */
+  startTask: string | null;
   /** A subagent's own texts are its orchestrator's, not the person's. */
   subagent: boolean;
   parent: string | null;
@@ -452,7 +458,7 @@ export class ReviewService {
   private state(sessionId: string): SessionState {
     let state = this.sessions.get(sessionId);
     if (!state) {
-      state = { suspect: false, launchTask: null, turns: [], subagent: false, parent: null, dataClass: null, strict: false, reviewed: new Map() };
+      state = { suspect: false, launchTask: null, turns: [], startTask: null, subagent: false, parent: null, dataClass: null, strict: false, reviewed: new Map() };
       this.sessions.set(sessionId, state);
       // The oldest session goes from every per-session map, not only this one.
       while (this.sessions.size > MAX_SESSIONS) this.forget(this.sessions.keys().next().value!);
@@ -470,6 +476,23 @@ export class ReviewService {
     state.dataClass = launch.dataClass;
     state.strict = launch.triage ? 'pending' : false;
     if (launch.role !== undefined) { state.subagent = launch.role === 'subagent'; state.parent = state.subagent ? launch.parentSessionId ?? null : null; }
+    // A start task belongs to a top-level orchestrator only: a card that turns out to be a subagent has none.
+    if (state.subagent) state.startTask = null;
+  }
+
+  /**
+   * "Start with Auto (Jev)": the person typed `task` on the Assistant's page, and this plugin started the orchestrator
+   * `sessionId` (core B8) with it. Recorded for that card only (its full session id, as sessions.create answered it),
+   * as the person's own text for its reviews and for the trust chain of its subagents, the same as a task typed in
+   * the launcher's Task field or a turn its Auto router saw. Memory only, until the card closes.
+   */
+  notePersonStart(sessionId: string, task: string): void {
+    const value = task.trim().slice(0, MAX_REQUEST_CHARS);
+    if (!sessionId || !value) return;
+    const state = this.state(sessionId);
+    state.subagent = false;
+    state.parent = null;
+    state.startTask = value;
   }
 
   /**
@@ -492,11 +515,11 @@ export class ReviewService {
   /** The task a card was given, for the agent tree: the launcher's task, else its first turn. */
   taskOf(sessionId: string): string | null {
     const state = this.sessions.get(sessionId);
-    return state ? state.launchTask ?? state.turns[0] ?? null : null;
+    return state ? state.launchTask ?? state.startTask ?? state.turns[0] ?? null : null;
   }
 
   /** A card's own texts, most recent first: its latest turn, its earlier turns, then the launcher's task. */
-  private ownTexts(state: SessionState): string[] { return distinct([...[...state.turns].reverse(), state.launchTask]); }
+  private ownTexts(state: SessionState): string[] { return distinct([...[...state.turns].reverse(), state.launchTask, state.subagent ? null : state.startTask]); }
 
   /** The texts the person typed for this card or, for a subagent, for the nearest card above it that is not one. */
   private personTexts(state: SessionState): string[] {

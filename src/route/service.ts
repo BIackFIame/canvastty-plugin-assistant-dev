@@ -19,7 +19,7 @@ import type { AutoPreference } from '../auto/settings.ts';
 import { ruleDifficulty } from '../harness/router.ts';
 import type { DataClass, DataClassMode } from '../shared/settings.ts';
 import { ALIAS_TABLE_AS_OF, BUNDLED_ALIASES, resolveModel } from './aliases.ts';
-import { decide, estimateText, modelText, TASK_TOKENS, whyLine, type AccountRow, type AutoExpectation, type Candidate, type ProviderInfo, type RouteDecision } from './engine.ts';
+import { decide, estimateText, modelText, TASK_TOKENS, whyLine, type AccountRow, type AutoExpectation, type Candidate, type Dropped, type ProviderInfo, type RouteDecision } from './engine.ts';
 import { earlyNote, limitChanges, mergeLimits, parseLimits, quotaOf, resetFromText, STALE_MS, type EarlyResetDetail, type LimitChange, type LimitsCache, type LimitsSource } from './limits.ts';
 import { classifyOutcome, RouteRecords, type OptionRecord, type OutcomeResult, type RouteRecord } from './records.ts';
 import { normalizeRouteSettings, validateRouteSettings, type RouteSettings } from './settings.ts';
@@ -50,6 +50,27 @@ function digestOf(providers: { list: ProviderInfo[] }, rows: AccountRow[]): stri
   const clis = providers.list.filter(entry => entry.available !== false && entry.installed !== false).map(entry => `${entry.id}${entry.signIn && entry.signIn !== 'unknown' ? `:${entry.signIn}` : ''}`);
   const accounts = rows.filter(row => row.state === 'ready').map(row => `@${row.accountId}`);
   return [...new Set([...clis, ...accounts])].join(' ').slice(0, 300);
+}
+
+/**
+ * Why routes were left out, for an answer: a model's own route (an account, a plan) first, then the CLIs left out
+ * for the same reason in one line ("codex, claude: its CLI is not installed or not available"), and how many more.
+ * Every usable-but-unscored account is named, never cut off behind the CLIs that are not installed.
+ */
+export function droppedReasons(dropped: readonly Dropped[], max: number): string[] {
+  const own: string[] = [];
+  const byReason = new Map<string, string[]>();
+  for (const entry of dropped) {
+    if (entry.model) { const line = `${entry.cli} ${entry.model}: ${entry.reason}`; if (!own.includes(line)) own.push(line); continue; }
+    const clis = byReason.get(entry.reason) ?? [];
+    if (!clis.includes(entry.cli)) clis.push(entry.cli);
+    byReason.set(entry.reason, clis);
+  }
+  const grouped = [...byReason].map(([reason, clis]) => `${clis.join(', ')}: ${reason}`);
+  // Ready routes left out only for want of a score come first: the person can pin, boost or allow new models.
+  const unscored = (line: string): boolean => line.includes(': no measured score');
+  const all = [...own.filter(unscored), ...own.filter(line => !unscored(line)), ...grouped];
+  return all.length > max ? [...all.slice(0, max - 1), `and ${all.length - max + 1} more`] : all;
 }
 
 const trimSlash = (path: string): string => path.length > 1 ? path.replace(/[\\/]+$/u, '') : path;
@@ -437,9 +458,12 @@ export class RouteService {
     const candidates = [decision.top, ...decision.alternatives, ...decision.groups.flat()]
       .filter((c): c is Candidate => !!c && !seen.has(c.key) && !!seen.add(c.key))
       .filter(c => !limit.ownSignIn || (c.kind === 'subscription' && !c.signIn.startsWith('pool:')) || c.kind === 'cli-default');
-    const dropped = [...new Set(decision.dropped.map(entry => `${entry.cli}${entry.model ? ` ${entry.model}` : ''}: ${entry.reason}`))].slice(0, 4);
+    const dropped = droppedReasons(decision.dropped, 4);
     return { candidates, dropped };
   }
+
+  /** Accounts' routes and pools, CanvasTTY's provider list and measured use, read now (start, page open). */
+  async refreshPeers(): Promise<void> { await this.peerInputs(); }
 
   /**
    * What the Assistant reads itself before a decision (each where the core and the person allow it, within a short
@@ -542,7 +566,7 @@ export class RouteService {
     for (const entry of servers) { const bound = this.options.bindSpawn?.(caller.id, entry.spawn, randomUUID().slice(0, 8), false); if (bound) entry.spawn = bound; }
     const serverLines = servers.map(entry => `On your server ${entry.server} (${entry.spawn.provider}, its own sign-in there): spawn_agent ${JSON.stringify(entry.spawn)}.`);
     if (!decision.top) {
-      const reasons = [...new Set(decision.dropped.map(entry => `${entry.cli}${entry.model ? ` ${entry.model}` : ''}: ${entry.reason}`))].slice(0, 6);
+      const reasons = droppedReasons(decision.dropped, 6);
       if (servers.length) return { content: `No route on this computer is usable now${reasons.length ? ` (${reasons.join('; ')})` : ''}.\n${serverLines.join('\n')}\n${JSON.stringify({ servers })}` };
       return { content: `No route is usable now${reasons.length ? `: ${reasons.join('; ')}` : ''}. Call list_providers and choose a provider yourself, or ask the person.` };
     }

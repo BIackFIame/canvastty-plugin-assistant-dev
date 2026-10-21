@@ -20,6 +20,7 @@ import {
   type AutoRoutingSettings, type AutoUpstream
 } from './settings.ts';
 import type { LaunchGrant } from './tokens.ts';
+import { AccountBroker, type BrokeredAccount, type BrokerMode } from './broker.ts';
 
 /**
  * Auto (Jev) inside the Assistant service: its settings (storage key `autoRouting`), the router, the launch
@@ -29,6 +30,10 @@ import type { LaunchGrant } from './tokens.ts';
 export const AUTO_STORAGE_KEY = 'autoRouting';
 export const PLUGIN_ID = 'canvastty-assistant';
 const TEST_TIMEOUT_MS = 10_000;
+/** CanvasTTY allows 4 open brokered requests per account and caller: a fan-out stays under it. */
+const BROKER_PARALLEL = 4;
+/** A launch waits at most this long for CanvasTTY's list of brokered accounts. */
+const BROKER_LIST_MS = 2_000;
 
 export interface AutoServiceOptions {
   host: Host;
@@ -89,6 +94,8 @@ export class AutoService {
   readable: boolean;
   readonly router: AutoRouter;
   readonly catalog: CatalogStore;
+  /** Accounts other extensions keep, called through CanvasTTY without their keys (an older core lists none). */
+  readonly broker: AccountBroker;
   private readonly options: AutoServiceOptions;
   private memo: { settings: AutoRoutingSettings; version: number; hour: number; inventory: Inventory } | null = null;
   private index: { version: number; hour: number; index: BenchmarkIndex } | null = null;
@@ -105,6 +112,8 @@ export class AutoService {
       onChange: () => { this.memo = null; }
     });
     this.configureCatalog();
+    this.broker = new AccountBroker(options.host, { ...(options.now ? { now: options.now } : {}), log: (level, message) => options.host.log(level, message) });
+    const parallelCap = options.parallelCap;
     this.router = new AutoRouter({
       directory: join(options.dataDir, 'auto'),
       settings: () => this.settings,
@@ -115,7 +124,12 @@ export class AutoService {
       ...(options.turn ? { turn: options.turn } : {}),
       badge: (sessionId, model) => options.publishBadge(sessionId, model ? () => ({ text: badgeText(model.model), tone: 'neutral', tooltip: AUTO_STRINGS[this.options.locale].badgeTip(model.tier, model.source) }) : null),
       log: (level, message) => options.host.log(level, message),
-      ...(options.parallelCap ? { parallelCap: options.parallelCap } : {}),
+      parallelCap: upstream => upstream.preset === 'account' ? BROKER_PARALLEL : parallelCap?.(upstream) ?? null,
+      broker: {
+        send: (upstream, path, init) => this.broker.send(upstream.account ?? '', path, init as Parameters<AccountBroker['send']>[2]),
+        ready: upstream => this.accountReady(upstream),
+        refresh: async () => { await this.broker.list(); }
+      },
       noProviderMessage: () => AUTO_STRINGS[this.options.locale].noProvider,
       ...(options.jevOnly ? { jevOnly: options.jevOnly } : {}),
       ...(options.transport ? { transport: options.transport } : {}),
@@ -131,6 +145,19 @@ export class AutoService {
     if (!stored) return null;
     // A key saved for another address is never sent anywhere else.
     return stored.origin === originOf(upstream.baseUrl) ? stored.value : null;
+  }
+
+  /** An account upstream CanvasTTY lists now (granted by the person, offered by its owner) for a model it offers. */
+  accountReady(upstream: AutoUpstream): boolean {
+    if (upstream.preset !== 'account' || !upstream.account) return false;
+    const account = this.broker.known(upstream.account);
+    return !!account && account.protocol === 'openai' && account.paths.includes('/chat/completions');
+  }
+
+  /** The inventory without account upstreams CanvasTTY does not list now (no grant, owner off, older core). */
+  private reachableInventory(inventory: Inventory): Inventory {
+    if (!inventory.entries.some(entry => entry.upstream.preset === 'account')) return inventory;
+    return { ...inventory, entries: inventory.entries.filter(entry => entry.upstream.preset !== 'account' || this.accountReady(entry.upstream)) };
   }
 
   setLocale(locale: Locale): void { this.options.locale = locale; }
@@ -169,7 +196,10 @@ export class AutoService {
   /** `model: "auto"` for this launch: refuse with a reason, or the contribution with a fresh key. Never waits on a model. */
   async prepare(input: AutoPrepareInput): Promise<AutoPrepareAnswer> {
     const strings = AUTO_STRINGS[this.options.locale];
-    const inventory = this.inventory();
+    if (this.settings.upstreams.some(upstream => upstream.enabled && upstream.preset === 'account')) {
+      await Promise.race([this.broker.list(), new Promise(resolve => setTimeout(resolve, BROKER_LIST_MS).unref?.())]);
+    }
+    const inventory = this.reachableInventory(this.inventory());
     const refusal = autoRefusal({ provider: input.provider, role: input.role, cwd: input.cwd, environment: input.environment, dataClass: input.dataClass, settings: this.settings, mode: this.options.dataClassMode(), inventory });
     if (refusal === 'listLoading') void this.catalog.refresh().catch(() => undefined);
     if (refusal) return { refuse: { reason: strings[refusal] } };
@@ -196,7 +226,10 @@ export class AutoService {
   async expectation(view: TurnView, cardClass: DataClass): Promise<{ model: string; identity: string | null; effort: ReasoningEffort | null; priceIn: number | null; priceOut: number | null; trusted: boolean } | null> {
     const mode = this.options.dataClassMode();
     const keyed: AutoUpstream[] = [];
-    for (const upstream of this.settings.upstreams) if (upstream.enabled && (upstream.key === 'none' || await this.keyFor(upstream).catch(() => null))) keyed.push(upstream);
+    for (const upstream of this.settings.upstreams) {
+      if (!upstream.enabled) continue;
+      if (upstream.preset === 'account' ? this.accountReady(upstream) : upstream.key === 'none' || await this.keyFor(upstream).catch(() => null)) keyed.push(upstream);
+    }
     if (!keyed.length || this.settings.dailyUsdCap <= 0) return null;
     const ids = new Set(keyed.map(upstream => upstream.id));
     const entries = this.inventory().entries.filter(entry => ids.has(entry.upstream.id) && !entry.excluded);
@@ -217,7 +250,7 @@ export class AutoService {
   sessionsKnown(ids: ReadonlySet<string>): void { this.router.retainSessions(ids); }
   /** Service start: the catalog caches are read, and cards that still hold keys get their listener back. */
   async resume(): Promise<void> { await this.catalog.load(); await this.router.resume(); }
-  stop(): Promise<void> { this.catalog.dispose(); return this.router.stop(); }
+  stop(): Promise<void> { this.catalog.dispose(); this.broker.close(); return this.router.stop(); }
 
   /** «Обновить каталог»: downloads every source now (fixed public addresses; no task text, no key). */
   async refreshCatalog(): Promise<CatalogStatus> {
@@ -252,10 +285,12 @@ export class AutoService {
   // The decision models page
   // ---------------------------------------------------------------------------------------------------------------
 
-  async state(): Promise<{ jevKey: boolean; settings: AutoRoutingSettings; readable: boolean; keys: Record<string, boolean>; recent: DecisionRecord[]; stats: RouterStats & { spentToday: number; callsToday?: number; listening: boolean; cards: number }; catalog: CatalogStatus; models: Record<string, ModelRow[]>; waitingForList: string[]; outcomes: Record<string, RouteOutcome> }> {
+  async state(): Promise<{ jevKey: boolean; settings: AutoRoutingSettings; readable: boolean; keys: Record<string, boolean>; recent: DecisionRecord[]; stats: RouterStats & { spentToday: number; callsToday?: number; listening: boolean; cards: number }; catalog: CatalogStatus; models: Record<string, ModelRow[]>; waitingForList: string[]; outcomes: Record<string, RouteOutcome>; brokered: { mode: BrokerMode; accounts: BrokeredAccount[] } }> {
+    const accounts = await this.broker.list();
     const keys: Record<string, boolean> = {};
-    for (const upstream of this.settings.upstreams) keys[upstream.id] = upstream.key === 'none' ? true : !!(await this.keyFor(upstream).catch(() => null));
-    return { jevKey: await this.jevKey(), settings: this.settings, readable: this.readable, keys, recent: this.router.recent(), stats: this.router.statsView(), catalog: this.catalog.status(), models: this.modelRows(), waitingForList: this.inventory().waitingForList, outcomes: this.router.routeOutcomes() };
+    for (const upstream of this.settings.upstreams) keys[upstream.id] = upstream.preset === 'account' ? this.accountReady(upstream) : upstream.key === 'none' ? true : !!(await this.keyFor(upstream).catch(() => null));
+    return { jevKey: await this.jevKey(), settings: this.settings, readable: this.readable, keys, recent: this.router.recent(), stats: this.router.statsView(), catalog: this.catalog.status(), models: this.modelRows(), waitingForList: this.inventory().waitingForList, outcomes: this.router.routeOutcomes(),
+      brokered: { mode: this.broker.mode, accounts } };
   }
 
   async save(value: unknown): Promise<AutoRoutingSettings> {
@@ -285,6 +320,7 @@ export class AutoService {
     const upstream = this.settings.upstreams.find(entry => entry.id === upstreamId);
     if (!upstream) throw new Error('Unknown upstream.');
     if (isJevOnlyUpstream(upstream)) throw new Error(AUTO_STRINGS[this.options.locale].jevOnly);
+    if (upstream.preset === 'account') return this.testAccount(upstream);
     const key = await this.keyFor(upstream);
     if (upstream.key !== 'none' && !key) return { ok: false, status: null, missing: [], listed: null };
     const controller = new AbortController();
@@ -303,6 +339,24 @@ export class AutoService {
       return { ok: true, status: answer.status, missing: ids.size ? upstream.models.map(model => model.id).filter(id => !ids.has(id)) : [], listed: ids.size };
     } catch {
       return { ok: false, status: null, missing: [], listed: null };
+    } finally { clearTimeout(timer); }
+  }
+
+  /** «Проверить» for an account upstream: CanvasTTY's GET /models through the broker (no prompt, no tokens). */
+  private async testAccount(upstream: AutoUpstream): Promise<{ ok: boolean; status: number | null; missing: string[]; listed: number | null }> {
+    this.broker.invalidate();
+    const account = (await this.broker.list()).find(entry => entry.ref === upstream.account);
+    if (!account) return { ok: false, status: null, missing: [], listed: null };
+    const missing = upstream.models.map(model => model.id).filter(id => !account.models.includes(id));
+    if (!account.paths.includes('/models')) return { ok: true, status: null, missing, listed: account.models.length };
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), TEST_TIMEOUT_MS);
+    try {
+      const answer = await this.broker.send(account.ref, '/models', { method: 'GET', signal: controller.signal });
+      await answer.text().catch(() => '');
+      return { ok: answer.ok, status: answer.status, missing, listed: account.models.length };
+    } catch {
+      return { ok: false, status: null, missing, listed: null };
     } finally { clearTimeout(timer); }
   }
 }

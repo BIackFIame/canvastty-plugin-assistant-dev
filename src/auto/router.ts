@@ -57,6 +57,11 @@ export interface RouterDeps {
   /** At most this many calls at once on a subscription-like (flat-rate) upstream; null: no such cap. */
   parallelCap?(upstream: AutoUpstream): number | null;
   log?(level: 'info' | 'warn', message: string): void;
+  /**
+   * An `account` upstream (another extension's account): the call goes through CanvasTTY's broker, which adds the
+   * key itself; the answer is a Response like fetch's. `ready` says whether CanvasTTY lists the account now.
+   */
+  broker?: { send(upstream: AutoUpstream, path: string, init: RequestInit): Promise<Response>; ready(upstream: AutoUpstream): boolean; refresh(): Promise<void> };
   transport?: typeof fetch;
   now?: () => number;
   timeouts?: Partial<RouterTimeouts>;
@@ -541,11 +546,23 @@ export class AutoRouter {
     return rules(settings.decider === 'rules' ? 'rules_only' : 'no_text');
   }
 
+  /** An account upstream only while CanvasTTY's broker lists it (granted and offered); every other one always. */
+  private reachable(upstream: AutoUpstream): boolean {
+    return upstream.preset !== 'account' || (this.deps.broker?.ready(upstream) ?? false);
+  }
+
+  /** The model call: fetch for a direct upstream, CanvasTTY's broker for another extension's account. */
+  private send(upstream: AutoUpstream, url: string, init: RequestInit): Promise<Response> {
+    if (upstream.preset !== 'account') return this.transport(url, init);
+    if (!this.deps.broker) return Promise.reject(new Error('No broker for account upstreams.'));
+    return this.deps.broker.send(upstream, '/chat/completions', init);
+  }
+
   /** Who may take this request now: enabled, allowed, trusted with the card's class, not cooling down, large enough. */
   private usable(grant: LaunchGrant, promptTokens: number, maxTokens: unknown): InventoryEntry[] {
     const mode = this.deps.dataClassMode();
     const healthy = this.deps.inventory().entries.filter(entry => entry.upstream.enabled && !entry.excluded && !modelTrafficForbidden(entry.upstream.baseUrl)
-      && upstreamAllowed(entry.upstream, grant.dataClass, mode) && !this.coolingDown(entry.upstream.id, entry.model));
+      && this.reachable(entry.upstream) && upstreamAllowed(entry.upstream, grant.dataClass, mode) && !this.coolingDown(entry.upstream.id, entry.model));
     // A model whose known context or output is too small for this request is left out, unless none would remain.
     const wanted = typeof maxTokens === 'number' && maxTokens > 0 ? maxTokens : 0;
     const fits = healthy.filter(entry => (entry.context === null || entry.context >= promptTokens + Math.min(wanted, 4_096)) && (entry.output === null || !wanted || entry.output >= Math.min(wanted, 32_768)));
@@ -610,6 +627,8 @@ export class AutoRouter {
         this.leases.set(keys.conversation, { sessionId: grant.sessionId, turn: keys.turn, contract: keys.contract, view, model: preferred, source: record.source, decidedAt: record.source === 'lease' && lease ? lease.decidedAt : this.now() });
         while (this.leases.size > ROUTER_LIMITS.conversations) this.leases.delete(this.leases.keys().next().value!);
       }
+      // Which accounts CanvasTTY brokers for this plugin now (cached for seconds; nothing on an older core).
+      if (settings.upstreams.some(upstream => upstream.enabled && upstream.preset === 'account')) await this.deps.broker?.refresh().catch(() => undefined);
       const chosen = plan(this.usable(grant, Math.ceil(raw.length / 4), body.max_tokens), request, { preference: settings.preference, cheaperFallback: settings.cheaperFallback });
       record.why = chosen.why;
       if (chosen.bestEntry && chosen.best !== null) {
@@ -737,7 +756,7 @@ export class AutoRouter {
         this.hosts.add(new URL(url).host);
         let upstream: Response;
         try {
-          upstream = await this.transport(url, {
+          upstream = await this.send(candidate.upstream, url, {
             method: 'POST', body: payload, signal: attempt.signal, redirect: 'error',
             headers: { 'content-type': 'application/json', accept: stream ? 'text/event-stream' : 'application/json', ...(key ? { authorization: `Bearer ${key}` } : {}) }
           });
@@ -898,7 +917,7 @@ export class AutoRouter {
     try {
       let upstream: Response;
       try {
-        upstream = await this.transport(url, { method: 'POST', body: Buffer.from(JSON.stringify({ ...body, model: entry.model, ...effort }), 'utf8'), signal: attempt.signal, redirect: 'error',
+        upstream = await this.send(entry.upstream, url, { method: 'POST', body: Buffer.from(JSON.stringify({ ...body, model: entry.model, ...effort }), 'utf8'), signal: attempt.signal, redirect: 'error',
           headers: { 'content-type': 'application/json', accept: stream ? 'text/event-stream' : 'application/json', ...(key ? { authorization: `Bearer ${key}` } : {}) } });
       } catch {
         if (stop.aborted && !late) return done('stopped');

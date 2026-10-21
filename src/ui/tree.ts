@@ -11,9 +11,9 @@ type Cost =
   | { kind: 'flat'; label: string };
 interface TreeNode {
   id: string; title: string; role: string; provider: string; model: string | null; status: Status; task: string | null;
-  cost: Cost | null; usage?: { tokens: number; providerEstimate?: number } | null; startedAt: number | null; endedAt: number | null; planChildren: number | null; descendants: number; children: TreeNode[];
+  cost: Cost | null; usage?: { tokens: number; providerEstimate?: number } | null; startedAt: number | null; endedAt: number | null; planChildren: number | null; descendants: number; refused?: number; children: TreeNode[];
 }
-interface Totals { agents: number; running: number; usd: { low: number; high: number } | null; plans: Array<{ label: string; share: number | null; window: string | null; cards: number; launches: number }>; unpriced: number; tokens?: number | null; providerEstimate?: number | null }
+interface Totals { agents: number; refused?: number; running: number; usd: { low: number; high: number } | null; plans: Array<{ label: string; share: number | null; window: string | null; cards: number; launches: number }>; unpriced: number; tokens?: number | null; providerEstimate?: number | null }
 interface View { trees: Array<{ root: TreeNode; totals: Totals }>; focus: string | null; now: number }
 
 const PROVIDERS: Record<string, string> = {
@@ -56,6 +56,7 @@ const STRINGS = {
       return h ? `${h}h ${String(m % 60).padStart(2, '0')}m` : m ? `${m}m ${String(s % 60).padStart(2, '0')}s` : `${s}s`;
     },
     children: (n: number) => `${n} ${n === 1 ? 'agent' : 'agents'}`, planned: (n: number, of: number) => `${n} of ${of} planned`,
+    refused: (n: number) => `${n} refused`, refusedTip: 'Launches refused before they started (for example a subagent spawned without pick_route). They are not counted as agents or as parts of the plan.',
     expand: 'Show agents', collapse: 'Hide agents', show: (title: string) => `Show ${title} on the canvas`,
     focusOld: 'This CanvasTTY version cannot show a card from a plugin page. Find it on the canvas by its title.',
     focusFail: (why: string) => `Could not show the card: ${why}`
@@ -83,6 +84,7 @@ const STRINGS = {
       return h ? `${h} ч ${String(m % 60).padStart(2, '0')} мин` : m ? `${m} мин ${String(s % 60).padStart(2, '0')} с` : `${s} с`;
     },
     children: (n: number) => `${n} ${ruPlural(n, 'агент', 'агента', 'агентов')}`, planned: (n: number, of: number) => `${n} из ${of} по плану`,
+    refused: (n: number) => `${n} ${ruPlural(n, 'запуск отклонён', 'запуска отклонены', 'запусков отклонено')}`, refusedTip: 'Запуски, отклонённые до старта (например, субагент без pick_route). Они не считаются агентами и частями плана.',
     expand: 'Показать агентов', collapse: 'Скрыть агентов', show: (title: string) => `Показать «${title}» на холсте`,
     focusOld: 'Эта версия CanvasTTY не умеет показывать окно со страницы плагина. Найдите его на холсте по названию.',
     focusFail: (why: string) => `Не удалось показать окно: ${why}`
@@ -151,6 +153,7 @@ function nodeCard(node: TreeNode): HTMLElement {
     });
     meta.push(toggle);
   } else if (node.planChildren !== null) meta.push(el('span', { className: 'muted', textContent: t.planned(0, node.planChildren) }));
+  if (node.refused) meta.push(el('span', { className: 'muted tree-refused', textContent: t.refused(node.refused), title: t.refusedTip }));
   card.append(
     el('div', { className: 'tree-node__head' },
       el('span', { className: 'tree-node__title', textContent: node.title, title: node.title }),
@@ -171,6 +174,7 @@ function branch(node: TreeNode): HTMLLIElement {
 
 function summary(totals: Totals): string {
   const parts = [t.agents(totals.agents), t.running(totals.running)];
+  if (totals.refused) parts.push(t.refused(totals.refused));
   if (totals.usd) parts.push(usdText(totals.usd));
   if (totals.plans.length) parts.push(totals.usd ? `+ ${t.plan}` : t.plan);
   if (totals.tokens) parts.push(t.tokens(totals.tokens));

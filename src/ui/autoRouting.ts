@@ -7,7 +7,7 @@ import type { CatalogStatus } from '../auto/catalog/catalog.ts';
 import { EFFORTS } from '../auto/catalog/identity.ts';
 import type { DecisionRecord, RouterStats } from '../auto/router.ts';
 import type { ModelRow } from '../auto/service.ts';
-import { DEFAULT_AUTO_SETTINGS, type AutoModel, type AutoRoutingSettings, type AutoStrategySettings, type AutoTier, type AutoUpstream } from '../auto/settings.ts';
+import { DEFAULT_AUTO_SETTINGS, accountUpstream, type AutoModel, type AutoRoutingSettings, type AutoStrategySettings, type AutoTier, type AutoUpstream } from '../auto/settings.ts';
 import { el } from './common.ts';
 
 export interface AutoState {
@@ -22,7 +22,12 @@ export interface AutoState {
   catalog?: CatalogStatus;
   models?: Record<string, ModelRow[]>;
   waitingForList?: string[];
+  /** Accounts CanvasTTY brokers for this plugin (absent from an older service). */
+  brokered?: { mode: string; accounts: BrokeredAccountView[] };
 }
+
+/** One account CanvasTTY's accounts.list gave (no key, no secret name). */
+export interface BrokeredAccountView { ref: string; ownerName: string; id: string; label: string; protocol: string; origin: string; paths: string[]; models: string[]; flatRate: boolean }
 
 export interface AutoPageHost {
   request(method: string, params?: unknown): Promise<unknown>;
@@ -75,7 +80,15 @@ export const AUTO_PAGE_STRINGS = {
     next: (date: string) => `Next background refresh: ${date}.`, noNext: 'Background refresh is off (or no upstream is on).',
     autoRefresh: 'Refresh in the background', every: 'every, hours', lastError: (e: string) => `Last refresh: ${catalogNote(e, 'en')}.`,
     upstreams: 'Upstreams', none: 'None yet.', add: 'Add', remove: 'Remove', on: 'On', check: 'Check', checking: 'Checking…',
-    preset: { openrouter: 'OpenRouter', 'openai-compatible': 'OpenAI-compatible' } as Record<string, string>,
+    preset: { openrouter: 'OpenRouter', 'openai-compatible': 'OpenAI-compatible', account: 'Account in another extension' } as Record<string, string>,
+    brokered: 'Accounts from other extensions',
+    brokeredLead: 'Accounts another extension (for example Accounts) lets Auto use: CanvasTTY sends each request with that extension\'s key, and Auto never sees it. Mark an account there, allow Assistant under Settings → Agents → Extension native code, then add it here and choose how far you trust it.',
+    brokeredNone: 'No account is allowed for Auto yet.',
+    brokeredUnsupported: 'This CanvasTTY cannot send requests through other extensions\' accounts.',
+    brokeredUse: 'Use in Auto', brokeredAnthropic: 'speaks the Anthropic API; Auto needs an OpenAI-compatible account',
+    accountVia: (owner: string, label: string) => `Through CanvasTTY: ${owner} · ${label}. The key stays there.`,
+    accountNotListed: 'CanvasTTY does not offer this account to Auto now (not allowed, unmarked, or its extension is off).',
+    fromPlan: 'plan',
     idLabel: 'Name (a-z, 0-9, -)', baseUrl: 'Base URL (…/v1)', trust: 'I trust it with', trustHelp: 'Secret data only for a server on this computer.',
     keyFrom: 'Key', keyOwn: 'Its own key', keyJev: 'The Jev · OpenRouter key', keyNone: 'No key (a server on this computer)',
     keySet: 'key saved', keyMissing: 'no key', keyPlaceholder: 'Key', saveKey: 'Save key', removeKey: 'Remove key',
@@ -126,7 +139,15 @@ export const AUTO_PAGE_STRINGS = {
     next: (date: string) => `Следующее фоновое обновление: ${date}.`, noNext: 'Фоновое обновление выключено (или нет включённого поставщика).',
     autoRefresh: 'Обновлять в фоне', every: 'каждые, часов', lastError: (e: string) => `Последнее обновление: ${catalogNote(e, 'ru')}.`,
     upstreams: 'Поставщики', none: 'Пока нет.', add: 'Добавить', remove: 'Удалить', on: 'Вкл', check: 'Проверить', checking: 'Проверяю…',
-    preset: { openrouter: 'OpenRouter', 'openai-compatible': 'Совместимый с OpenAI' } as Record<string, string>,
+    preset: { openrouter: 'OpenRouter', 'openai-compatible': 'Совместимый с OpenAI', account: 'Учётная запись другого расширения' } as Record<string, string>,
+    brokered: 'Учётные записи других расширений',
+    brokeredLead: 'Учётные записи, которые другое расширение (например, Accounts) разрешает Auto: CanvasTTY отправляет каждый запрос с ключом того расширения, Auto его не видит. Отметьте запись там, разрешите Assistant в Настройки → Агенты → Нативный код расширений, затем добавьте её здесь и выберите, насколько ей доверяете.',
+    brokeredNone: 'Пока ни одна учётная запись не разрешена для Auto.',
+    brokeredUnsupported: 'Этот CanvasTTY не умеет отправлять запросы через учётные записи других расширений.',
+    brokeredUse: 'Использовать в Auto', brokeredAnthropic: 'работает по API Anthropic; Auto нужна совместимая с OpenAI запись',
+    accountVia: (owner: string, label: string) => `Через CanvasTTY: ${owner} · ${label}. Ключ остаётся там.`,
+    accountNotListed: 'CanvasTTY сейчас не предлагает эту запись Auto (не разрешена, не отмечена или её расширение выключено).',
+    fromPlan: 'подписка',
     idLabel: 'Имя (a-z, 0-9, -)', baseUrl: 'Базовый адрес (…/v1)', trust: 'Доверяю до', trustHelp: 'Секретные данные — только серверу на этом компьютере.',
     keyFrom: 'Ключ', keyOwn: 'Свой ключ', keyJev: 'Ключ Jev · OpenRouter', keyNone: 'Без ключа (сервер на этом компьютере)',
     keySet: 'ключ сохранён', keyMissing: 'нет ключа', keyPlaceholder: 'Ключ', saveKey: 'Сохранить ключ', removeKey: 'Удалить ключ',
@@ -206,6 +227,7 @@ export function renderAuto(state: AutoState, t: Strings, page: AutoPageHost, vie
   if (!settings.upstreams.length) list.append(el('li', { className: 'muted', textContent: t.none }));
   for (const upstream of settings.upstreams) list.append(upstreamRow(upstream, state, t, page, save, view));
   section.append(list, addUpstream(settings, t, save));
+  if (state.brokered) section.append(brokeredSection(state.brokered, settings, t, save));
 
   section.append(el('h2', { textContent: t.choices }),
     labelled(t.preference, selectOf('auto-preference', settings.preference, (['cheap', 'balanced', 'best'] as const).map(p => [p, t.pref[p]!] as [typeof p, string]), value => save(next => { next.preference = value; }))),
@@ -329,6 +351,15 @@ function upstreamRow(upstream: AutoUpstream, state: AutoState, t: Strings, page:
     check, remove));
   if (jevOnlyUpstream(upstream)) item.append(el('p', { className: 'muted', textContent: t.jevOnlyNote, dataset: { note: 'jev-only' } }));
   item.append(el('p', { className: 'muted', textContent: t.trustHelp }));
+  if (upstream.preset === 'account') {
+    // Another extension's account: no key here, CanvasTTY adds it; only its models table follows.
+    const account = state.brokered?.accounts.find(entry => entry.ref === upstream.account);
+    item.append(el('p', { className: 'muted', dataset: { note: 'account' }, textContent: account ? t.accountVia(account.ownerName, account.label) : t.accountNotListed }));
+    item.append(modelTable(upstream, state.models?.[upstream.id] ?? null, t, page, edit, view));
+    const done = view.checks.get(upstream.id);
+    if (done) item.append(el('div', { className: 'check-result', textContent: done, dataset: { result: upstream.id } }));
+    return item;
+  }
   // Keys: written straight into the plugin's secrets, bound to this upstream's address, never read back.
   const keyChoices: Array<[AutoUpstream['key'], string]> = [['own', t.keyOwn], ...(upstream.preset === 'openrouter' ? [['jev', t.keyJev] as [AutoUpstream['key'], string]] : []), ...(isLocal(upstream.baseUrl) ? [['none', t.keyNone] as [AutoUpstream['key'], string]] : [])];
   const keyRow = el('div', { className: 'row' }, el('span', { className: 'label', textContent: t.keyFrom }), selectOf(`auto-key-from-${upstream.id}`, upstream.key, keyChoices, value => edit(entry => { entry.key = value; })), el('span', { className: 'muted', textContent: state.keys[upstream.id] ? t.keySet : t.keyMissing }));
@@ -400,7 +431,7 @@ function modelTable(upstream: AutoUpstream, rows: ModelRow[] | null, t: Strings,
       const use = el('input', { type: 'checkbox', checked: !row.excluded, name: `auto-use-${upstream.id}-${row.id}` });
       use.addEventListener('change', () => edit(entry => { entry.excluded = use.checked ? entry.excluded.filter(id => id !== row.id) : [...new Set([...entry.excluded, row.id])]; }));
       const score = row.scores[view.type as keyof ModelRow['scores']];
-      const priceFrom = row.priceSource === 'person' ? t.fromPerson : row.priceSource === 'openrouter' ? t.fromList : row.priceSource === 'models.dev' ? t.fromDev : '';
+      const priceFrom = row.priceSource === 'plan' ? t.fromPlan : row.priceSource === 'person' ? t.fromPerson : row.priceSource === 'openrouter' ? t.fromList : row.priceSource === 'models.dev' ? t.fromDev : '';
       // OpenRouter: only efforts the catalog measured (Auto sends them); elsewhere any effort names the upstream's own setting.
       const efforts = upstream.preset === 'openrouter' ? row.measuredEfforts : [...EFFORTS];
       const effortSelect = selectOf(`auto-effort-${upstream.id}-${row.id}`, row.effort ?? '', [['', t.effortDefault], ...[...new Set([...(row.effort ? [row.effort] : []), ...efforts])].map(effort => [effort, effort] as [string, string])],
@@ -466,4 +497,28 @@ function addUpstream(settings: AutoRoutingSettings, t: Strings, save: (change: (
   });
   form.append(preset, id, url, add);
   return form;
+}
+
+/** Accounts CanvasTTY brokers for Auto: each one not added yet can become an upstream (trust chosen after adding). */
+function brokeredSection(brokered: NonNullable<AutoState['brokered']>, settings: AutoRoutingSettings, t: Strings, save: (change: (next: AutoRoutingSettings) => void) => void): HTMLElement {
+  const box = el('div', { className: 'brokered', dataset: { section: 'brokered' } });
+  box.append(el('h3', { textContent: t.brokered }), el('p', { className: 'muted', textContent: t.brokeredLead }));
+  if (brokered.mode === 'unsupported') { box.append(el('p', { className: 'muted', textContent: t.brokeredUnsupported })); return box; }
+  if (!brokered.accounts.length) { box.append(el('p', { className: 'muted', textContent: t.brokeredNone })); return box; }
+  const list = el('ul', { className: 'backends' });
+  for (const account of brokered.accounts) {
+    const added = settings.upstreams.some(upstream => upstream.preset === 'account' && upstream.account === account.ref);
+    const usable = account.protocol === 'openai' && account.paths.includes('/chat/completions');
+    const row = el('li', { className: 'backend', dataset: { account: account.ref } },
+      el('strong', { textContent: `${account.ownerName} · ${account.label}` }),
+      el('span', { className: 'muted', textContent: ` ${account.origin} · ${account.models.join(', ')}${account.flatRate ? ` · ${t.fromPlan}` : ''}${usable ? '' : ` · ${t.brokeredAnthropic}`}` }));
+    if (!added && usable) {
+      const use = el('button', { type: 'button', textContent: t.brokeredUse, name: `auto-use-${account.ref}` });
+      use.addEventListener('click', () => save(next => { next.upstreams.push(accountUpstream(account, next.upstreams.map(upstream => upstream.id))); }));
+      row.append(use);
+    }
+    list.append(row);
+  }
+  box.append(list);
+  return box;
 }

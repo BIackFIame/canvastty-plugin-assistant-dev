@@ -351,3 +351,31 @@ test('page: no tree yet says how one appears, in both languages', async () => {
   ui.context('ru', 'sage');
   assert.match(ui.app.text(), /Дерева агентов пока нет/u);
 });
+
+test('page (live run 17): a refused launch is not an agent and not a planned part, but a small "refused" note; the B8 orchestrator shows its route', async () => {
+  const now = 10_000_000;
+  const cards = [
+    card('orch', { provider: 'opencode', role: 'orchestrator', title: 'Auto (Jev)', startedAt: now - 150_000 }),
+    card('c', { provider: 'opencode', parentSessionId: 'orch', title: 'Part C', status: 'idle', startedAt: now - 100_000 }),
+    card('t', { provider: 'opencode', parentSessionId: 'orch', title: 'Part T', status: 'idle', startedAt: now - 60_000 }),
+    card('x', { provider: 'opencode', parentSessionId: 'orch', title: 'extra', status: 'failed', exitCode: 1, startedAt: now - 30_000 })
+  ];
+  const glm = { model: 'glm-5.3', identity: 'glm-5-3', kind: 'account', label: 'GLM 5.3 · Z.AI Coding Plan', costBasis: 'flat', estimate: { kind: 'flat' } };
+  const view = { ...buildTree(inputs(cards, { route: id => id === 'orch' ? glm : null, planChildren: id => id === 'orch' ? 3 : null, refused: id => id === 'x' })), focus: null, now };
+  const ui = page(view);
+  await settle();
+  ui.context('en', 'sage');
+  const en = ui.app.text();
+  assert.match(en, /3 agents · 1 running · 1 refused/u);
+  assert.match(en, /Auto \(Jev\) Running GLM-5\.3 · OpenCode · orchestrator plan · flat rate/u);
+  assert.match(en, /2 of 3 planned/u);
+  assert.doesNotMatch(en, /extra/u, 'the refused card is not a node');
+  assert.doesNotMatch(en.split('Part C')[0], /default model|cost unknown/u, 'the orchestrator: its route, not the defaults');
+  const note = ui.app.all().find(node => (node.className ?? '').includes('tree-refused'));
+  assert.match(note.title, /not counted as agents/u);
+  ui.context('ru', 'night', { uiScale: 1.25 });
+  const ru = ui.app.text();
+  assert.match(ru, /3 агента · 1 работает · 1 запуск отклонён/u);
+  assert.match(ru, /2 из 3 по плану/u);
+  assert.match(ru, /план · без лимита по цене/u);
+});

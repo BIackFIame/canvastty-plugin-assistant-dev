@@ -32,7 +32,8 @@ export interface InventoryEntry {
   excluded: boolean;
   priceIn: number | null;
   priceOut: number | null;
-  priceSource: 'person' | 'openrouter' | 'models.dev' | null;
+  /** `plan`: an account upstream on a flat-rate plan (nothing per token). */
+  priceSource: 'person' | 'openrouter' | 'models.dev' | 'plan' | null;
   context: number | null;
   output: number | null;
   /** The catalog knows this model (a benchmark row for its name, or its models.dev entry). */
@@ -88,6 +89,8 @@ export function buildInventory(settings: AutoRoutingSettings, catalog: RoutingCa
       const measuredEfforts = bare ? index.measuredEfforts(bare) : [];
       const catalogModel = index.catalogModel(id, context);
       const priced = person?.priceIn !== undefined || person?.priceOut !== undefined;
+      // A flat-rate plan account another extension keeps costs nothing per token (unless the person priced it).
+      const plan = !priced && upstream.preset === 'account' && upstream.flatRate === true;
       const listPriceIn = listing && !catalog.openRouterPricesStale ? listing.priceIn : null;
       const listPriceOut = listing && !catalog.openRouterPricesStale ? listing.priceOut : null;
       const devPriceIn = catalogModel && !catalog.pricesStale ? catalogModel.inputPrice : null;
@@ -95,9 +98,9 @@ export function buildInventory(settings: AutoRoutingSettings, catalog: RoutingCa
       const base = {
         upstream, model: id, tier: person?.tier ?? null, listed: !!person, excluded: excluded.has(id),
         fromList: openRouter && upstream.allModels && !!listing && offeredByDefault(listing),
-        priceIn: priced ? person!.priceIn ?? null : listPriceIn ?? devPriceIn,
-        priceOut: priced ? person!.priceOut ?? null : listPriceOut ?? devPriceOut,
-        priceSource: (priced ? 'person' : listPriceIn !== null || listPriceOut !== null ? 'openrouter' : devPriceIn !== null || devPriceOut !== null ? 'models.dev' : null) as InventoryEntry['priceSource'],
+        priceIn: plan ? 0 : priced ? person!.priceIn ?? null : listPriceIn ?? devPriceIn,
+        priceOut: plan ? 0 : priced ? person!.priceOut ?? null : listPriceOut ?? devPriceOut,
+        priceSource: (plan ? 'plan' : priced ? 'person' : listPriceIn !== null || listPriceOut !== null ? 'openrouter' : devPriceIn !== null || devPriceOut !== null ? 'models.dev' : null) as InventoryEntry['priceSource'],
         context: person?.context ?? listing?.context ?? catalogModel?.context ?? null,
         output: person?.output ?? listing?.maxOutput ?? catalogModel?.output ?? null,
         known: !!catalogModel || (bare ? index.rows(bare).length > 0 : false),
