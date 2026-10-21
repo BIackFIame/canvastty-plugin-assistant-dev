@@ -139,6 +139,12 @@ export function serve({ methods, notifications = {}, onInitialize, input = proce
     if (method === 'canvastty.shutdown') { stop(); return; }
     if (typeof method === 'string' && message.id === undefined) {
       if (stopping) return;
+      // A brokered answer's parts (canvastty.accounts.head|chunk|end) are cheap and must not be lost or reordered:
+      // they are handed over at once, never dropped for a busy service.
+      if (method.startsWith('canvastty.accounts.') && Object.hasOwn(notifications, method)) {
+        try { void notifications[method]!(record(message.params), host); } catch (error) { host.log('warn', `${method}: ${errorText(error)}`); }
+        return;
+      }
       if (active >= limit.activeHandlers) { host.log('warn', `${method}: dropped, the service is busy`); return; }
       const handler = Object.hasOwn(notifications, method) ? notifications[method] : undefined;
       track(() => handler?.(record(message.params), host))

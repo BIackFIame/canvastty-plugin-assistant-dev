@@ -11,7 +11,8 @@ export type AutoTier = 'small' | 'medium' | 'large';
 export const AUTO_TIERS: readonly AutoTier[] = ['small', 'medium', 'large'];
 export type AutoPreference = 'cheap' | 'balanced' | 'best';
 export const AUTO_PREFERENCES: readonly AutoPreference[] = ['cheap', 'balanced', 'best'];
-export type AutoUpstreamPreset = 'openrouter' | 'openai-compatible';
+/** `account`: an account another extension keeps (CanvasTTY Accounts), called through CanvasTTY without its key. */
+export type AutoUpstreamPreset = 'openrouter' | 'openai-compatible' | 'account';
 /** Who decides how hard a turn is: Jev (the Assistant's task triage, word rules when it does not answer) or rules only. */
 export type AutoDecider = 'jev' | 'rules';
 
@@ -52,6 +53,10 @@ export interface AutoUpstream {
   /** Model ids Auto never uses (the person's exclude toggles). */
   excluded: string[];
   enabled: boolean;
+  /** `account` only: `<owner plugin id>:<account id>` as CanvasTTY lists it (`accounts.list`). */
+  account?: string;
+  /** `account` only: a flat-rate plan (the owner says so); its models then cost nothing per token unless priced. */
+  flatRate?: boolean;
 }
 
 export interface AutoCatalogSettings {
@@ -101,6 +106,9 @@ export const DEFAULT_AUTO_SETTINGS: AutoRoutingSettings = {
 const OPTIONAL_KEYS = ['catalog', 'strategy'];
 
 const ID = /^[a-z0-9][a-z0-9-]{0,23}$/u;
+const BROKER_REF = /^[a-z0-9][a-z0-9.-]{1,78}[a-z0-9]:[a-z0-9][a-z0-9._-]{0,63}$/u;
+/** `<owner plugin id>:<account id>`, as CanvasTTY's accounts.list names an account another extension offers. */
+export const validBrokerRef = (value: unknown): value is string => typeof value === 'string' && value.length <= 160 && BROKER_REF.test(value);
 const MODEL_ID = /^[A-Za-z0-9][A-Za-z0-9._:/@+-]{0,159}$/u;
 const CLASSES: readonly DataClass[] = ['D0', 'D1', 'D2', 'D3'];
 
@@ -126,19 +134,23 @@ export function originOf(baseUrl: string): string { return new URL(baseUrl).orig
 
 export function validateAutoUpstream(value: unknown): AutoUpstream {
   if (!isRecord(value)) fail('Invalid upstream.');
-  only(value, ['id', 'preset', 'baseUrl', 'trust', 'key', 'models', 'allModels', 'excluded', 'enabled'], 'Upstream');
+  only(value, ['id', 'preset', 'baseUrl', 'trust', 'key', 'models', 'allModels', 'excluded', 'enabled', 'account', 'flatRate'], 'Upstream');
   if (typeof value.id !== 'string' || !ID.test(value.id)) fail('Upstream id: lowercase letters, digits and dashes, at most 24.');
-  if (value.preset !== 'openrouter' && value.preset !== 'openai-compatible') fail('Unknown upstream kind.');
+  if (value.preset !== 'openrouter' && value.preset !== 'openai-compatible' && value.preset !== 'account') fail('Unknown upstream kind.');
+  const brokered = value.preset === 'account';
+  if (brokered ? !validBrokerRef(value.account) : value.account !== undefined) fail('An account upstream names one account another extension offers.');
+  if (value.flatRate !== undefined && (!brokered || typeof value.flatRate !== 'boolean')) fail('Invalid upstream.');
   if (typeof value.enabled !== 'boolean') fail('Invalid upstream.');
   const baseUrl = value.preset === 'openrouter' ? OPENROUTER_BASE_URL : value.baseUrl;
   if (value.preset === 'openrouter' && value.baseUrl !== undefined && value.baseUrl !== OPENROUTER_BASE_URL) fail('OpenRouter has a fixed address.');
   if (typeof baseUrl !== 'string' || !validUrl(baseUrl.replace(/\/+$/u, '')) || !/^https?:\/\/[^/]+(?:\/[A-Za-z0-9._~-]+)*\/?$/u.test(baseUrl)) fail('Invalid upstream address (https, or http on this computer only).');
   if (!CLASSES.includes(value.trust as DataClass)) fail('Invalid upstream trust.');
   if (value.trust === 'D3' && !isLoopbackUrl(baseUrl)) fail('D3 stays on this computer: only a server on 127.0.0.1 can take it.');
-  const key = value.key ?? 'own';
+  // An account's key stays with the extension that keeps it: CanvasTTY adds it, this plugin never holds one.
+  const key = brokered ? 'none' : value.key ?? 'own';
   if (key !== 'own' && key !== 'jev' && key !== 'none') fail('Invalid upstream key choice.');
   if (key === 'jev' && value.preset !== 'openrouter') fail('Only an OpenRouter upstream can use the Jev · OpenRouter key.');
-  if (key === 'none' && !isLoopbackUrl(baseUrl)) fail('Only a server on this computer can work without a key.');
+  if (key === 'none' && !brokered && !isLoopbackUrl(baseUrl)) fail('Only a server on this computer can work without a key.');
   if (!Array.isArray(value.models) || value.models.length > MAX_AUTO_MODELS) fail(`At most ${MAX_AUTO_MODELS} models per upstream.`);
   const models: AutoModel[] = [];
   const seen = new Set<string>();
@@ -163,7 +175,8 @@ export function validateAutoUpstream(value: unknown): AutoUpstream {
   if (!Array.isArray(excluded) || excluded.length > MAX_EXCLUDED || excluded.some(id => typeof id !== 'string' || !MODEL_ID.test(id))) fail(`At most ${MAX_EXCLUDED} excluded models, by their ids.`);
   // OpenRouter carries only Jev's own decisions: an upstream there (or saved from before this rule) stays off.
   if (value.enabled && (value.preset === 'openrouter' || modelTrafficForbidden(baseUrl))) fail(JEV_ONLY_MESSAGE);
-  return { id: value.id, preset: value.preset, baseUrl: baseUrl.replace(/\/+$/u, ''), trust: value.trust as DataClass, key, models, allModels, excluded: [...new Set(excluded as string[])], enabled: value.enabled };
+  return { id: value.id, preset: value.preset, baseUrl: baseUrl.replace(/\/+$/u, ''), trust: value.trust as DataClass, key, models, allModels, excluded: [...new Set(excluded as string[])], enabled: value.enabled,
+    ...(brokered ? { account: value.account as string, ...(value.flatRate === true ? { flatRate: true } : {}) } : {}) };
 }
 
 export function validateAutoSettings(value: unknown): AutoRoutingSettings {
@@ -226,3 +239,12 @@ function jevOnlyOff(raw: unknown): unknown {
 export const upstreamSecret = (id: string): string => `auto-upstream-${id}`;
 /** The Jev · OpenRouter backend's key (shared when an OpenRouter upstream says `key: "jev"`). */
 export const JEV_OPENROUTER_SECRET = 'assistant-openrouter';
+
+/** A new upstream for a brokered account: its models as offered, trust D1 (the person changes it), on. */
+export function accountUpstream(account: { ref: string; id: string; origin: string; models: string[]; flatRate: boolean }, taken: string[]): AutoUpstream {
+  const base = `acc-${account.id}`.toLowerCase().replace(/[^a-z0-9-]+/gu, '-').replace(/-+$/u, '').slice(0, 20) || 'acc';
+  let id = base;
+  for (let n = 2; taken.includes(id); n++) id = `${base.slice(0, 20)}-${n}`;
+  return { id, preset: 'account', baseUrl: account.origin, trust: 'D1', key: 'none', models: account.models.slice(0, 64).map(model => ({ id: model })), allModels: false, excluded: [], enabled: true,
+    account: account.ref, ...(account.flatRate ? { flatRate: true } : {}) };
+}

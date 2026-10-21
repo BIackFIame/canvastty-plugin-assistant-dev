@@ -52,7 +52,11 @@ serve({
     // A newer core tells services when the person switches the app language: badges are written again in it.
     'canvastty.locale.changed': params => { assistant?.setLocale(params.locale); },
     // limit.exhausted (provider-wide, the default login): that CLI's own sign-in routes rest until the reset.
-    'canvastty.activity': params => { assistant?.activity(params); }
+    'canvastty.activity': params => { assistant?.activity(params); },
+    // Brokered requests (Auto through another extension's account): the answer, then its chunks, then the end.
+    'canvastty.accounts.head': params => { assistant?.auto.broker.notification('head', params); },
+    'canvastty.accounts.chunk': params => { assistant?.auto.broker.notification('chunk', params); },
+    'canvastty.accounts.end': params => { assistant?.auto.broker.notification('end', params); }
   },
   methods: {
     // Host-only requests.

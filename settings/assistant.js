@@ -275,6 +275,24 @@
   function isJevOnlyUpstream(upstream) {
     return upstream.preset === "openrouter" || modelTrafficForbidden(upstream.baseUrl ?? OPENROUTER_BASE_URL);
   }
+  function accountUpstream(account, taken) {
+    const base = `acc-${account.id}`.toLowerCase().replace(/[^a-z0-9-]+/gu, "-").replace(/-+$/u, "").slice(0, 20) || "acc";
+    let id = base;
+    for (let n = 2; taken.includes(id); n++) id = `${base.slice(0, 20)}-${n}`;
+    return {
+      id,
+      preset: "account",
+      baseUrl: account.origin,
+      trust: "D1",
+      key: "none",
+      models: account.models.slice(0, 64).map((model) => ({ id: model })),
+      allModels: false,
+      excluded: [],
+      enabled: true,
+      account: account.ref,
+      ...account.flatRate ? { flatRate: true } : {}
+    };
+  }
 
   // src/ui/autoRouting.ts
   var newAutoView = () => ({ checks: /* @__PURE__ */ new Map(), filter: /* @__PURE__ */ new Map(), type: "coding", shown: /* @__PURE__ */ new Map(), refreshing: false });
@@ -324,7 +342,16 @@
       on: "On",
       check: "Check",
       checking: "Checking\u2026",
-      preset: { openrouter: "OpenRouter", "openai-compatible": "OpenAI-compatible" },
+      preset: { openrouter: "OpenRouter", "openai-compatible": "OpenAI-compatible", account: "Account in another extension" },
+      brokered: "Accounts from other extensions",
+      brokeredLead: "Accounts another extension (for example Accounts) lets Auto use: CanvasTTY sends each request with that extension's key, and Auto never sees it. Mark an account there, allow Assistant under Settings \u2192 Agents \u2192 Extension native code, then add it here and choose how far you trust it.",
+      brokeredNone: "No account is allowed for Auto yet.",
+      brokeredUnsupported: "This CanvasTTY cannot send requests through other extensions' accounts.",
+      brokeredUse: "Use in Auto",
+      brokeredAnthropic: "speaks the Anthropic API; Auto needs an OpenAI-compatible account",
+      accountVia: (owner, label) => `Through CanvasTTY: ${owner} \xB7 ${label}. The key stays there.`,
+      accountNotListed: "CanvasTTY does not offer this account to Auto now (not allowed, unmarked, or its extension is off).",
+      fromPlan: "plan",
       idLabel: "Name (a-z, 0-9, -)",
       baseUrl: "Base URL (\u2026/v1)",
       trust: "I trust it with",
@@ -420,7 +447,16 @@
       on: "\u0412\u043A\u043B",
       check: "\u041F\u0440\u043E\u0432\u0435\u0440\u0438\u0442\u044C",
       checking: "\u041F\u0440\u043E\u0432\u0435\u0440\u044F\u044E\u2026",
-      preset: { openrouter: "OpenRouter", "openai-compatible": "\u0421\u043E\u0432\u043C\u0435\u0441\u0442\u0438\u043C\u044B\u0439 \u0441 OpenAI" },
+      preset: { openrouter: "OpenRouter", "openai-compatible": "\u0421\u043E\u0432\u043C\u0435\u0441\u0442\u0438\u043C\u044B\u0439 \u0441 OpenAI", account: "\u0423\u0447\u0451\u0442\u043D\u0430\u044F \u0437\u0430\u043F\u0438\u0441\u044C \u0434\u0440\u0443\u0433\u043E\u0433\u043E \u0440\u0430\u0441\u0448\u0438\u0440\u0435\u043D\u0438\u044F" },
+      brokered: "\u0423\u0447\u0451\u0442\u043D\u044B\u0435 \u0437\u0430\u043F\u0438\u0441\u0438 \u0434\u0440\u0443\u0433\u0438\u0445 \u0440\u0430\u0441\u0448\u0438\u0440\u0435\u043D\u0438\u0439",
+      brokeredLead: "\u0423\u0447\u0451\u0442\u043D\u044B\u0435 \u0437\u0430\u043F\u0438\u0441\u0438, \u043A\u043E\u0442\u043E\u0440\u044B\u0435 \u0434\u0440\u0443\u0433\u043E\u0435 \u0440\u0430\u0441\u0448\u0438\u0440\u0435\u043D\u0438\u0435 (\u043D\u0430\u043F\u0440\u0438\u043C\u0435\u0440, Accounts) \u0440\u0430\u0437\u0440\u0435\u0448\u0430\u0435\u0442 Auto: CanvasTTY \u043E\u0442\u043F\u0440\u0430\u0432\u043B\u044F\u0435\u0442 \u043A\u0430\u0436\u0434\u044B\u0439 \u0437\u0430\u043F\u0440\u043E\u0441 \u0441 \u043A\u043B\u044E\u0447\u043E\u043C \u0442\u043E\u0433\u043E \u0440\u0430\u0441\u0448\u0438\u0440\u0435\u043D\u0438\u044F, Auto \u0435\u0433\u043E \u043D\u0435 \u0432\u0438\u0434\u0438\u0442. \u041E\u0442\u043C\u0435\u0442\u044C\u0442\u0435 \u0437\u0430\u043F\u0438\u0441\u044C \u0442\u0430\u043C, \u0440\u0430\u0437\u0440\u0435\u0448\u0438\u0442\u0435 Assistant \u0432 \u041D\u0430\u0441\u0442\u0440\u043E\u0439\u043A\u0438 \u2192 \u0410\u0433\u0435\u043D\u0442\u044B \u2192 \u041D\u0430\u0442\u0438\u0432\u043D\u044B\u0439 \u043A\u043E\u0434 \u0440\u0430\u0441\u0448\u0438\u0440\u0435\u043D\u0438\u0439, \u0437\u0430\u0442\u0435\u043C \u0434\u043E\u0431\u0430\u0432\u044C\u0442\u0435 \u0435\u0451 \u0437\u0434\u0435\u0441\u044C \u0438 \u0432\u044B\u0431\u0435\u0440\u0438\u0442\u0435, \u043D\u0430\u0441\u043A\u043E\u043B\u044C\u043A\u043E \u0435\u0439 \u0434\u043E\u0432\u0435\u0440\u044F\u0435\u0442\u0435.",
+      brokeredNone: "\u041F\u043E\u043A\u0430 \u043D\u0438 \u043E\u0434\u043D\u0430 \u0443\u0447\u0451\u0442\u043D\u0430\u044F \u0437\u0430\u043F\u0438\u0441\u044C \u043D\u0435 \u0440\u0430\u0437\u0440\u0435\u0448\u0435\u043D\u0430 \u0434\u043B\u044F Auto.",
+      brokeredUnsupported: "\u042D\u0442\u043E\u0442 CanvasTTY \u043D\u0435 \u0443\u043C\u0435\u0435\u0442 \u043E\u0442\u043F\u0440\u0430\u0432\u043B\u044F\u0442\u044C \u0437\u0430\u043F\u0440\u043E\u0441\u044B \u0447\u0435\u0440\u0435\u0437 \u0443\u0447\u0451\u0442\u043D\u044B\u0435 \u0437\u0430\u043F\u0438\u0441\u0438 \u0434\u0440\u0443\u0433\u0438\u0445 \u0440\u0430\u0441\u0448\u0438\u0440\u0435\u043D\u0438\u0439.",
+      brokeredUse: "\u0418\u0441\u043F\u043E\u043B\u044C\u0437\u043E\u0432\u0430\u0442\u044C \u0432 Auto",
+      brokeredAnthropic: "\u0440\u0430\u0431\u043E\u0442\u0430\u0435\u0442 \u043F\u043E API Anthropic; Auto \u043D\u0443\u0436\u043D\u0430 \u0441\u043E\u0432\u043C\u0435\u0441\u0442\u0438\u043C\u0430\u044F \u0441 OpenAI \u0437\u0430\u043F\u0438\u0441\u044C",
+      accountVia: (owner, label) => `\u0427\u0435\u0440\u0435\u0437 CanvasTTY: ${owner} \xB7 ${label}. \u041A\u043B\u044E\u0447 \u043E\u0441\u0442\u0430\u0451\u0442\u0441\u044F \u0442\u0430\u043C.`,
+      accountNotListed: "CanvasTTY \u0441\u0435\u0439\u0447\u0430\u0441 \u043D\u0435 \u043F\u0440\u0435\u0434\u043B\u0430\u0433\u0430\u0435\u0442 \u044D\u0442\u0443 \u0437\u0430\u043F\u0438\u0441\u044C Auto (\u043D\u0435 \u0440\u0430\u0437\u0440\u0435\u0448\u0435\u043D\u0430, \u043D\u0435 \u043E\u0442\u043C\u0435\u0447\u0435\u043D\u0430 \u0438\u043B\u0438 \u0435\u0451 \u0440\u0430\u0441\u0448\u0438\u0440\u0435\u043D\u0438\u0435 \u0432\u044B\u043A\u043B\u044E\u0447\u0435\u043D\u043E).",
+      fromPlan: "\u043F\u043E\u0434\u043F\u0438\u0441\u043A\u0430",
       idLabel: "\u0418\u043C\u044F (a-z, 0-9, -)",
       baseUrl: "\u0411\u0430\u0437\u043E\u0432\u044B\u0439 \u0430\u0434\u0440\u0435\u0441 (\u2026/v1)",
       trust: "\u0414\u043E\u0432\u0435\u0440\u044F\u044E \u0434\u043E",
@@ -528,6 +564,7 @@
     if (!settings.upstreams.length) list.append(el("li", { className: "muted", textContent: t2.none }));
     for (const upstream of settings.upstreams) list.append(upstreamRow(upstream, state2, t2, page, save2, view));
     section.append(list, addUpstream(settings, t2, save2));
+    if (state2.brokered) section.append(brokeredSection(state2.brokered, settings, t2, save2));
     section.append(
       el("h2", { textContent: t2.choices }),
       labelled(t2.preference, selectOf("auto-preference", settings.preference, ["cheap", "balanced", "best"].map((p) => [p, t2.pref[p]]), (value) => save2((next) => {
@@ -698,6 +735,14 @@
     ));
     if (jevOnlyUpstream(upstream)) item.append(el("p", { className: "muted", textContent: t2.jevOnlyNote, dataset: { note: "jev-only" } }));
     item.append(el("p", { className: "muted", textContent: t2.trustHelp }));
+    if (upstream.preset === "account") {
+      const account = state2.brokered?.accounts.find((entry) => entry.ref === upstream.account);
+      item.append(el("p", { className: "muted", dataset: { note: "account" }, textContent: account ? t2.accountVia(account.ownerName, account.label) : t2.accountNotListed }));
+      item.append(modelTable(upstream, state2.models?.[upstream.id] ?? null, t2, page, edit, view));
+      const done = view.checks.get(upstream.id);
+      if (done) item.append(el("div", { className: "check-result", textContent: done, dataset: { result: upstream.id } }));
+      return item;
+    }
     const keyChoices = [["own", t2.keyOwn], ...upstream.preset === "openrouter" ? [["jev", t2.keyJev]] : [], ...isLocal(upstream.baseUrl) ? [["none", t2.keyNone]] : []];
     const keyRow = el("div", { className: "row" }, el("span", { className: "label", textContent: t2.keyFrom }), selectOf(`auto-key-from-${upstream.id}`, upstream.key, keyChoices, (value) => edit((entry) => {
       entry.key = value;
@@ -804,7 +849,7 @@
           entry.excluded = use.checked ? entry.excluded.filter((id2) => id2 !== row2.id) : [.../* @__PURE__ */ new Set([...entry.excluded, row2.id])];
         }));
         const score = row2.scores[view.type];
-        const priceFrom = row2.priceSource === "person" ? t2.fromPerson : row2.priceSource === "openrouter" ? t2.fromList : row2.priceSource === "models.dev" ? t2.fromDev : "";
+        const priceFrom = row2.priceSource === "plan" ? t2.fromPlan : row2.priceSource === "person" ? t2.fromPerson : row2.priceSource === "openrouter" ? t2.fromList : row2.priceSource === "models.dev" ? t2.fromDev : "";
         const efforts = upstream.preset === "openrouter" ? row2.measuredEfforts : [...EFFORTS];
         const effortSelect = selectOf(
           `auto-effort-${upstream.id}-${row2.id}`,
@@ -890,6 +935,39 @@
     });
     form.append(preset, id, url, add);
     return form;
+  }
+  function brokeredSection(brokered, settings, t2, save2) {
+    const box = el("div", { className: "brokered", dataset: { section: "brokered" } });
+    box.append(el("h3", { textContent: t2.brokered }), el("p", { className: "muted", textContent: t2.brokeredLead }));
+    if (brokered.mode === "unsupported") {
+      box.append(el("p", { className: "muted", textContent: t2.brokeredUnsupported }));
+      return box;
+    }
+    if (!brokered.accounts.length) {
+      box.append(el("p", { className: "muted", textContent: t2.brokeredNone }));
+      return box;
+    }
+    const list = el("ul", { className: "backends" });
+    for (const account of brokered.accounts) {
+      const added = settings.upstreams.some((upstream) => upstream.preset === "account" && upstream.account === account.ref);
+      const usable = account.protocol === "openai" && account.paths.includes("/chat/completions");
+      const row2 = el(
+        "li",
+        { className: "backend", dataset: { account: account.ref } },
+        el("strong", { textContent: `${account.ownerName} \xB7 ${account.label}` }),
+        el("span", { className: "muted", textContent: ` ${account.origin} \xB7 ${account.models.join(", ")}${account.flatRate ? ` \xB7 ${t2.fromPlan}` : ""}${usable ? "" : ` \xB7 ${t2.brokeredAnthropic}`}` })
+      );
+      if (!added && usable) {
+        const use = el("button", { type: "button", textContent: t2.brokeredUse, name: `auto-use-${account.ref}` });
+        use.addEventListener("click", () => save2((next) => {
+          next.upstreams.push(accountUpstream(account, next.upstreams.map((upstream) => upstream.id)));
+        }));
+        row2.append(use);
+      }
+      list.append(row2);
+    }
+    box.append(list);
+    return box;
   }
 
   // src/route/settings.ts
