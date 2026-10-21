@@ -219,6 +219,8 @@ test('a task finished on a resting route ends its rest (a refused call that now 
   const second = { decisionId: null };
   route.records.add({ id: 'manual01', at: clock.now, card: orchestrator.id.slice(0, 8), type: 'research', level: 'medium', typeFrom: 'jev', confidence: 0.2, strategy: 'single-strong', cohort: null, candidates: 1, dropped: 0, explored: false, preferred: false, options: [route.records.get(first.decisionId).options[0]] });
   second.decisionId = 'manual01';
+  // A decision of this run, made by this orchestrator (outcomes are matched by its full session id).
+  route['owners'].set('manual01', orchestrator.id);
   route.sessionEvent({ type: 'created', session: { id: 'child-q-0003', provider: 'claude', role: 'subagent', parentSessionId: orchestrator.id, status: 'starting' } });
   clock.now += 5 * MIN;
   const done = await route.tool('route_outcome', orchestrator, { decisionId: 'manual01', status: 'done' });
