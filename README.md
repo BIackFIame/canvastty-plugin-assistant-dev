@@ -203,6 +203,17 @@ model account (an account and Auto on one launch are refused: both configure Ope
 - **Known limit**: the agent's own shell can read its key and call the router itself; it then spends at most that
   card's cap through the same allow-list.
 
+## Auto (Jev) autopilot (phase 1)
+
+Choose the role and **Model: Auto (Jev)** in the launcher; Jev decides the rest within what you declared.
+
+- **Claude Code and Codex** run Auto on their **own sign-in**: the Assistant adds only the model and effort Jev chose on your declared subscription for that CLI, and pins the vendor's endpoint (`ANTHROPIC_BASE_URL=https://api.anthropic.com`; Codex `model_provider="openai"`). No proxy, no key. A subscription with no room left above your reserve refuses the launch with the reason; it is never moved to a paid route. Without a declared plan the CLI's own default model is used. OpenCode keeps the Auto proxy (non-OpenRouter providers only).
+- **`autopilot_plan`** (orchestrators): Jev reads the task (`task.route` and the new `task.shape`: structure and number of parts) and the plan says solo, orchestrate N or deep, the strategy and the budget. Below 0.6 confidence word rules decide; an unsure large task gets at most 3 parts.
+- **Every subagent of an Auto card goes through `pick_route`.** Its answer carries a single-use value in the Assistant's `model` option, bound to that orchestrator, that CLI and that decision for 10 minutes, and counted against the plan. A subagent launched without it (inherited or named), with a used, expired or foreign value, or beyond the plan is refused with what to do; the orchestrator then routes it. This needs no launch policy: on CanvasTTY 1.8.2 a subagent of an Auto card always reaches the Assistant (the same CLI inherits its options; another CLI must name it). Launches outside an Auto tree, and every launch you start yourself, are never refused by this. If the Assistant's service is down, only launches that use its options are refused, with CanvasTTY's own reason.
+- **OpenCode plan routes** (`zai-coding-plan/…`) are pinned: the launch gets one provider for the model and the small model (titles, summaries).
+- **Servers** (Decision models → Advanced → Where agents run; off by default): `start_leaf` runs an independent leaf task on a server you declared (its name as in the Environments plugin), on that server's own CLI sign-in, within its parallel cap; `leaf_status` reports it. A leaf cannot start subagents. Needs `sessions:launch` and `sessions:control` (install review).
+- Not yet (CanvasTTY changes, phase 2): choosing the CLI of your own card, a plugin-started orchestrator, subagents on servers, a launch check of the requested model and the other plugins' options, limits read by the service.
+
 ## How Auto decides
 
 The settings pages keep one plain sentence per control; the numbers live here.

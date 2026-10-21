@@ -441,18 +441,42 @@ var COMMAND_REVIEW_META = {
     criteria: COMMAND_REVIEW.security_weakening.criteria
   }
 };
+var TASK_SHAPE = {
+  shape: {
+    type: "choice",
+    instructions: "How is the work that `task` asks for structured?",
+    criteria: {
+      single_step: "One piece of work that one agent does from start to end",
+      independent_parts: "Two or more parts that can be done at the same time without waiting on each other",
+      pipeline: "Parts that must happen in order, each using the result of the one before",
+      unclear_large: "A large piece of work whose parts `task` does not name"
+    }
+  },
+  parts: {
+    type: "choice",
+    instructions: "How many separate parts does `task` name or clearly imply?",
+    criteria: {
+      one: "One",
+      two_three: "Two or three",
+      four_six: "Four to six",
+      seven_plus: "Seven or more"
+    }
+  }
+};
 var QUESTION_SETS = {
   "task.route": TASK_ROUTE,
+  "task.shape": TASK_SHAPE,
   "command.review": COMMAND_REVIEW,
   "command.review@meta": COMMAND_REVIEW_META
 };
 var USE_CASE_SETS = {
-  "task.route": ["task.route"],
+  "task.route": ["task.route", "task.shape"],
   "command.review": ["command.review", "command.review@meta"]
 };
 var METADATA_VARIANTS = { "command.review": "command.review@meta" };
 var SYNTHETIC_STATES = {
   "task.route": { task: "Rename the variable tmp to buffer in utils.ts" },
+  "task.shape": { task: "Add a dark theme to the settings page and its tests" },
   "command.review": { person_request: "Run the unit tests", action: { tool: "Bash", command: "npm test", shape: { program: "npm", subcommand: "test", flags: [] } }, facts: { stays_inside_project: "yes", network_access: "none", deletes_files: "no" } },
   "command.review@meta": { action: { shape: { program: "npm", subcommand: "test", flags: [] } }, facts: { stays_inside_project: "yes", network_access: "none", deletes_files: "no" } }
 };
@@ -1021,12 +1045,12 @@ function topTwo(vector) {
   });
   return { top, second, index };
 }
-function choiceAnswer(labels, vector, choice) {
-  if (typeof choice !== "string" || !labels.includes(choice)) fault("invalid-response", "System One answer chose an unknown option.");
+function choiceAnswer(labels, vector, choice2) {
+  if (typeof choice2 !== "string" || !labels.includes(choice2)) fault("invalid-response", "System One answer chose an unknown option.");
   const { top, second } = topTwo(vector);
-  if (vector[labels.indexOf(choice)] + 1e-9 < top) fault("invalid-response", "System One choice is not the most probable option.");
+  if (vector[labels.indexOf(choice2)] + 1e-9 < top) fault("invalid-response", "System One choice is not the most probable option.");
   const n = labels.length;
-  return { type: "choice", choice, probabilities: Object.fromEntries(labels.map((label2, i) => [label2, vector[i]])), top, second, margin: top - second, n, conf: spreadConf(n, top) };
+  return { type: "choice", choice: choice2, probabilities: Object.fromEntries(labels.map((label2, i) => [label2, vector[i]])), top, second, margin: top - second, n, conf: spreadConf(n, top) };
 }
 function scoreAnswer(vector) {
   const { top, second, index } = topTwo(vector);
@@ -3945,10 +3969,10 @@ async function runConformance(backend, options) {
   } catch (error) {
     return fail6("model-identity", s1ErrorClass(error), "The server answered with another model.");
   }
-  const noul = answersA1.q_noul, choice = answersA1.q_choice, score2 = answersA1.q_score;
+  const noul = answersA1.q_noul, choice2 = answersA1.q_choice, score2 = answersA1.q_score;
   const wrong = [];
   if (noul.type === "noul" && noul.p < 0.7) wrong.push({ id: "q_noul", top: noul.top });
-  if (choice.type === "choice" && (choice.choice !== "none_of_these" || (choice.probabilities.none_of_these ?? 0) < 0.5)) wrong.push({ id: "q_choice", top: choice.top });
+  if (choice2.type === "choice" && (choice2.choice !== "none_of_these" || (choice2.probabilities.none_of_these ?? 0) < 0.5)) wrong.push({ id: "q_choice", top: choice2.top });
   if (score2.type === "score" && score2.level !== 0) wrong.push({ id: "q_score", top: Math.max(...score2.probabilities) });
   const confidentlyWrong = wrong.some((item) => item.top >= 0.8);
   if (confidentlyWrong) return fail6("known-answers", null, "Confidently wrong on a simple question: not suitable for decisions.");
@@ -4127,14 +4151,14 @@ var CapsStore = class {
 function knownAnswers(answers) {
   const wrong = [];
   let confidentlyWrong = false;
-  const noul = answers.q_noul, choice = answers.q_choice, score2 = answers.q_score;
+  const noul = answers.q_noul, choice2 = answers.q_choice, score2 = answers.q_score;
   if (noul?.type === "noul" && noul.p < 0.7) {
     wrong.push("q_noul");
     if (noul.p <= 0.2) confidentlyWrong = true;
   }
-  if (choice?.type === "choice" && (choice.probabilities.none_of_these ?? 0) < 0.5) {
+  if (choice2?.type === "choice" && (choice2.probabilities.none_of_these ?? 0) < 0.5) {
     wrong.push("q_choice");
-    if (choice.choice !== "none_of_these" && choice.top >= 0.8) confidentlyWrong = true;
+    if (choice2.choice !== "none_of_these" && choice2.top >= 0.8) confidentlyWrong = true;
   }
   if (score2?.type === "score" && score2.level !== 0) {
     wrong.push("q_score");
@@ -12196,8 +12220,8 @@ function parseAnswer(raw) {
   const take = (value) => {
     if (!value || typeof value !== "object") return;
     const v = value;
-    for (const choice of Array.isArray(v.choices) ? v.choices : []) {
-      const c = choice;
+    for (const choice2 of Array.isArray(v.choices) ? v.choices : []) {
+      const c = choice2;
       const part = c.delta ?? c.message;
       if (typeof part?.content === "string") result.text += part.content;
       if (Array.isArray(part?.tool_calls) && part.tool_calls.length) result.toolCalls = true;
@@ -12524,8 +12548,8 @@ var UsageReader = class {
     } catch {
       return;
     }
-    for (const choice of Array.isArray(value?.choices) ? value.choices : []) {
-      const delta = choice?.delta ?? {};
+    for (const choice2 of Array.isArray(value?.choices) ? value.choices : []) {
+      const delta = choice2?.delta ?? {};
       for (const key of ["content", "reasoning", "reasoning_content"]) if (typeof delta[key] === "string") this.streamedChars += delta[key].length;
       if (Array.isArray(delta.tool_calls)) {
         for (const call of delta.tool_calls) if (typeof call?.function?.arguments === "string") this.streamedChars += call.function.arguments.length;
@@ -13923,6 +13947,7 @@ var QUOTA_BYS = ["tokens", "prompts", "unknown"];
 var VALUE_SPEEDS = ["low", "moderate", "high"];
 var SPEED_WEIGHT = { low: 0.2, moderate: 0.5, high: 1 };
 var ROUTE_CLIS = ["claude", "codex", "grok", "kimi", "qwen", "opencode", "hermes", "omp", "pi", "cursor", "minimax", "devin", "antigravity"];
+var MAX_SERVERS = 8;
 var MAX_PLANS2 = 16;
 var MAX_PLAN_MODELS = 16;
 var MAX_MAP = 64;
@@ -13949,7 +13974,9 @@ var DEFAULT_ROUTE_SETTINGS = Object.freeze({
   speeds: {},
   quotaWeights: {},
   preferPlansSmall: true,
-  planWindowSmall: 30
+  planWindowSmall: 30,
+  serversOn: false,
+  servers: []
 });
 var RouteSettingsError = class extends Error {
 };
@@ -14053,7 +14080,9 @@ function validateRouteSettings(value) {
     speeds: {},
     quotaWeights: {},
     preferPlansSmall: true,
-    planWindowSmall: 30
+    planWindowSmall: 30,
+    serversOn: false,
+    servers: []
   };
   if (v.valueSpeed !== void 0 && !VALUE_SPEEDS.includes(v.valueSpeed)) fail5("Invalid speed preference.");
   result.valueSpeed = v.valueSpeed ?? "moderate";
@@ -14063,6 +14092,19 @@ function validateRouteSettings(value) {
   if (v.planWindowSmall !== void 0 && !intIn(v.planWindowSmall, 0, 60)) fail5("Invalid plan window.");
   result.preferPlansSmall = v.preferPlansSmall ?? true;
   result.planWindowSmall = v.planWindowSmall ?? 30;
+  if (v.serversOn !== void 0 && typeof v.serversOn !== "boolean") fail5("Invalid servers switch.");
+  result.serversOn = v.serversOn === true;
+  const servers = v.servers ?? [];
+  if (!Array.isArray(servers) || servers.length > MAX_SERVERS) fail5("Invalid servers.");
+  result.servers = servers.map((entry) => {
+    if (!isRecord8(entry) || Object.keys(entry).some((key) => !["label", "clis", "maxParallel"].includes(key))) fail5("Invalid server.");
+    const e = entry;
+    if (!plain(e.label, 64) || !/^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$/u.test(e.label)) fail5("Invalid server name.");
+    if (!Array.isArray(e.clis) || !e.clis.length || e.clis.length > 8 || e.clis.some((cli) => !ROUTE_CLIS.includes(cli))) fail5("Invalid server CLIs.");
+    if (!intIn(e.maxParallel, 1, 8)) fail5("Invalid server parallel limit.");
+    return { label: e.label, clis: [...new Set(e.clis)], maxParallel: e.maxParallel };
+  });
+  if (new Set(result.servers.map((server) => server.label)).size !== result.servers.length) fail5("Two servers have the same name.");
   if (JSON.stringify(result).length > MAX_SETTINGS_CHARS) fail5("The routing settings are too large: remove some plans, models or aliases.");
   return result;
 }
@@ -15138,6 +15180,49 @@ var RouteService = class {
     return { decision: result, view, source, providers, accountRows };
   }
   /**
+   * Auto (Jev) on a card's own sign-in (autopilot D2): the model and effort for `cli` on its declared subscription,
+   * by the same engine as `route`, among that CLI's own sign-in routes only (never a paid route). A declared plan
+   * with no room left gives `exhausted` with the reason; no declared plan gives the CLI's own default model.
+   */
+  topLevelChoice(cli, view, cardClass, orchestrate) {
+    const { catalog, index } = this.options.catalog();
+    const now = this.now();
+    const result = decide({
+      view,
+      preference: this.options.preference(),
+      settings: this.settings,
+      providers: [{ id: cli, installed: true, available: true, subagent: true, orchestrator: true }],
+      providersGiven: true,
+      accountRows: [],
+      callerProvider: cli,
+      cardClass,
+      mode: this.options.dataClassMode(),
+      limits: this.limits,
+      catalog,
+      index,
+      auto: null,
+      now,
+      busy: () => 0,
+      launches: (id, ms) => this.launches(id, ms),
+      cooldown: (key) => {
+        const c = this.cooldowns.get(key);
+        return c && c.until > now ? c : null;
+      },
+      stats: this.records.routeStats(),
+      prefer: cli,
+      orchestrate,
+      explore: { roll: 1, retired: /* @__PURE__ */ new Set(), highRisk: false }
+    });
+    const own = [result.top, ...result.groups.flat()].filter((c) => !!c && c.cli === cli && (c.kind === "subscription" || c.kind === "cli-default"));
+    const best = own.find((c) => c.kind === "subscription") ?? own[0];
+    if (!best || best.kind === "cli-default" && this.settings.plans.some((plan3) => plan3.cli === cli)) {
+      const why = result.dropped.find((entry) => entry.cli === cli && /exhausted|reserve|cooldown|limit|busy/iu.test(entry.reason))?.reason;
+      if (why) return { exhausted: why };
+    }
+    if (!best) return { model: null, effort: null, why: "no declared plan: the CLI's own default model" };
+    return { model: best.spawn.model ?? null, effort: best.spawn.effort ?? null, why: best.kind === "subscription" ? `${best.label}: ${best.model ?? "default"}${best.effort ? `@${best.effort}` : ""}` : "the CLI's own default model" };
+  }
+  /**
    * What the orchestrator passed, or what it passed earlier: the full list_providers and list_routes are large, so a
    * card's last full lists are kept (memory, 30 min) and a later call may send only the task, or a `digest` such as
    * "claude:ok codex:signed_out opencode @glm-53" (CLIs with their sign-in, `@` a ready account id from list_routes).
@@ -15199,6 +15284,12 @@ var RouteService = class {
       options: options.map((option) => optionRecord(option, decision, now))
     };
     this.records.add(record4);
+    if (this.options.bindSpawn) {
+      for (const option of options) {
+        const bound = this.options.bindSpawn(caller.id, option.spawn, record4.id, input.orchestrate === true);
+        if (bound) option.spawn = bound;
+      }
+    }
     const now2 = this.now();
     for (const [id, kept] of this.tasks) if (now2 - kept.at > MATCH_MS) this.tasks.delete(id);
     const cwd = clean3(input.cwd, 4096);
@@ -15352,6 +15443,170 @@ ${JSON.stringify({
   }
 };
 
+// src/autopilot/binding.ts
+import { randomBytes as randomBytes7 } from "node:crypto";
+var BIND_TTL_MS = 10 * 6e4;
+var MAX_BINDINGS = 512;
+var VALUE = /^r:([a-z0-9]{12}):(off|auto|plan:[A-Za-z0-9][A-Za-z0-9._:/@+-]{0,150})$/u;
+var isBoundValue = (value) => typeof value === "string" && VALUE.test(value);
+var Bindings = class {
+  bindings = /* @__PURE__ */ new Map();
+  /** Cards in an Auto tree: an Auto top-level card, or a routed child that may split further. */
+  autoCards = /* @__PURE__ */ new Map();
+  now;
+  constructor(now = Date.now) {
+    this.now = now;
+  }
+  /** The card was started with Model: Auto (Jev): its subagents must be routed. */
+  markAuto(sessionId, root = sessionId) {
+    const known = this.autoCards.get(sessionId);
+    this.autoCards.set(sessionId, { root, children: known?.children ?? /* @__PURE__ */ new Set(), maxChildren: known?.maxChildren ?? null });
+    while (this.autoCards.size > MAX_BINDINGS) this.autoCards.delete(this.autoCards.keys().next().value);
+  }
+  isAuto(sessionId) {
+    return !!sessionId && this.autoCards.has(sessionId);
+  }
+  /** The autopilot plan's child count for this orchestrator (D3); null: no plan, only CanvasTTY's own caps. */
+  setPlan(sessionId, children) {
+    const card = this.autoCards.get(sessionId);
+    if (card) card.maxChildren = children;
+  }
+  running(sessionId) {
+    return this.autoCards.get(sessionId)?.children.size ?? 0;
+  }
+  /** A value for `pick_route`'s spawn (one per option). */
+  bind(parent, provider, target, decisionId, orchestrate) {
+    const id = randomBytes7(9).toString("base64url").toLowerCase().replace(/[^a-z0-9]/gu, "0").slice(0, 12).padEnd(12, "0");
+    this.bindings.set(id, { parent, provider, target, decisionId, orchestrate, at: this.now(), used: false });
+    while (this.bindings.size > MAX_BINDINGS) this.bindings.delete(this.bindings.keys().next().value);
+    return `r:${id}:${target}`;
+  }
+  /**
+   * A subagent launch of an Auto card. `value` is the Assistant's `model` option as it came (inherited or named).
+   * Allowed once per value, for the orchestrator and CLI it was given to, within the plan's child count.
+   */
+  check(input) {
+    if (!isBoundValue(input.value)) return { ok: false, reason: "unrouted" };
+    const id = VALUE.exec(input.value)[1];
+    const binding = this.bindings.get(id);
+    if (!binding) return { ok: false, reason: "unknown" };
+    if (binding.used) return { ok: false, reason: "used" };
+    if (this.now() - binding.at > BIND_TTL_MS) return { ok: false, reason: "expired" };
+    if (binding.parent !== input.parent) return { ok: false, reason: "wrong-parent" };
+    if (binding.provider !== input.provider) return { ok: false, reason: "wrong-cli" };
+    const parent = this.autoCards.get(input.parent);
+    if (parent?.maxChildren !== null && parent?.maxChildren !== void 0 && parent.children.size >= parent.maxChildren) return { ok: false, reason: "over-plan" };
+    binding.used = true;
+    parent?.children.add(input.sessionId);
+    if (binding.orchestrate) this.markAuto(input.sessionId, parent?.root ?? input.parent);
+    return { ok: true, target: binding.target, decisionId: binding.decisionId, orchestrate: binding.orchestrate };
+  }
+  ended(sessionId) {
+    for (const card of this.autoCards.values()) card.children.delete(sessionId);
+    this.autoCards.delete(sessionId);
+  }
+};
+
+// src/autopilot/topLevel.ts
+var OWN_SIGN_IN_CLIS = ["claude", "codex"];
+var isOwnSignInCli = (cli) => OWN_SIGN_IN_CLIS.includes(cli);
+var EFFORTS2 = { claude: ["low", "medium", "high", "xhigh", "max"], codex: ["minimal", "low", "medium", "high", "xhigh"] };
+var MODEL3 = /^[A-Za-z0-9][A-Za-z0-9._:@+-]{0,119}$/u;
+var ANTHROPIC_ENDPOINT = "https://api.anthropic.com";
+function ownSignInArgs(cli, choice2) {
+  const args = [];
+  if (choice2.model && MODEL3.test(choice2.model)) args.push("--model", choice2.model);
+  const effort = choice2.effort && EFFORTS2[cli].includes(choice2.effort) ? choice2.effort : null;
+  if (cli === "claude") {
+    if (effort) args.push("--effort", effort);
+    args.push("--settings", JSON.stringify({ env: { ANTHROPIC_BASE_URL: ANTHROPIC_ENDPOINT } }));
+  } else {
+    if (effort) args.push("-c", `model_reasoning_effort="${effort}"`);
+    args.push("-c", 'model_provider="openai"');
+  }
+  return args;
+}
+function openCodePlanContribution(model) {
+  const match = /^([a-z0-9][a-z0-9._-]{0,63})\/([A-Za-z0-9][A-Za-z0-9._:/@+-]{0,120})$/u.exec(model);
+  if (!match || match[1] === "openrouter") return null;
+  const config = { $schema: "https://opencode.ai/config.json", model, small_model: model, enabled_providers: [match[1]] };
+  return { env: { OPENCODE_CONFIG: "{launchFiles}/opencode.json" }, args: ["--model", model], files: [{ relPath: "opencode.json", content: `${JSON.stringify(config, null, 2)}
+` }] };
+}
+
+// src/autopilot/shape.ts
+var SHAPE_CONFIDENCE = 0.6;
+var MAX_CHILDREN = 6;
+var BUCKET_COUNT = { one: 1, two_three: 3, four_six: 6, seven_plus: 8 };
+async function askTaskShape(engine, input, ctx) {
+  const request = {
+    useCase: "task.route",
+    set: "task.shape",
+    fields: [{ name: "task", value: input.task.trim(), dataClass: input.dataClass, disclosure: "content", bound: FIELD_BOUNDS.task }],
+    summary: "task shape",
+    map: (answers) => ({ outcome: `shape:${choice(answers.shape) ?? "?"}`, qualifiedOutcome: null })
+  };
+  const decision = await engine.ask(request, ctx);
+  if (decision.fallbackReason || !decision.answers) return null;
+  const shape = decision.answers.shape, parts = decision.answers.parts;
+  if (shape?.type !== "choice" || parts?.type !== "choice") return null;
+  if (shape.top < SHAPE_CONFIDENCE) return null;
+  return { shape: shape.choice, parts: parts.top >= SHAPE_CONFIDENCE ? parts.choice : "two_three", from: "jev", confidence: Math.round(shape.top * 1e3) / 1e3 };
+}
+var choice = (answer) => answer?.type === "choice" ? answer.choice : null;
+function ruleShape(task) {
+  const items = task.split("\n").filter((line) => /^\s*(?:[-*•]|\d+[.)])\s+\S/u.test(line)).length;
+  const sequence = /\b(?:then|after that|afterwards|finally|first|second)\b|затем|потом|после этого|сначала/iu.test(task);
+  const many = items >= 2 ? items : (task.match(/;|\band\b|\bи\b/giu) ?? []).length + 1;
+  const parts = many <= 1 ? "one" : many <= 3 ? "two_three" : many <= 6 ? "four_six" : "seven_plus";
+  const shape = items >= 2 ? sequence ? "pipeline" : "independent_parts" : parts === "one" ? "single_step" : sequence ? "pipeline" : "single_step";
+  return { shape, parts, from: "rules", confidence: null };
+}
+function planFor(view, shape, caps) {
+  const count2 = Math.min(MAX_CHILDREN, BUCKET_COUNT[shape.parts]);
+  const strategy = view.level === "small" ? "single-cheap" : "single-strong";
+  const budgetUsd = caps.perTaskUsd;
+  if (shape.shape === "single_step" && view.level !== "large") return { mode: "solo", children: 0, deepChildren: 0, strategy, budgetUsd, why: "one piece of work: do it yourself" };
+  if (shape.shape === "unclear_large" || shape.parts === "seven_plus") {
+    if (view.level === "large" && shape.from === "jev") return { mode: "deep", children: Math.min(3, count2), deepChildren: Math.min(3, count2), strategy: "single-strong", budgetUsd, why: "large, with many or unnamed parts: split it, and let each part split once more" };
+    return { mode: "orchestrate", children: 3, deepChildren: 0, strategy, budgetUsd, why: "large or unclear: split it into at most 3 parts" };
+  }
+  if (shape.shape === "single_step") return { mode: "orchestrate", children: 1, deepChildren: 0, strategy, budgetUsd, why: "one large piece of work: give it to one strong subagent" };
+  return { mode: "orchestrate", children: Math.max(2, count2), deepChildren: 0, strategy, budgetUsd, why: shape.shape === "pipeline" ? "parts in order: one subagent per step, each after the one before" : "independent parts: one subagent per part, at the same time" };
+}
+function planText(plan3) {
+  const head = plan3.mode === "solo" ? "Do this task yourself; start no subagent." : plan3.mode === "deep" ? `Split the task into at most ${plan3.children} parts; each part may split once more (route it with pick_route {orchestrate: true}).` : `Split the task into at most ${plan3.children} part${plan3.children === 1 ? "" : "s"}.`;
+  const route = plan3.mode === "solo" ? "" : " For each part call canvastty-assistant__pick_route {task, cwd} and pass its spawn values to spawn_agent unchanged; a spawn without them is refused. Then wait_for_agent, get_agent_result and route_outcome.";
+  return `${head}${route} Why: ${plan3.why}. Strategy: ${plan3.strategy}. Budget for subagents on paid routes: $${plan3.budgetUsd.toFixed(2)}.`;
+}
+
+// src/autopilot/i18n.ts
+var EN3 = {
+  unrouted: "Auto (Jev) routes every subagent: call canvastty-assistant__pick_route with this subtask and pass its spawn values to spawn_agent unchanged.",
+  unknown: "Auto (Jev): this route value is not one pick_route gave out. Call canvastty-assistant__pick_route again and pass its spawn values unchanged.",
+  used: "Auto (Jev): this route was already used for another subagent. Call canvastty-assistant__pick_route again for this subtask.",
+  expired: "Auto (Jev): this route is older than 10 minutes. Call canvastty-assistant__pick_route again for this subtask.",
+  "wrong-parent": "Auto (Jev): this route was given to another orchestrator. Call canvastty-assistant__pick_route yourself.",
+  "wrong-cli": "Auto (Jev): this route was for another CLI. Pass pick_route's spawn values unchanged, provider included.",
+  "over-plan": "Auto (Jev): your plan has no room for another subagent now. Wait for one to finish, or call canvastty-assistant__autopilot_plan again.",
+  exhausted: "Auto (Jev): this CLI's subscription has no room left now ({why}). Choose another CLI, or start it without Auto.",
+  provider: "Model: Auto (Jev) works on Claude Code and Codex (their own sign-in) and on OpenCode. Choose the agent's own model for this CLI.",
+  planUnusable: "Auto (Jev): this OpenCode plan model cannot be pinned. Call canvastty-assistant__pick_route again."
+};
+var RU3 = {
+  unrouted: "\xAB\u0410\u0432\u0442\u043E (Jev)\xBB \u0440\u0430\u0441\u043F\u0440\u0435\u0434\u0435\u043B\u044F\u0435\u0442 \u043A\u0430\u0436\u0434\u043E\u0433\u043E \u0441\u0443\u0431\u0430\u0433\u0435\u043D\u0442\u0430: \u0432\u044B\u0437\u043E\u0432\u0438\u0442\u0435 canvastty-assistant__pick_route \u0441 \u044D\u0442\u043E\u0439 \u043F\u043E\u0434\u0437\u0430\u0434\u0430\u0447\u0435\u0439 \u0438 \u043F\u0435\u0440\u0435\u0434\u0430\u0439\u0442\u0435 \u0435\u0433\u043E \u0437\u043D\u0430\u0447\u0435\u043D\u0438\u044F spawn \u0432 spawn_agent \u0431\u0435\u0437 \u0438\u0437\u043C\u0435\u043D\u0435\u043D\u0438\u0439.",
+  unknown: "\xAB\u0410\u0432\u0442\u043E (Jev)\xBB: \u044D\u0442\u043E \u0437\u043D\u0430\u0447\u0435\u043D\u0438\u0435 \u043C\u0430\u0440\u0448\u0440\u0443\u0442\u0430 \u0432\u044B\u0434\u0430\u043B \u043D\u0435 pick_route. \u0412\u044B\u0437\u043E\u0432\u0438\u0442\u0435 canvastty-assistant__pick_route \u0435\u0449\u0451 \u0440\u0430\u0437 \u0438 \u043F\u0435\u0440\u0435\u0434\u0430\u0439\u0442\u0435 \u0435\u0433\u043E \u0437\u043D\u0430\u0447\u0435\u043D\u0438\u044F spawn \u0431\u0435\u0437 \u0438\u0437\u043C\u0435\u043D\u0435\u043D\u0438\u0439.",
+  used: "\xAB\u0410\u0432\u0442\u043E (Jev)\xBB: \u044D\u0442\u043E\u0442 \u043C\u0430\u0440\u0448\u0440\u0443\u0442 \u0443\u0436\u0435 \u0438\u0441\u043F\u043E\u043B\u044C\u0437\u043E\u0432\u0430\u043D \u0434\u043B\u044F \u0434\u0440\u0443\u0433\u043E\u0433\u043E \u0441\u0443\u0431\u0430\u0433\u0435\u043D\u0442\u0430. \u0412\u044B\u0437\u043E\u0432\u0438\u0442\u0435 canvastty-assistant__pick_route \u0434\u043B\u044F \u044D\u0442\u043E\u0439 \u043F\u043E\u0434\u0437\u0430\u0434\u0430\u0447\u0438 \u0435\u0449\u0451 \u0440\u0430\u0437.",
+  expired: "\xAB\u0410\u0432\u0442\u043E (Jev)\xBB: \u044D\u0442\u043E\u043C\u0443 \u043C\u0430\u0440\u0448\u0440\u0443\u0442\u0443 \u0431\u043E\u043B\u044C\u0448\u0435 10 \u043C\u0438\u043D\u0443\u0442. \u0412\u044B\u0437\u043E\u0432\u0438\u0442\u0435 canvastty-assistant__pick_route \u0434\u043B\u044F \u044D\u0442\u043E\u0439 \u043F\u043E\u0434\u0437\u0430\u0434\u0430\u0447\u0438 \u0435\u0449\u0451 \u0440\u0430\u0437.",
+  "wrong-parent": "\xAB\u0410\u0432\u0442\u043E (Jev)\xBB: \u044D\u0442\u043E\u0442 \u043C\u0430\u0440\u0448\u0440\u0443\u0442 \u0432\u044B\u0434\u0430\u043D \u0434\u0440\u0443\u0433\u043E\u043C\u0443 \u043E\u0440\u043A\u0435\u0441\u0442\u0440\u0430\u0442\u043E\u0440\u0443. \u0412\u044B\u0437\u043E\u0432\u0438\u0442\u0435 canvastty-assistant__pick_route \u0441\u0430\u043C\u0438.",
+  "wrong-cli": "\xAB\u0410\u0432\u0442\u043E (Jev)\xBB: \u044D\u0442\u043E\u0442 \u043C\u0430\u0440\u0448\u0440\u0443\u0442 \u0431\u044B\u043B \u0434\u043B\u044F \u0434\u0440\u0443\u0433\u043E\u0433\u043E CLI. \u041F\u0435\u0440\u0435\u0434\u0430\u0439\u0442\u0435 \u0437\u043D\u0430\u0447\u0435\u043D\u0438\u044F spawn \u0438\u0437 pick_route \u0431\u0435\u0437 \u0438\u0437\u043C\u0435\u043D\u0435\u043D\u0438\u0439, \u0432\u043C\u0435\u0441\u0442\u0435 \u0441 provider.",
+  "over-plan": "\xAB\u0410\u0432\u0442\u043E (Jev)\xBB: \u0432 \u0432\u0430\u0448\u0435\u043C \u043F\u043B\u0430\u043D\u0435 \u0441\u0435\u0439\u0447\u0430\u0441 \u043D\u0435\u0442 \u043C\u0435\u0441\u0442\u0430 \u0434\u043B\u044F \u0435\u0449\u0451 \u043E\u0434\u043D\u043E\u0433\u043E \u0441\u0443\u0431\u0430\u0433\u0435\u043D\u0442\u0430. \u0414\u043E\u0436\u0434\u0438\u0442\u0435\u0441\u044C \u043E\u043A\u043E\u043D\u0447\u0430\u043D\u0438\u044F \u043E\u0434\u043D\u043E\u0433\u043E \u0438\u043B\u0438 \u0432\u044B\u0437\u043E\u0432\u0438\u0442\u0435 canvastty-assistant__autopilot_plan \u0435\u0449\u0451 \u0440\u0430\u0437.",
+  exhausted: "\xAB\u0410\u0432\u0442\u043E (Jev)\xBB: \u0443 \u043F\u043E\u0434\u043F\u0438\u0441\u043A\u0438 \u044D\u0442\u043E\u0433\u043E CLI \u0441\u0435\u0439\u0447\u0430\u0441 \u043D\u0435 \u043E\u0441\u0442\u0430\u043B\u043E\u0441\u044C \u0437\u0430\u043F\u0430\u0441\u0430 ({why}). \u0412\u044B\u0431\u0435\u0440\u0438\u0442\u0435 \u0434\u0440\u0443\u0433\u043E\u0439 CLI \u0438\u043B\u0438 \u0437\u0430\u043F\u0443\u0441\u0442\u0438\u0442\u0435 \u0431\u0435\u0437 \xAB\u0410\u0432\u0442\u043E\xBB.",
+  provider: "\xAB\u041C\u043E\u0434\u0435\u043B\u044C: \u0410\u0432\u0442\u043E (Jev)\xBB \u0440\u0430\u0431\u043E\u0442\u0430\u0435\u0442 \u0432 Claude Code \u0438 Codex (\u043D\u0430 \u0438\u0445 \u0441\u043E\u0431\u0441\u0442\u0432\u0435\u043D\u043D\u043E\u043C \u0432\u0445\u043E\u0434\u0435) \u0438 \u0432 OpenCode. \u0414\u043B\u044F \u044D\u0442\u043E\u0433\u043E CLI \u0432\u044B\u0431\u0435\u0440\u0438\u0442\u0435 \u0441\u043E\u0431\u0441\u0442\u0432\u0435\u043D\u043D\u0443\u044E \u043C\u043E\u0434\u0435\u043B\u044C \u0430\u0433\u0435\u043D\u0442\u0430.",
+  planUnusable: "\xAB\u0410\u0432\u0442\u043E (Jev)\xBB: \u044D\u0442\u0443 \u043C\u043E\u0434\u0435\u043B\u044C \u043F\u043B\u0430\u043D\u0430 OpenCode \u043D\u0435\u043B\u044C\u0437\u044F \u0437\u0430\u043A\u0440\u0435\u043F\u0438\u0442\u044C. \u0412\u044B\u0437\u043E\u0432\u0438\u0442\u0435 canvastty-assistant__pick_route \u0435\u0449\u0451 \u0440\u0430\u0437."
+};
+var AUTOPILOT_STRINGS = { en: EN3, ru: RU3 };
+
 // src/service/assistant.ts
 var DECIDE_BUDGET_MS = 45e3;
 var TRIAGE_DEADLINE_MS = 2e4;
@@ -15384,6 +15639,10 @@ var Assistant = class {
   classes = /* @__PURE__ */ new Map();
   /** Each card's triage advice, so its badge can be written again in another language. */
   triaged = /* @__PURE__ */ new Map();
+  /** Auto (Jev) autopilot: Auto cards and the single-use route values their subagents launch with. */
+  bindings;
+  /** Leaf cards this service started on servers: the orchestrator that asked, the server, the CLI. */
+  leaves = /* @__PURE__ */ new Map();
   constructor(options) {
     this.host = options.host;
     this.settingsReadable = options.settingsUnavailable !== true;
@@ -15446,7 +15705,9 @@ var Assistant = class {
       ...options.now ? { now: options.now } : {},
       ...options.autoTimeouts ? { timeouts: options.autoTimeouts } : {}
     });
+    this.bindings = new Bindings(options.now);
     this.routing = new RouteService({
+      bindSpawn: (callerId, spawn, decisionId, orchestrate) => this.bindSpawn(callerId, spawn, decisionId, orchestrate),
       host: options.host,
       dataDir: options.dataDir,
       saved: options.routing,
@@ -15541,7 +15802,10 @@ var Assistant = class {
     if (!session || typeof session.id !== "string") return;
     this.harness.sessionEvent(event);
     this.routing.sessionEvent(event);
+    const ended = event.type === "closed" || event.type === "exited" || session.status === "exited";
+    if (ended) this.bindings.ended(session.id);
     if (event.type === "closed") {
+      this.leaves.delete(session.id);
       this.sessions.delete(session.id);
       this.review.forget(session.id);
       this.classes.delete(session.id);
@@ -15582,7 +15846,16 @@ var Assistant = class {
     this.classes.set(context.sessionId, dataClass ?? this.settings.defaultDataClass);
     while (this.classes.size > 4096) this.classes.delete(this.classes.keys().next().value);
     const model = options.model ?? "off";
-    if (model !== "off" && model !== "auto") {
+    const strings3 = AUTOPILOT_STRINGS[this.locale];
+    const parent = context.role === "subagent" ? context.parentSessionId ?? null : null;
+    let bound = null;
+    if (parent && this.bindings.isAuto(parent)) {
+      const check = this.bindings.check({ value: model, parent, provider: context.provider, sessionId: context.sessionId });
+      if (!check.ok) return { refuse: { reason: strings3[check.reason] } };
+      bound = check.target;
+    } else if (isBoundValue(model)) {
+      bound = /^r:[a-z0-9]{12}:(.+)$/u.exec(model)[1];
+    } else if (model !== "off" && model !== "auto") {
       const refusal = AUTO_STRINGS[this.locale].unknownValue;
       return { refuse: { reason: refusal } };
     }
@@ -15590,7 +15863,31 @@ var Assistant = class {
     const triage = !!task && (mode === "suggest" || mode === "auto" || mode === "shadow");
     this.review.noteLaunch(context.sessionId, { task, dataClass, triage: triage && mode !== "shadow", role: context.role, parentSessionId: context.parentSessionId ?? null });
     if (triage) void this.triage(context.sessionId, task, dataClass, context.cwd);
+    if (bound) {
+      if (bound === "off") return null;
+      if (bound.startsWith("plan:")) {
+        const pinned = context.provider === "opencode" ? openCodePlanContribution(bound.slice(5)) : null;
+        return pinned ?? { refuse: { reason: strings3.planUnusable } };
+      }
+      return this.auto.prepare({
+        sessionId: context.sessionId,
+        provider: context.provider,
+        role: context.role,
+        cwd: context.cwd,
+        parentSessionId: context.parentSessionId ?? null,
+        environment: context.environment,
+        dataClass: dataClass ?? this.settings.defaultDataClass
+      });
+    }
     if (model !== "auto") return null;
+    if (isOwnSignInCli(context.provider)) {
+      const choice2 = await this.topLevelChoice(context.provider, task, dataClass ?? this.settings.defaultDataClass, context.sessionId, context.role);
+      if ("exhausted" in choice2) return { refuse: { reason: strings3.exhausted.replace("{why}", choice2.exhausted) } };
+      this.bindings.markAuto(context.sessionId);
+      return { args: ownSignInArgs(context.provider, choice2) };
+    }
+    if (context.provider !== "opencode") return { refuse: { reason: strings3.provider } };
+    this.bindings.markAuto(context.sessionId);
     return this.auto.prepare({
       sessionId: context.sessionId,
       provider: context.provider,
@@ -15600,6 +15897,111 @@ var Assistant = class {
       environment: context.environment,
       dataClass: dataClass ?? this.settings.defaultDataClass
     });
+  }
+  /**
+   * D2: the model and effort for an Auto card on its CLI's own sign-in. Jev reads the launcher's Task (at most 2.5 s,
+   * then word rules); an orchestrator without a task counts as large, never small.
+   */
+  async topLevelChoice(cli, task, dataClass, sessionId, role) {
+    let decision = null;
+    if (task) {
+      const controller = new AbortController();
+      const timer = setTimeout(() => controller.abort(), 2500);
+      try {
+        decision = await Promise.race([this.turnDifficulty(task, dataClass, sessionId, role, controller.signal), new Promise((resolve9) => controller.signal.addEventListener("abort", () => resolve9(null)))]);
+      } catch {
+        decision = null;
+      } finally {
+        clearTimeout(timer);
+      }
+    }
+    const view = decision ? turnView(decision, "jev", task ?? "", { role }) : task ? turnView({ difficulty: ruleDifficulty(task), strong: false }, "rules", task, { role }) : turnView({ difficulty: role === "orchestrator" ? "hard" : "normal", strong: role === "orchestrator" }, "rules", "", { role });
+    return this.routing.topLevelChoice(cli, view, dataClass, role === "orchestrator");
+  }
+  /**
+   * autopilot_plan (D3, D5, D9): how the orchestrator's task splits. Jev answers task.route and task.shape on the
+   * task (2.5 s, then word rules); code turns that into solo / orchestrate N / deep, the strategy and the budget.
+   * For an Auto card the child count is enforced at each subagent's launch; calling again replaces the plan.
+   */
+  async autopilotPlan(caller, input) {
+    if (!caller || typeof caller.id !== "string") return { content: "CanvasTTY did not say which card is calling.", isError: true };
+    const task = typeof input.task === "string" ? input.task.replace(/[\u0000-\u0009\u000b-\u001f\u007f]+/gu, " ").trim().slice(0, 2e3) : "";
+    if (!task) return { content: "Give the whole task in `task`.", isError: true };
+    const dataClass = this.classOf(caller.id);
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), 2500);
+    const ctx = { signal: controller.signal, assertCurrent: () => {
+      if (controller.signal.aborted) throw new Error("aborted");
+    }, requester: "orchestrator", sessionId: caller.id };
+    const quiet = (work) => Promise.race([work.catch(() => null), new Promise((resolve9) => controller.signal.addEventListener("abort", () => resolve9(null)))]);
+    const mode = this.engine.mode("task.route");
+    const asks = mode === "suggest" || mode === "auto";
+    const [decision, shape] = await Promise.all([
+      asks ? quiet(this.turnDifficulty(task, dataClass, caller.id, "orchestrator", controller.signal)) : Promise.resolve(null),
+      asks ? quiet(askTaskShape(this.engine, { task, dataClass }, ctx)) : Promise.resolve(null)
+    ]);
+    clearTimeout(timer);
+    const view = decision ? turnView(decision, "jev", task, { role: "subagent" }) : turnView({ difficulty: ruleDifficulty(task), strong: false }, "rules", task, { role: "subagent" });
+    const shaped = shape ?? ruleShape(task);
+    const plan3 = planFor(view, shaped, { perTaskUsd: this.auto.settings.perCardUsdCap });
+    if (this.bindings.isAuto(caller.id)) this.bindings.setPlan(caller.id, plan3.children);
+    return { content: `${planText(plan3)}
+${JSON.stringify({ ...plan3, type: view.type, level: view.level, shape: shaped.shape, parts: shaped.parts, from: shape ? "jev" : "rules" })}` };
+  }
+  /**
+   * start_leaf (D6, Phase 1): an independent leaf task on a server the person declared (Advanced, off by default),
+   * as a card this plugin starts there (Environments ssh-host) on that server's own CLI sign-in. Only a leaf: it
+   * cannot start subagents. Nothing from this computer's sign-ins or keys reaches the server.
+   */
+  async startLeaf(caller, input) {
+    if (!caller || typeof caller.id !== "string") return { content: "CanvasTTY did not say which card is calling.", isError: true };
+    const route = this.routing.settings;
+    if (!route.serversOn || !route.servers.length) return { content: "Servers are off in the Assistant settings: run this part with pick_route and spawn_agent here.", isError: true };
+    const task = text5(input.task, 4e3);
+    const cwd = text5(input.cwd, 4096);
+    if (!task || !cwd) return { content: "Give `task` and `cwd` (the project folder as on the server).", isError: true };
+    const wanted = text5(input.server, 64);
+    const cli = text5(input.provider, 40);
+    const running = (label2) => [...this.leaves.values()].filter((leaf) => leaf.server === label2).length;
+    const server = route.servers.find((entry) => (!wanted || entry.label === wanted) && (!cli || entry.clis.includes(cli)) && running(entry.label) < entry.maxParallel);
+    if (!server) return { content: wanted ? `Server ${wanted} is not declared, has no ${cli || "such"} CLI, or is full now.` : "No declared server has room now: run this part here with pick_route and spawn_agent.", isError: true };
+    const provider = cli && server.clis.includes(cli) ? cli : server.clis[0];
+    try {
+      const created = await this.host.callHost("sessions.create", {
+        provider,
+        cwd,
+        title: text5(input.title, 80) || "Leaf task",
+        launchOptions: { [ASSISTANT_ID]: { model: "off" } },
+        environment: { pluginId: "canvastty-environments", kind: "ssh-host", options: { host: server.label } }
+      });
+      const sessionId = typeof created?.sessionId === "string" ? created.sessionId : null;
+      if (!sessionId) return { content: "CanvasTTY did not start the card.", isError: true };
+      this.leaves.set(sessionId, { parent: caller.id, server: server.label, provider });
+      await this.host.callHost("sessions.send", { sessionId, text: task });
+      return { content: `Started on ${server.label} (${provider}, its own sign-in). Check it with leaf_status {sessionId:"${sessionId}"}.
+${JSON.stringify({ sessionId, server: server.label, provider })}` };
+    } catch (error) {
+      return { content: `CanvasTTY refused the card: ${error instanceof Error ? error.message.slice(0, 200) : "error"}.`, isError: true };
+    }
+  }
+  leafStatus(caller, input) {
+    const sessionId = text5(input.sessionId, 80);
+    const leaf = this.leaves.get(sessionId);
+    if (!caller || !leaf || leaf.parent !== caller.id) return { content: "No leaf card of yours with that sessionId.", isError: true };
+    const session = this.sessions.get(sessionId);
+    return { content: JSON.stringify({ sessionId, server: leaf.server, provider: leaf.provider, status: session?.status ?? "unknown", exitCode: session?.exitCode ?? null }) };
+  }
+  /** pick_route for a caller in an Auto tree: each option's spawn carries a single-use route value. */
+  bindSpawn(callerId, spawn, decisionId, orchestrate) {
+    if (!this.bindings.isAuto(callerId)) return null;
+    const next = { ...spawn, launchOptions: { ...spawn.launchOptions } };
+    let target = spawn.launchOptions[ASSISTANT_ID]?.model === "auto" ? "auto" : "off";
+    if (target === "off" && spawn.provider === "opencode" && spawn.model && /^[a-z0-9][a-z0-9._-]*\//u.test(spawn.model)) {
+      target = `plan:${spawn.model}`;
+      delete next.model;
+    }
+    next.launchOptions[ASSISTANT_ID] = { model: this.bindings.bind(callerId, spawn.provider, target, decisionId, orchestrate) };
+    return next;
   }
   /**
    * Jev's view of one Auto turn: the existing task triage (task.route) on the latest user text only, through the
@@ -15661,6 +16063,9 @@ var Assistant = class {
       if (!caller || typeof caller.id !== "string") return { content: "CanvasTTY did not say which card is calling.", isError: true };
       return this.routing.tool(name, caller, input);
     }
+    if (name === "autopilot_plan") return this.autopilotPlan(caller, input);
+    if (name === "start_leaf") return this.startLeaf(caller, input);
+    if (name === "leaf_status") return this.leafStatus(caller, input);
     if (name === "recommend") {
       const task = text5(input.task, 2e3);
       if (!task) return { content: "Give the task text in `task`.", isError: true };
@@ -15939,6 +16344,8 @@ serve({
     // Host-only requests.
     "canvastty.decide": async (params) => (await ready).decide(params),
     "canvastty.launch.prepare": async (params) => (await ready).launch(params),
+    // The model field lists only its own choices; route values come from pick_route, not from the launcher.
+    "canvastty.launch.options": async () => ({ model: [] }),
     "canvastty.tools.call": async (params) => (await ready).tool(String(params.tool), params.caller, params.input ?? {}),
     "canvastty.cards.invoke": async (params) => (await ready).harness.cardAction(str2(params.actionId), str2(params.sessionId), params.session),
     // Any page: CanvasTTY's language as its context says (a service hears it only at start).

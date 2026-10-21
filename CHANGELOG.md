@@ -2,6 +2,7 @@
 
 ## Next
 
+- **Auto (Jev) autopilot, phase 1**: Auto on Claude Code's and Codex's own sign-in (model and effort chosen, vendor endpoint pinned); every subagent of an Auto card bound to a single-use `pick_route` decision (no launch policy); `autopilot_plan` with the new `task.shape` question set; OpenCode plan routes pinned to one provider; leaf tasks on declared servers (off by default; new permissions `sessions:launch`, `sessions:control`).
 - **OpenRouter serves only Jev** (owner's rule): no Auto upstream, consensus draft or judge, or agent-level route on openrouter.ai; enforced in settings, the inventory, route candidates and again by the router on every call (host rule plus OpenRouter's resolved addresses for literal IPs; no redirects). The Jev key no longer creates an Auto upstream; the short view calls it "Jev key (OpenRouter)".
 - **Live run 15 / re-audit**: stalled streams end (keep-alive is not progress; a turn deadline) and are counted at an estimate; compound `;`/`&&` commands and OpenCode's edit (with its old text) under the trust chain; today's calls and the last decisions survive a restart; triage badges follow a language switch; plainer Advanced.
 - **Simpler pages** (UI audit 2026-10-19): the Decision models page opens on a short view (Auto on/off, one OpenRouter
