@@ -62,6 +62,21 @@
       el("div", { className: "setting-row__control" }, control)
     );
   }
+  var deferred = false;
+  function whenIdle(refresh) {
+    const active = document.activeElement;
+    if (active && /^(INPUT|SELECT|TEXTAREA)$/u.test(active.tagName) && active.closest("#app")) {
+      if (!deferred) {
+        deferred = true;
+        active.addEventListener("focusout", () => {
+          deferred = false;
+          refresh();
+        }, { once: true });
+      }
+      return;
+    }
+    refresh();
+  }
 
   // src/ui/harnessSettings.ts
   var STRINGS = {
@@ -93,7 +108,27 @@
       models: (n) => n ? `Decision models: ${n} on` : "Decision models: none (simple rules are used)",
       openModels: "Decision models\u2026",
       saved: "Saved.",
-      notSaved: "Not saved: "
+      notSaved: "Not saved: ",
+      start: {
+        title: "Start with Auto (Jev)",
+        help: "Jev reads the task and chooses where an orchestrator runs: the CLI, your subscription, plan or account, the model and effort. The Assistant starts it, gives it the task and routes each of its subagents.",
+        task: "Task",
+        taskPlaceholder: "What should be done",
+        folder: "Project folder",
+        server: "On one of your servers (Jev picks one)",
+        button: "Start with Auto (Jev)",
+        starting: "Starting\u2026",
+        started: (route) => `Started: ${route}. Its subagents are routed by Jev.`,
+        codes: {
+          input: "Write the task and the project folder (a full path).",
+          routingOff: "Turn on Automatic routing above first: Auto (Jev) routes every subagent.",
+          core: "This CanvasTTY does not let plugins start orchestrators: start one yourself in the launcher with Model: Auto (Jev).",
+          consent: "To start it from here, allow \u201CMay start orchestrators\u201D for the Assistant in Settings \u2192 Extension native code. Or start an orchestrator yourself in the launcher with Model: Auto (Jev).",
+          noRoute: "No declared subscription, coding plan or account can run an orchestrator now (Where agents run, on the Decision models page).",
+          noServer: "No declared server has room now.",
+          refused: "CanvasTTY did not start it."
+        }
+      }
     },
     ru: {
       lead: "\u0417\u0434\u0435\u0441\u044C \u0432\u0441\u0451 \u0440\u0435\u0448\u0430\u0435\u0442\u0435 \u0432\u044B. \u041F\u0440\u043E\u0432\u0435\u0440\u043A\u0430 \u043A\u043E\u043C\u0430\u043D\u0434 \u0441\u043D\u0430\u0447\u0430\u043B\u0430 \u0432\u044B\u043A\u043B\u044E\u0447\u0435\u043D\u0430; \u0432\u043A\u043B\u044E\u0447\u0438\u0442\u0435 \u0435\u0451, \u0435\u0441\u043B\u0438 \u043E\u043D\u0430 \u043D\u0443\u0436\u043D\u0430.",
@@ -123,11 +158,35 @@
       models: (n) => n ? `\u041C\u043E\u0434\u0435\u043B\u0438 \u0440\u0435\u0448\u0435\u043D\u0438\u0439: \u0432\u043A\u043B\u044E\u0447\u0435\u043D\u043E ${n}` : "\u041C\u043E\u0434\u0435\u043B\u0438 \u0440\u0435\u0448\u0435\u043D\u0438\u0439: \u043D\u0435\u0442 (\u0440\u0430\u0431\u043E\u0442\u0430\u044E\u0442 \u043F\u0440\u043E\u0441\u0442\u044B\u0435 \u043F\u0440\u0430\u0432\u0438\u043B\u0430)",
       openModels: "\u041C\u043E\u0434\u0435\u043B\u0438 \u0440\u0435\u0448\u0435\u043D\u0438\u0439\u2026",
       saved: "\u0421\u043E\u0445\u0440\u0430\u043D\u0435\u043D\u043E.",
-      notSaved: "\u041D\u0435 \u0441\u043E\u0445\u0440\u0430\u043D\u0435\u043D\u043E: "
+      notSaved: "\u041D\u0435 \u0441\u043E\u0445\u0440\u0430\u043D\u0435\u043D\u043E: ",
+      start: {
+        title: "\u0417\u0430\u043F\u0443\u0441\u0442\u0438\u0442\u044C \u0441 \xAB\u0410\u0432\u0442\u043E (Jev)\xBB",
+        help: "Jev \u0447\u0438\u0442\u0430\u0435\u0442 \u0437\u0430\u0434\u0430\u0447\u0443 \u0438 \u0432\u044B\u0431\u0438\u0440\u0430\u0435\u0442, \u0433\u0434\u0435 \u0440\u0430\u0431\u043E\u0442\u0430\u0435\u0442 \u043E\u0440\u043A\u0435\u0441\u0442\u0440\u0430\u0442\u043E\u0440: CLI, \u0432\u0430\u0448\u0443 \u043F\u043E\u0434\u043F\u0438\u0441\u043A\u0443, \u043F\u043B\u0430\u043D \u0438\u043B\u0438 \u0430\u043A\u043A\u0430\u0443\u043D\u0442, \u043C\u043E\u0434\u0435\u043B\u044C \u0438 \u0443\u0441\u0438\u043B\u0438\u0435. \u041F\u043E\u043C\u043E\u0449\u043D\u0438\u043A \u0437\u0430\u043F\u0443\u0441\u043A\u0430\u0435\u0442 \u0435\u0433\u043E, \u043F\u0435\u0440\u0435\u0434\u0430\u0451\u0442 \u0437\u0430\u0434\u0430\u0447\u0443 \u0438 \u043D\u0430\u043F\u0440\u0430\u0432\u043B\u044F\u0435\u0442 \u043A\u0430\u0436\u0434\u043E\u0433\u043E \u0435\u0433\u043E \u0441\u0443\u0431\u0430\u0433\u0435\u043D\u0442\u0430.",
+        task: "\u0417\u0430\u0434\u0430\u0447\u0430",
+        taskPlaceholder: "\u0427\u0442\u043E \u043D\u0443\u0436\u043D\u043E \u0441\u0434\u0435\u043B\u0430\u0442\u044C",
+        folder: "\u041F\u0430\u043F\u043A\u0430 \u043F\u0440\u043E\u0435\u043A\u0442\u0430",
+        server: "\u041D\u0430 \u043E\u0434\u043D\u043E\u043C \u0438\u0437 \u0432\u0430\u0448\u0438\u0445 \u0441\u0435\u0440\u0432\u0435\u0440\u043E\u0432 (\u0432\u044B\u0431\u0435\u0440\u0435\u0442 Jev)",
+        button: "\u0417\u0430\u043F\u0443\u0441\u0442\u0438\u0442\u044C \u0441 \xAB\u0410\u0432\u0442\u043E (Jev)\xBB",
+        starting: "\u0417\u0430\u043F\u0443\u0441\u043A\u2026",
+        started: (route) => `\u0417\u0430\u043F\u0443\u0449\u0435\u043D: ${route}. \u0415\u0433\u043E \u0441\u0443\u0431\u0430\u0433\u0435\u043D\u0442\u043E\u0432 \u043D\u0430\u043F\u0440\u0430\u0432\u043B\u044F\u0435\u0442 Jev.`,
+        codes: {
+          input: "\u041D\u0430\u043F\u0438\u0448\u0438\u0442\u0435 \u0437\u0430\u0434\u0430\u0447\u0443 \u0438 \u043F\u0430\u043F\u043A\u0443 \u043F\u0440\u043E\u0435\u043A\u0442\u0430 (\u043F\u043E\u043B\u043D\u044B\u0439 \u043F\u0443\u0442\u044C).",
+          routingOff: "\u0421\u043D\u0430\u0447\u0430\u043B\u0430 \u0432\u043A\u043B\u044E\u0447\u0438\u0442\u0435 \u0430\u0432\u0442\u043E\u043C\u0430\u0442\u0438\u0447\u0435\u0441\u043A\u0438\u0439 \u0432\u044B\u0431\u043E\u0440 \u043C\u043E\u0434\u0435\u043B\u0438 \u0432\u044B\u0448\u0435: \xAB\u0410\u0432\u0442\u043E (Jev)\xBB \u043D\u0430\u043F\u0440\u0430\u0432\u043B\u044F\u0435\u0442 \u043A\u0430\u0436\u0434\u043E\u0433\u043E \u0441\u0443\u0431\u0430\u0433\u0435\u043D\u0442\u0430.",
+          core: "\u042D\u0442\u0430 \u0432\u0435\u0440\u0441\u0438\u044F CanvasTTY \u043D\u0435 \u0440\u0430\u0437\u0440\u0435\u0448\u0430\u0435\u0442 \u043F\u043B\u0430\u0433\u0438\u043D\u0430\u043C \u0437\u0430\u043F\u0443\u0441\u043A\u0430\u0442\u044C \u043E\u0440\u043A\u0435\u0441\u0442\u0440\u0430\u0442\u043E\u0440\u044B: \u0437\u0430\u043F\u0443\u0441\u0442\u0438\u0442\u0435 \u0435\u0433\u043E \u0441\u0430\u043C\u0438 \u0432 \u043E\u043A\u043D\u0435 \u0437\u0430\u043F\u0443\u0441\u043A\u0430 \u0441 \u043C\u043E\u0434\u0435\u043B\u044C\u044E \xAB\u0410\u0432\u0442\u043E (Jev)\xBB.",
+          consent: "\u0427\u0442\u043E\u0431\u044B \u0437\u0430\u043F\u0443\u0441\u043A\u0430\u0442\u044C \u043E\u0442\u0441\u044E\u0434\u0430, \u0440\u0430\u0437\u0440\u0435\u0448\u0438\u0442\u0435 \u041F\u043E\u043C\u043E\u0449\u043D\u0438\u043A\u0443 \xAB\u041C\u043E\u0436\u0435\u0442 \u0437\u0430\u043F\u0443\u0441\u043A\u0430\u0442\u044C \u043E\u0440\u043A\u0435\u0441\u0442\u0440\u0430\u0442\u043E\u0440\u043E\u0432\xBB \u0432 \u041D\u0430\u0441\u0442\u0440\u043E\u0439\u043A\u0438 \u2192 \u041D\u0430\u0442\u0438\u0432\u043D\u044B\u0439 \u043A\u043E\u0434 \u0440\u0430\u0441\u0448\u0438\u0440\u0435\u043D\u0438\u0439. \u0418\u043B\u0438 \u0437\u0430\u043F\u0443\u0441\u0442\u0438\u0442\u0435 \u043E\u0440\u043A\u0435\u0441\u0442\u0440\u0430\u0442\u043E\u0440 \u0441\u0430\u043C\u0438 \u0432 \u043E\u043A\u043D\u0435 \u0437\u0430\u043F\u0443\u0441\u043A\u0430 \u0441 \u043C\u043E\u0434\u0435\u043B\u044C\u044E \xAB\u0410\u0432\u0442\u043E (Jev)\xBB.",
+          noRoute: "\u0421\u0435\u0439\u0447\u0430\u0441 \u043D\u0438 \u043E\u0434\u043D\u0430 \u043E\u0431\u044A\u044F\u0432\u043B\u0435\u043D\u043D\u0430\u044F \u043F\u043E\u0434\u043F\u0438\u0441\u043A\u0430, \u043F\u043B\u0430\u043D \u0438\u043B\u0438 \u0430\u043A\u043A\u0430\u0443\u043D\u0442 \u043D\u0435 \u043C\u043E\u0436\u0435\u0442 \u0432\u0435\u0441\u0442\u0438 \u043E\u0440\u043A\u0435\u0441\u0442\u0440\u0430\u0442\u043E\u0440 (\xAB\u0413\u0434\u0435 \u0440\u0430\u0431\u043E\u0442\u0430\u044E\u0442 \u0430\u0433\u0435\u043D\u0442\u044B\xBB \u043D\u0430 \u0441\u0442\u0440\u0430\u043D\u0438\u0446\u0435 \u043C\u043E\u0434\u0435\u043B\u0435\u0439 \u0440\u0435\u0448\u0435\u043D\u0438\u0439).",
+          noServer: "\u0421\u0435\u0439\u0447\u0430\u0441 \u043D\u0438 \u043D\u0430 \u043E\u0434\u043D\u043E\u043C \u043E\u0431\u044A\u044F\u0432\u043B\u0435\u043D\u043D\u043E\u043C \u0441\u0435\u0440\u0432\u0435\u0440\u0435 \u043D\u0435\u0442 \u043C\u0435\u0441\u0442\u0430.",
+          refused: "CanvasTTY \u043D\u0435 \u0437\u0430\u043F\u0443\u0441\u0442\u0438\u043B \u0435\u0433\u043E."
+        }
+      }
     }
   };
   var t = STRINGS.en;
   var state = null;
+  var entry = null;
+  var draft = { task: "", folder: "", server: false };
+  var starting = false;
+  var hint = null;
   var root = document.querySelector("#app");
   var status = document.querySelector("#status");
   var say = (message, error = false) => {
@@ -136,6 +195,8 @@
   };
   async function load() {
     state = await host.service.request(SERVICE, "harness.settings");
+    entry = await host.service.request(SERVICE, "autopilot.entry").catch(() => null);
+    if (entry && !draft.folder && entry.folders[0]) draft.folder = entry.folders[0];
     render();
   }
   var saving = Promise.resolve();
@@ -156,6 +217,54 @@
   function reviewHelp(s) {
     const lines = [s.commandReview === "custom" && s.custom ? t.customHelp(t.modes[s.custom.mode] ?? s.custom.mode, t.strictness[s.custom.strictness] ?? s.custom.strictness) : s.commandReview === "custom" ? t.reviewHelp : t.levels[s.commandReview]];
     return el("div", {}, ...lines.map((line) => el("div", { textContent: line })));
+  }
+  function startAuto() {
+    if (starting) return;
+    starting = true;
+    hint = null;
+    render();
+    host.service.request(SERVICE, "autopilot.start", { task: draft.task, cwd: draft.folder.trim(), server: draft.server }).then((raw) => {
+      const answer = raw;
+      if (answer.started) {
+        draft.task = "";
+        say(t.start.started(answer.route));
+        return;
+      }
+      hint = { code: answer.code, ...answer.detail ? { detail: answer.detail } : {} };
+    }, (error) => {
+      hint = { code: "refused", detail: errorText(error) };
+    }).finally(() => {
+      starting = false;
+      render();
+    });
+  }
+  function startCard() {
+    if (!entry) return null;
+    const task = el("textarea", { className: "input", name: "autoTask", rows: 3, maxLength: 2e3, placeholder: t.start.taskPlaceholder, value: draft.task });
+    task.addEventListener("input", () => {
+      draft.task = task.value;
+    });
+    const folders = el("datalist", { id: "auto-folders" }, ...entry.folders.map((folder2) => el("option", { value: folder2 })));
+    const folder = el("input", { className: "input", name: "autoFolder", value: draft.folder, maxLength: 4096, spellcheck: false });
+    folder.setAttribute("list", "auto-folders");
+    folder.addEventListener("input", () => {
+      draft.folder = folder.value;
+    });
+    const button = el("button", { type: "button", className: "button button--primary", textContent: starting ? t.start.starting : t.start.button, disabled: starting });
+    button.addEventListener("click", startAuto);
+    return el(
+      "section",
+      { className: "card" },
+      el("h2", { className: "card__title", textContent: t.start.title }),
+      el("p", { className: "muted", textContent: t.start.help }),
+      el("label", { className: "field" }, el("span", { className: "field__label", textContent: t.start.task }), task),
+      el("label", { className: "field" }, el("span", { className: "field__label", textContent: t.start.folder }), folder, folders),
+      entry.servers ? settingRow(t.start.server, "", toggle("autoServer", draft.server, t.start.server, (value) => {
+        draft.server = value;
+      })) : null,
+      hint ? el("p", { className: "notice", textContent: `${t.start.codes[hint.code] ?? t.start.codes.refused}${hint.detail ? ` ${hint.detail}` : ""}` }) : null,
+      el("div", { className: "row row--end" }, button)
+    );
   }
   function render() {
     if (!state) return;
@@ -181,7 +290,8 @@
         settingRow(t.loops, t.loopsHelp, toggle("loopAlerts", s.loopAlerts, t.loops, (value) => save({ loopAlerts: value }))),
         settingRow(t.flows, t.flowsHelp, toggle("flows", s.flows, t.flows, (value) => save({ flows: value })))
       ),
-      el("div", { className: "row" }, el("span", { className: "muted", textContent: t.models(s.models) }), openModels)
+      el("div", { className: "row" }, el("span", { className: "muted", textContent: t.models(s.models) }), openModels),
+      ...[startCard()].filter((node) => node !== null)
     );
   }
   onContext((locale) => {
@@ -189,7 +299,9 @@
     render();
   });
   host.service.onEvent(({ serviceId, event }) => {
-    if (serviceId === SERVICE && event === "settings") void load().catch((error) => say(errorText(error), true));
+    if (serviceId === SERVICE && event === "settings") whenIdle(() => {
+      void load().catch((error) => say(errorText(error), true));
+    });
   });
   load().catch((error) => say(errorText(error), true));
 })();

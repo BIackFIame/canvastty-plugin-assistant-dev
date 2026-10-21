@@ -1,3 +1,4 @@
+import { randomUUID } from 'node:crypto';
 import { join } from 'node:path';
 import type { Host } from '../rpc.ts';
 import { AssistantEngine } from '../engine/AssistantEngine.ts';
@@ -21,13 +22,13 @@ import type { RouterDeps } from '../auto/router.ts';
 import { decisionFromTriage, type TurnDecision } from '../auto/select.ts';
 import { RouteService } from '../route/service.ts';
 import { LimitsFeed } from '../route/limitsFeed.ts';
-import { ASSISTANT_ID, type Spawn } from '../route/engine.ts';
-import { Bindings, isBoundValue, type BindTarget } from '../autopilot/binding.ts';
+import { ACCOUNTS_ID, ASSISTANT_ID, type Spawn } from '../route/engine.ts';
+import { Bindings, expectedOf, isBoundValue, isTopValue, launchAsk, ownChoice, ownTarget, targetOf, type ChildTarget, type TopTarget } from '../autopilot/binding.ts';
 import { isOwnSignInCli, openCodePlanContribution, ownSignInArgs } from '../autopilot/topLevel.ts';
-import { askTaskShape, planFor, planText, ruleShape } from '../autopilot/shape.ts';
+import { askTaskShape, planFor, planText, ruleShape, type AutopilotPlan, type ShapeView } from '../autopilot/shape.ts';
 import { AUTOPILOT_STRINGS } from '../autopilot/i18n.ts';
 import { ruleDifficulty } from '../harness/router.ts';
-import { turnView } from '../auto/select.ts';
+import { turnView, type TurnView } from '../auto/select.ts';
 import { DEFAULT_MAX_PARALLEL } from '../route/settings.ts';
 
 /**
@@ -56,10 +57,39 @@ export interface LaunchContext {
   /** Where the card runs: the chosen or saved environment; null on this computer. */
   environment?: { pluginId: string; kind: string } | null;
   parentSessionId?: string;
+  /** CanvasTTY with B7: the model and effort the CLI is started with and the selected plugin ids. */
+  requested?: { model?: string; effort?: string; plugins: string[] };
+  /** CanvasTTY with B7: other selected plugins' fields they share with this plugin (`visibleTo`). */
+  peerOptions?: Record<string, Record<string, string | boolean>>;
 }
 
 /** What prepare answers: the Auto proxy, own-sign-in args, an OpenCode plan pin, or a refusal. */
 export type LaunchAnswer = AutoPrepareAnswer | { args: string[]; env?: Record<string, string>; files?: Array<{ relPath: string; content: string }> };
+
+/** What "Start with Auto (Jev)" answers the page. */
+export type StartAnswer =
+  | { started: true; sessionId: string; provider: string; route: string; kind: string; server: string | null; plan: { mode: string; children: number } }
+  | { started: false; code: 'input' | 'routingOff' | 'core' | 'consent' | 'noRoute' | 'noServer' | 'refused'; detail?: string };
+
+/** Before the plan in the first prompt of an orchestrator "Start with Auto (Jev)" started (agents read English). */
+const AUTOPILOT_PROMPT = 'You were started by Auto (Jev): every subagent you start must be routed with canvastty-assistant__pick_route.';
+
+/** A whole task as the person or an orchestrator wrote it: lines kept (a list of parts is part of its shape). */
+const planTask = (value: unknown): string => typeof value === 'string' ? value.replace(/[\u0000-\u0009\u000b-\u001f\u007f]+/gu, ' ').trim().slice(0, 2_000) : '';
+
+/**
+ * How a top-level orchestrator gets a route's model (sessions.create takes no model): the CLI's own sign-in with the
+ * Assistant's arguments (Claude Code, Codex), an OpenCode plan pin or the Auto proxy, or a model account (Accounts
+ * sets the model). On a server only a CLI's own sign-in (nothing from this computer reaches it). Null: not startable.
+ */
+function topTargetOf(spawn: Spawn, onServer: boolean): TopTarget | null {
+  const account = spawn.launchOptions[ACCOUNTS_ID]?.account;
+  if (typeof account === 'string' && account !== 'none') return onServer ? null : 'off';
+  if (spawn.launchOptions[ASSISTANT_ID]?.model === 'auto') return onServer ? null : 'auto';
+  if (spawn.provider === 'opencode' && spawn.model && spawn.model.includes('/')) return onServer ? null : `plan:${spawn.model}`;
+  if (isOwnSignInCli(spawn.provider)) return ownTarget(spawn.model ?? null, spawn.effort ?? null);
+  return !spawn.model && !spawn.effort ? 'off' : null;
+}
 
 const text = (value: unknown, max: number): string => typeof value === 'string' ? value.replace(/[\u0000-\u001f\u007f]+/gu, ' ').trim().slice(0, max) : '';
 
@@ -95,6 +125,10 @@ export class Assistant {
   readonly bindings: Bindings;
   /** Leaf cards this service started on servers: the orchestrator that asked, the server, the CLI. */
   private readonly leaves = new Map<string, { parent: string; server: string; provider: string }>();
+  /** Orchestrators "Start with Auto (Jev)" started: where they run. */
+  private readonly started = new Map<string, { server: string | null; provider: string }>();
+  /** Whether this CanvasTTY lets a plugin start an orchestrator (B8): null until asked. */
+  private b8: boolean | null = null;
 
   constructor(options: { host: Host; dataDir: string; settings?: unknown; settingsUnavailable?: boolean; harness?: unknown; harnessUnavailable?: boolean; autoRouting?: unknown; autoRoutingUnavailable?: boolean; routing?: unknown; routingUnavailable?: boolean; locale?: unknown; transport?: typeof fetch; catalogTransport?: typeof fetch; git?: null; now?: () => number; autoTimeouts?: RouterDeps['timeouts'] }) {
     this.host = options.host;
@@ -236,7 +270,7 @@ export class Assistant {
     this.routing.sessionEvent(event);
     const ended = event.type === 'closed' || event.type === 'exited' || session.status === 'exited';
     if (ended) this.bindings.ended(session.id);
-    if (event.type === 'closed') { this.leaves.delete(session.id); this.sessions.delete(session.id); this.review.forget(session.id); this.classes.delete(session.id); this.triaged.delete(session.id); this.auto.sessionClosed(session.id); return; }
+    if (event.type === 'closed') { this.leaves.delete(session.id); this.started.delete(session.id); this.sessions.delete(session.id); this.review.forget(session.id); this.classes.delete(session.id); this.triaged.delete(session.id); this.auto.sessionClosed(session.id); return; }
     this.sessions.set(session.id, session);
   }
 
@@ -263,7 +297,9 @@ export class Assistant {
    * (which counted it as one) is gone and a saved value of it is ignored.
    */
   async launch(context: LaunchContext): Promise<LaunchAnswer | null> {
-    if (context.chosen === false) return null;
+    // What the launch asks for (model, effort, plugins, shared peer fields): only on a core that says (B7).
+    const ask = launchAsk(context);
+    if (context.chosen === false) return ask ? this.policy(context) : null;
     const options = context.options ?? {};
     const task = text(options.task, 2_000) || null;
     const requested = DATA_CLASSES.includes(options.dataClass as DataClass) ? options.dataClass as DataClass : null;
@@ -276,19 +312,36 @@ export class Assistant {
     const strings = AUTOPILOT_STRINGS[this.locale];
     // Auto (Jev) autopilot: a subagent of an Auto card launches only with a route value pick_route gave out.
     const parent = context.role === 'subagent' ? context.parentSessionId ?? null : null;
-    let bound: BindTarget | null = null;
+    let bound: ChildTarget | null = null;
+    let top: TopTarget | null = null;
     if (parent && this.bindings.isAuto(parent)) {
-      const check = this.bindings.check({ value: model, parent, provider: context.provider, sessionId: context.sessionId });
+      const check = this.bindings.check({ value: model, parent, provider: context.provider, sessionId: context.sessionId, ask });
       if (!check.ok) return { refuse: { reason: strings[check.reason] } };
-      bound = check.target;
+      bound = check.target as ChildTarget;
+    } else if (parent && ask && this.bindings.isLeaf(parent) && !context.restoring) {
+      // A leaf of an Auto tree does not split (the plan's depth); seen only where the core shows every launch (B7).
+      return { refuse: { reason: strings.leaf } };
+    } else if (isTopValue(model)) {
+      // "Start with Auto (Jev)": the top-level orchestrator this plugin started, bound to Jev's decision.
+      if (context.role === 'subagent') return { refuse: { reason: strings.unrouted } };
+      const check = this.bindings.checkTop({ value: model, provider: context.provider, ask });
+      if (!check.ok) return { refuse: { reason: strings[check.reason] } };
+      top = check.target;
     } else if (isBoundValue(model)) {
       // A route value outside an Auto tree: what it names, without the binding checks (nothing to enforce there).
-      bound = /^r:[a-z0-9]{12}:(.+)$/u.exec(model)![1] as BindTarget;
+      bound = targetOf(model) as ChildTarget;
     } else if (model !== 'off' && model !== 'auto') { const refusal = AUTO_STRINGS[this.locale].unknownValue; return { refuse: { reason: refusal } }; }
     const mode = this.engine.mode('task.route');
     const triage = !!task && (mode === 'suggest' || mode === 'auto' || mode === 'shadow');
     this.review.noteLaunch(context.sessionId, { task, dataClass, triage: triage && mode !== 'shadow', role: context.role, parentSessionId: context.parentSessionId ?? null });
     if (triage) void this.triage(context.sessionId, task!, dataClass, context.cwd);
+    if (top) {
+      // Its subagents are routed like any Auto card's; the route itself is what Jev chose when it was started.
+      this.bindings.markAuto(context.sessionId);
+      const own = ownChoice(top);
+      if (own) return isOwnSignInCli(context.provider) ? { args: ownSignInArgs(context.provider, own) } : null;
+      bound = top as ChildTarget;
+    }
     if (bound) {
       if (bound === 'off') return null;
       if (bound.startsWith('plan:')) {
@@ -318,6 +371,21 @@ export class Assistant {
   }
 
   /**
+   * The launch policy (`"policy": true`): a launch where the person did not choose the Assistant. Only on a core
+   * that shows what a launch asks for (B7); older cores get no answer from it but null, as before. A subagent of an
+   * Auto card that does not carry its route (another CLI that did not name the Assistant, a grandchild on another
+   * CLI) is refused with what to do; a leaf's subagent too. Everything else, and every restore, passes. Answers from
+   * memory only, never waits on a model.
+   */
+  private policy(context: LaunchContext): LaunchAnswer | null {
+    if (context.role !== 'subagent' || !context.parentSessionId || context.restoring) return null;
+    const strings = AUTOPILOT_STRINGS[this.locale];
+    if (this.bindings.isAuto(context.parentSessionId)) return { refuse: { reason: strings.unrouted } };
+    if (this.bindings.isLeaf(context.parentSessionId)) return { refuse: { reason: strings.leaf } };
+    return null;
+  }
+
+  /**
    * D2: the model and effort for an Auto card on its CLI's own sign-in. Jev reads the launcher's Task (at most 2.5 s,
    * then word rules); an orchestrator without a task counts as large, never small.
    */
@@ -342,25 +410,114 @@ export class Assistant {
   private async autopilotPlan(caller: SessionSummary | undefined, input: Record<string, unknown>): Promise<{ content: unknown; isError?: boolean }> {
     if (!caller || typeof caller.id !== 'string') return { content: 'CanvasTTY did not say which card is calling.', isError: true };
     // Lines kept: a list of parts is part of the task's shape.
-    const task = typeof input.task === 'string' ? input.task.replace(/[\u0000-\u0009\u000b-\u001f\u007f]+/gu, ' ').trim().slice(0, 2_000) : '';
+    const task = planTask(input.task);
     if (!task) return { content: 'Give the whole task in `task`.', isError: true };
-    const dataClass = this.classOf(caller.id);
+    const { plan, view, shaped, from } = await this.planOf(task, this.classOf(caller.id), caller.id);
+    if (this.bindings.isAuto(caller.id)) this.bindings.setPlan(caller.id, plan.children);
+    return { content: `${planText(plan)}\n${JSON.stringify({ ...plan, type: view.type, level: view.level, shape: shaped.shape, parts: shaped.parts, from })}` };
+  }
+
+  /** Jev's task.route and task.shape on a whole task (2.5 s, then word rules), and the plan code makes of them. */
+  private async planOf(task: string, dataClass: DataClass, sessionId: string): Promise<{ plan: AutopilotPlan; view: TurnView; shaped: ShapeView; from: 'jev' | 'rules'; decision: TurnDecision | null }> {
     const controller = new AbortController();
     const timer = setTimeout(() => controller.abort(), 2_500);
-    const ctx = { signal: controller.signal, assertCurrent: () => { if (controller.signal.aborted) throw new Error('aborted'); }, requester: 'orchestrator' as const, sessionId: caller.id };
+    const ctx = { signal: controller.signal, assertCurrent: () => { if (controller.signal.aborted) throw new Error('aborted'); }, requester: 'orchestrator' as const, sessionId };
     const quiet = <T>(work: Promise<T>): Promise<T | null> => Promise.race([work.catch(() => null), new Promise<null>(resolve => controller.signal.addEventListener('abort', () => resolve(null)))]);
     const mode = this.engine.mode('task.route');
     const asks = mode === 'suggest' || mode === 'auto';
     const [decision, shape] = await Promise.all([
-      asks ? quiet(this.turnDifficulty(task, dataClass, caller.id, 'orchestrator', controller.signal)) : Promise.resolve(null),
+      asks ? quiet(this.turnDifficulty(task, dataClass, sessionId, 'orchestrator', controller.signal)) : Promise.resolve(null),
       asks ? quiet(askTaskShape(this.engine, { task, dataClass }, ctx)) : Promise.resolve(null)
     ]);
     clearTimeout(timer);
     const view = decision ? turnView(decision, 'jev', task, { role: 'subagent' }) : turnView({ difficulty: ruleDifficulty(task), strong: false }, 'rules', task, { role: 'subagent' });
     const shaped = shape ?? ruleShape(task);
-    const plan = planFor(view, shaped, { perTaskUsd: this.auto.settings.perCardUsdCap });
-    if (this.bindings.isAuto(caller.id)) this.bindings.setPlan(caller.id, plan.children);
-    return { content: `${planText(plan)}\n${JSON.stringify({ ...plan, type: view.type, level: view.level, shape: shaped.shape, parts: shaped.parts, from: shape ? 'jev' : 'rules' })}` };
+    return { plan: planFor(view, shaped, { perTaskUsd: this.auto.settings.perCardUsdCap }), view, shaped, from: shape ? 'jev' : 'rules', decision };
+  }
+
+  /**
+   * Whether this CanvasTTY lets a plugin start an orchestrator (core B8), asked once per service run without
+   * starting anything: a role it does not know is refused by such a core before anything else; an older core ignores
+   * `role` and refuses the call for the missing provider and folder.
+   */
+  private async orchestratorsSupported(): Promise<boolean> {
+    if (this.b8 !== null) return this.b8;
+    try {
+      await this.host.callHost('sessions.create', { role: 'probe' });
+      this.b8 = false;
+    } catch (error) {
+      this.b8 = /role must be agent or orchestrator/iu.test(error instanceof Error ? error.message : String(error));
+    }
+    return this.b8;
+  }
+
+  /** Folders of the cards open now (newest first), for the start form; and whether servers are on. */
+  autopilotEntry(): { folders: string[]; servers: boolean; routing: boolean } {
+    const folders: string[] = [];
+    for (const session of [...this.sessions.values()].reverse()) {
+      const folder = typeof session.workingDirectory === 'string' && session.workingDirectory ? session.workingDirectory : session.cwd;
+      if (typeof folder === 'string' && folder && !folders.includes(folder)) folders.push(folder);
+      if (folders.length >= 8) break;
+    }
+    const route = this.routing.settings;
+    return { folders, servers: route.serversOn && route.servers.length > 0, routing: this.harness.settings.routing };
+  }
+
+  /**
+   * "Start with Auto (Jev)" (autopilot phase 2, core B8): Jev reads the task, and code chooses the CLI, the sign-in
+   * (a declared subscription or coding plan, or a model account), the model and effort, and with `server` one of the
+   * person's declared servers, for an orchestrator this plugin starts with `sessions.create {role: "orchestrator"}`.
+   * Its launch is bound to that decision (single use), its subagents are routed like any Auto card's, and its first
+   * prompt is the task with the plan. Needs the person's "May start orchestrators" for this plugin; without it, or on
+   * a core without it, nothing starts and the answer says how to start Auto instead. Never an OpenRouter route.
+   */
+  async startAuto(input: Record<string, unknown>): Promise<StartAnswer> {
+    const task = planTask(input.task);
+    const cwd = text(input.cwd, 4_096);
+    if (!task || !cwd || !(cwd.startsWith('/') || /^[A-Za-z]:[\\/]/u.test(cwd))) return { started: false, code: 'input' };
+    if (!this.harness.settings.routing) return { started: false, code: 'routingOff' };
+    if (!await this.orchestratorsSupported()) return { started: false, code: 'core' };
+    const dataClass = this.settings.defaultDataClass;
+    const { plan, decision } = await this.planOf(task, dataClass, 'autopilot-start');
+    // The orchestrator's own turns are never small (D2).
+    const view = decision ? turnView(decision, 'jev', task, { role: 'orchestrator' }) : turnView({ difficulty: ruleDifficulty(task), strong: false }, 'rules', task, { role: 'orchestrator' });
+    const route = this.routing.settings;
+    const onServer = input.server === true && route.serversOn && route.servers.length > 0;
+    const busy = (label: string): number => [...this.leaves.values(), ...this.started.values()].filter(entry => entry.server === label).length;
+    const servers = onServer ? route.servers.filter(entry => busy(entry.label) < entry.maxParallel) : [];
+    if (onServer && !servers.length) return { started: false, code: 'noServer' };
+    const { candidates, dropped } = this.routing.orchestratorRoutes(view, dataClass, onServer ? { clis: [...new Set(servers.flatMap(entry => entry.clis))], ownSignIn: true } : {});
+    const chosen = candidates.map(candidate => ({ candidate, target: topTargetOf(candidate.spawn, onServer) })).find(entry => entry.target !== null);
+    if (!chosen) return { started: false, code: 'noRoute', ...(dropped.length ? { detail: dropped.join('; ') } : {}) };
+    const { candidate } = chosen;
+    const spawn = candidate.spawn;
+    const server = onServer ? servers.find(entry => entry.clis.includes(spawn.provider))!.label : null;
+    const decisionId = randomUUID().slice(0, 8);
+    const launchOptions: Spawn['launchOptions'] = {};
+    for (const [pluginId, values] of Object.entries(spawn.launchOptions)) if (pluginId !== ASSISTANT_ID) launchOptions[pluginId] = { ...values };
+    launchOptions[ASSISTANT_ID] = { model: this.bindings.bindTop(spawn.provider, chosen.target!, decisionId, expectedOf({ launchOptions })) };
+    const label = `${spawn.provider} · ${candidate.label}${spawn.model ? ` · ${spawn.model}` : ''}${spawn.effort ? `@${spawn.effort}` : ''}${server ? ` · ${server}` : ''}`.slice(0, 160);
+    let sessionId: string | null = null;
+    try {
+      const created = await this.host.callHost('sessions.create', {
+        provider: spawn.provider, cwd, role: 'orchestrator', title: text(input.title, 80) || 'Auto (Jev)', launchOptions,
+        ...(server ? { environment: { pluginId: 'canvastty-environments', kind: 'ssh-host', options: { host: server } } } : {})
+      }) as { sessionId?: unknown };
+      sessionId = typeof created?.sessionId === 'string' ? created.sessionId : null;
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      if (/not allowed this plugin to start orchestrators/iu.test(message)) return { started: false, code: 'consent' };
+      return { started: false, code: 'refused', detail: message.replace(/[\u0000-\u001f\u007f]+/gu, ' ').slice(0, 240) };
+    }
+    if (!sessionId) return { started: false, code: 'refused' };
+    // Marked before its launch is prepared too: its subagents are routed, within the plan's child count.
+    this.bindings.markAuto(sessionId);
+    this.bindings.setPlan(sessionId, plan.children);
+    this.started.set(sessionId, { server, provider: spawn.provider });
+    while (this.started.size > 64) this.started.delete(this.started.keys().next().value!);
+    // The first prompt is typed once the launch started (CanvasTTY waits for it); the person sees the card meanwhile.
+    void this.host.callHost('sessions.send', { sessionId, text: `${task.replace(/\s*\n\s*/gu, ' ')} — ${AUTOPILOT_PROMPT} ${planText(plan)}` }).catch(() => undefined);
+    return { started: true, sessionId, provider: spawn.provider, route: label, kind: candidate.kind, server, plan: { mode: plan.mode, children: plan.children } };
   }
 
   /**
@@ -409,13 +566,14 @@ export class Assistant {
   private bindSpawn(callerId: string, spawn: Spawn, decisionId: string, orchestrate: boolean): Spawn | null {
     if (!this.bindings.isAuto(callerId)) return null;
     const next: Spawn = { ...spawn, launchOptions: { ...spawn.launchOptions } };
-    let target: BindTarget = spawn.launchOptions[ASSISTANT_ID]?.model === 'auto' ? 'auto' : 'off';
+    let target: ChildTarget = spawn.launchOptions[ASSISTANT_ID]?.model === 'auto' ? 'auto' : 'off';
     // An OpenCode coding-plan model is pinned by the Assistant (the model travels in its option, not next to it).
     if (target === 'off' && spawn.provider === 'opencode' && spawn.model && /^[a-z0-9][a-z0-9._-]*\//u.test(spawn.model)) {
       target = `plan:${spawn.model}`;
       delete next.model;
     }
-    next.launchOptions[ASSISTANT_ID] = { model: this.bindings.bind(callerId, spawn.provider, target, decisionId, orchestrate) };
+    // The launch must then ask for exactly this (checked where the core shows it: model, effort, the account).
+    next.launchOptions[ASSISTANT_ID] = { model: this.bindings.bind(callerId, spawn.provider, target, decisionId, orchestrate, expectedOf(next)) };
     return next;
   }
 

@@ -228,6 +228,7 @@ function serve({ methods, notifications = {}, onInitialize, input = process.stdi
 }
 
 // src/service/assistant.ts
+import { randomUUID as randomUUID4 } from "node:crypto";
 import { join as join16 } from "node:path";
 
 // src/engine/AssistantEngine.ts
@@ -15422,6 +15423,52 @@ var RouteService = class {
     return { model: best.spawn.model ?? null, effort: best.spawn.effort ?? null, why: best.kind === "subscription" ? `${best.label}: ${best.model ?? "default"}${best.effort ? `@${best.effort}` : ""}` : "the CLI's own default model" };
   }
   /**
+   * "Start with Auto (Jev)" (core B8): where a top-level orchestrator runs. The same engine as `route`, for a task
+   * that must orchestrate, among the routes the person declared (subscriptions and coding plans, by their CLI) and the
+   * model accounts an orchestrator's list_routes showed in the last day (Accounts' state as it was then; Accounts
+   * still checks the account at launch). `clis`: only these CLIs; `ownSignIn`: only a CLI's own sign-in (a server
+   * gets nothing from this computer). Best first, never an OpenRouter route (the engine drops those).
+   */
+  orchestratorRoutes(view, cardClass, limit2 = {}) {
+    const now = this.now();
+    const allowed = (cli) => !limit2.clis || limit2.clis.includes(cli);
+    const rows = limit2.ownSignIn || !this.accountsSeen || now - this.accountsSeen.at > 24 * 36e5 ? [] : this.accountsSeen.rows.filter((row) => allowed(row.provider)).map((row) => ({ ...row, launchOptions: { "canvastty-accounts": { account: row.accountId, effort: "default", trustFolder: false } } }));
+    const clis = [.../* @__PURE__ */ new Set([...this.settings.plans.filter((plan3) => plan3.allow !== "never").map((plan3) => plan3.cli), ...rows.map((row) => row.provider), ...limit2.clis ?? []])].filter(allowed);
+    if (!clis.length) return { candidates: [], dropped: [] };
+    const { catalog, index } = this.options.catalog();
+    const decision = decide({
+      view,
+      preference: this.options.preference(),
+      settings: this.settings,
+      providers: clis.map((id) => ({ id, installed: true, available: true, subagent: true, orchestrator: true })),
+      providersGiven: true,
+      accountRows: rows,
+      callerProvider: null,
+      cardClass,
+      mode: this.options.dataClassMode(),
+      limits: this.limits,
+      catalog,
+      index,
+      auto: null,
+      now,
+      busy: (key) => this.busy(key),
+      launches: (id, ms) => this.launches(id, ms),
+      cooldown: (key) => {
+        const c = this.cooldowns.get(key);
+        return c && c.until > now ? c : null;
+      },
+      launchesSinceRead: (id) => this.launchesSinceRead(id),
+      stats: this.records.routeStats(),
+      prefer: null,
+      orchestrate: true,
+      explore: { roll: 1, retired: /* @__PURE__ */ new Set(), highRisk: true }
+    });
+    const seen = /* @__PURE__ */ new Set();
+    const candidates = [decision.top, ...decision.alternatives, ...decision.groups.flat()].filter((c) => !!c && !seen.has(c.key) && !!seen.add(c.key)).filter((c) => !limit2.ownSignIn || c.kind === "subscription" || c.kind === "cli-default");
+    const dropped = [...new Set(decision.dropped.map((entry) => `${entry.cli}${entry.model ? ` ${entry.model}` : ""}: ${entry.reason}`))].slice(0, 4);
+    return { candidates, dropped };
+  }
+  /**
    * What the orchestrator passed, or what it passed earlier: the full list_providers and list_routes are large, so a
    * card's last full lists are kept (memory, 30 min) and a later call may send only the task, or a `digest` such as
    * "claude:ok codex:signed_out opencode @glm-53" (CLIs with their sign-in, `@` a ready account id from list_routes).
@@ -15916,12 +15963,73 @@ var LimitsFeed = class {
 import { randomBytes as randomBytes7 } from "node:crypto";
 var BIND_TTL_MS = 10 * 6e4;
 var MAX_BINDINGS = 512;
-var VALUE = /^r:([a-z0-9]{12}):(off|auto|plan:[A-Za-z0-9][A-Za-z0-9._:/@+-]{0,150})$/u;
+var PLAN = "plan:[A-Za-z0-9][A-Za-z0-9._:/@+-]{0,150}";
+var OWN = "own:[A-Za-z0-9._:@+-]{0,120}~[a-z]{0,12}";
+var VALUE = new RegExp(`^r:([a-z0-9]{12}):(off|auto|${PLAN}|top:(?:off|auto|${PLAN}|${OWN}))$`, "u");
+var ACCOUNTS_ID2 = "canvastty-accounts";
+var ASSISTANT_ID2 = "canvastty-assistant";
 var isBoundValue = (value) => typeof value === "string" && VALUE.test(value);
+var isTopValue = (value) => isBoundValue(value) && VALUE.exec(value)[2].startsWith("top:");
+var targetOf2 = (value) => VALUE.exec(value)[2];
+function ownChoice(target) {
+  const match = /^own:([^~]*)~(.*)$/u.exec(target);
+  return match ? { model: match[1] || null, effort: match[2] || null } : null;
+}
+var ownTarget = (model, effort) => `own:${model ?? ""}~${effort ?? ""}`;
+function launchAsk(context) {
+  const requested = context.requested;
+  if (!requested || typeof requested !== "object" || Array.isArray(requested)) return null;
+  const r = requested;
+  if (!Array.isArray(r.plugins)) return null;
+  const peers = {};
+  if (context.peerOptions && typeof context.peerOptions === "object" && !Array.isArray(context.peerOptions)) {
+    for (const [pluginId, values] of Object.entries(context.peerOptions)) {
+      if (!values || typeof values !== "object" || Array.isArray(values)) continue;
+      const kept = {};
+      for (const [key, value] of Object.entries(values)) if (typeof value === "string" || typeof value === "boolean") kept[key] = value;
+      peers[pluginId] = kept;
+    }
+  }
+  return {
+    requested: {
+      ...typeof r.model === "string" ? { model: r.model } : {},
+      ...typeof r.effort === "string" ? { effort: r.effort } : {},
+      plugins: r.plugins.filter((id) => typeof id === "string")
+    },
+    peerOptions: peers
+  };
+}
+function mismatchOf(expect, ask) {
+  if ((ask.requested.model ?? null) !== expect.model) return "wrong-model";
+  if ((ask.requested.effort ?? null) !== expect.effort) return "wrong-effort";
+  const selected = new Set(ask.requested.plugins);
+  const reason = (pluginId) => pluginId === ACCOUNTS_ID2 ? "wrong-account" : "wrong-options";
+  for (const [pluginId, values] of Object.entries(expect.options)) {
+    if (pluginId === ASSISTANT_ID2) continue;
+    if (!selected.has(pluginId)) {
+      if (pluginId === ACCOUNTS_ID2 && (values.account ?? "none") === "none") continue;
+      return reason(pluginId);
+    }
+    const shared = ask.peerOptions[pluginId] ?? {};
+    for (const [key, value] of Object.entries(shared)) if (key in values && values[key] !== value) return reason(pluginId);
+  }
+  for (const [pluginId, shared] of Object.entries(ask.peerOptions)) {
+    if (pluginId in expect.options || pluginId === ASSISTANT_ID2) continue;
+    if (pluginId === ACCOUNTS_ID2 && typeof shared.account === "string" && shared.account !== "none") return "wrong-account";
+  }
+  return null;
+}
+function expectedOf(spawn) {
+  const options = {};
+  for (const [pluginId, values] of Object.entries(spawn.launchOptions)) if (pluginId !== ASSISTANT_ID2) options[pluginId] = { ...values };
+  return { model: spawn.model ?? null, effort: spawn.effort ?? null, options };
+}
 var Bindings = class {
   bindings = /* @__PURE__ */ new Map();
   /** Cards in an Auto tree: an Auto top-level card, or a routed child that may split further. */
   autoCards = /* @__PURE__ */ new Map();
+  /** Routed children that were not routed to split (leaves of an Auto tree), with their orchestrator. */
+  leaves = /* @__PURE__ */ new Map();
   now;
   constructor(now = Date.now) {
     this.now = now;
@@ -15935,6 +16043,10 @@ var Bindings = class {
   isAuto(sessionId) {
     return !!sessionId && this.autoCards.has(sessionId);
   }
+  /** A routed child of an Auto tree that was not routed to split (`orchestrate` was not asked). */
+  isLeaf(sessionId) {
+    return !!sessionId && this.leaves.has(sessionId);
+  }
   /** The autopilot plan's child count for this orchestrator (D3); null: no plan, only CanvasTTY's own caps. */
   setPlan(sessionId, children) {
     const card = this.autoCards.get(sessionId);
@@ -15943,36 +16055,84 @@ var Bindings = class {
   running(sessionId) {
     return this.autoCards.get(sessionId)?.children.size ?? 0;
   }
-  /** A value for `pick_route`'s spawn (one per option). */
-  bind(parent, provider, target, decisionId, orchestrate) {
-    const id = randomBytes7(9).toString("base64url").toLowerCase().replace(/[^a-z0-9]/gu, "0").slice(0, 12).padEnd(12, "0");
-    this.bindings.set(id, { parent, provider, target, decisionId, orchestrate, at: this.now(), used: false });
+  /** The plan's child count for this card (null: none, or not an Auto card). */
+  planned(sessionId) {
+    return this.autoCards.get(sessionId)?.maxChildren ?? null;
+  }
+  id() {
+    return randomBytes7(9).toString("base64url").toLowerCase().replace(/[^a-z0-9]/gu, "0").slice(0, 12).padEnd(12, "0");
+  }
+  keep(id, binding) {
+    this.bindings.set(id, binding);
     while (this.bindings.size > MAX_BINDINGS) this.bindings.delete(this.bindings.keys().next().value);
+  }
+  /** A value for `pick_route`'s spawn (one per option). `expect`: what the spawn asks for, checked where the core says. */
+  bind(parent, provider, target, decisionId, orchestrate, expect = null) {
+    const id = this.id();
+    this.keep(id, { parent, provider, target, decisionId, orchestrate, at: this.now(), used: false, expect });
     return `r:${id}:${target}`;
   }
+  /** A value for a top-level orchestrator this plugin starts ("Start with Auto (Jev)"). */
+  bindTop(provider, target, decisionId, expect) {
+    const id = this.id();
+    this.keep(id, { parent: null, provider, target: `top:${target}`, decisionId, orchestrate: true, at: this.now(), used: false, expect });
+    return `r:${id}:top:${target}`;
+  }
+  find(value) {
+    const binding = this.bindings.get(VALUE.exec(value)[1]);
+    if (!binding) return { reason: "unknown" };
+    if (binding.used) return { reason: "used" };
+    if (this.now() - binding.at > BIND_TTL_MS) return { reason: "expired" };
+    return { binding };
+  }
   /**
-   * A subagent launch of an Auto card. `value` is the Assistant's `model` option as it came (inherited or named).
-   * Allowed once per value, for the orchestrator and CLI it was given to, within the plan's child count.
+   * A subagent launch of an Auto card. `value` is the Assistant's `model` option as it came (inherited or named);
+   * `ask` what the launch asks for where the core says (B7). Allowed once per value, for the orchestrator and CLI it
+   * was given to, with the decision's model, effort and account, within the plan's child count.
    */
   check(input) {
-    if (!isBoundValue(input.value)) return { ok: false, reason: "unrouted" };
-    const id = VALUE.exec(input.value)[1];
-    const binding = this.bindings.get(id);
-    if (!binding) return { ok: false, reason: "unknown" };
-    if (binding.used) return { ok: false, reason: "used" };
-    if (this.now() - binding.at > BIND_TTL_MS) return { ok: false, reason: "expired" };
+    if (!isBoundValue(input.value) || isTopValue(input.value)) return { ok: false, reason: "unrouted" };
+    const found = this.find(input.value);
+    if (!("binding" in found)) return { ok: false, reason: found.reason };
+    const binding = found.binding;
     if (binding.parent !== input.parent) return { ok: false, reason: "wrong-parent" };
     if (binding.provider !== input.provider) return { ok: false, reason: "wrong-cli" };
+    if (input.ask && binding.expect) {
+      const mismatch2 = mismatchOf(binding.expect, input.ask);
+      if (mismatch2) return { ok: false, reason: mismatch2 };
+    }
     const parent = this.autoCards.get(input.parent);
     if (parent?.maxChildren !== null && parent?.maxChildren !== void 0 && parent.children.size >= parent.maxChildren) return { ok: false, reason: "over-plan" };
     binding.used = true;
     parent?.children.add(input.sessionId);
     if (binding.orchestrate) this.markAuto(input.sessionId, parent?.root ?? input.parent);
+    else {
+      this.leaves.set(input.sessionId, input.parent);
+      while (this.leaves.size > MAX_BINDINGS) this.leaves.delete(this.leaves.keys().next().value);
+    }
     return { ok: true, target: binding.target, decisionId: binding.decisionId, orchestrate: binding.orchestrate };
+  }
+  /**
+   * The launch of a top-level orchestrator with a top value. Not known any more (the service restarted) or already
+   * used (the card is restarted): the value's own target, as for any route value outside a tree.
+   */
+  checkTop(input) {
+    const target = targetOf2(input.value).slice(4);
+    const found = this.find(input.value);
+    if (!("binding" in found)) return found.reason === "expired" ? { ok: false, reason: "expired" } : { ok: true, target, fresh: false };
+    const binding = found.binding;
+    if (binding.provider !== input.provider) return { ok: false, reason: "wrong-cli" };
+    if (input.ask && binding.expect) {
+      const mismatch2 = mismatchOf(binding.expect, input.ask);
+      if (mismatch2) return { ok: false, reason: mismatch2 };
+    }
+    binding.used = true;
+    return { ok: true, target, fresh: true };
   }
   ended(sessionId) {
     for (const card of this.autoCards.values()) card.children.delete(sessionId);
     this.autoCards.delete(sessionId);
+    this.leaves.delete(sessionId);
   }
 };
 
@@ -16051,6 +16211,11 @@ function planText(plan3) {
 
 // src/autopilot/i18n.ts
 var EN3 = {
+  "wrong-model": "Auto (Jev): this subagent asks for another model than its route. Call canvastty-assistant__pick_route again and pass its spawn values to spawn_agent unchanged, with no model of your own.",
+  "wrong-effort": "Auto (Jev): this subagent asks for another effort than its route. Call canvastty-assistant__pick_route again and pass its spawn values to spawn_agent unchanged, with no effort of your own.",
+  "wrong-account": "Auto (Jev): this subagent's model account is not the one its route chose. Call canvastty-assistant__pick_route again and pass its launchOptions unchanged.",
+  "wrong-options": "Auto (Jev): this subagent's launch options are not the ones its route chose. Call canvastty-assistant__pick_route again and pass its spawn values unchanged.",
+  leaf: "Auto (Jev): you were routed as one task, not to split it. Do the work yourself; if it must be split, your orchestrator routes it with canvastty-assistant__pick_route and orchestrate: true.",
   unrouted: "Auto (Jev) routes every subagent: call canvastty-assistant__pick_route with this subtask and pass its spawn values to spawn_agent unchanged.",
   unknown: "Auto (Jev): this route value is not one pick_route gave out. Call canvastty-assistant__pick_route again and pass its spawn values unchanged.",
   used: "Auto (Jev): this route was already used for another subagent. Call canvastty-assistant__pick_route again for this subtask.",
@@ -16063,6 +16228,11 @@ var EN3 = {
   planUnusable: "Auto (Jev): this OpenCode plan model cannot be pinned. Call canvastty-assistant__pick_route again."
 };
 var RU3 = {
+  "wrong-model": "\xAB\u0410\u0432\u0442\u043E (Jev)\xBB: \u044D\u0442\u043E\u0442 \u0441\u0443\u0431\u0430\u0433\u0435\u043D\u0442 \u043F\u0440\u043E\u0441\u0438\u0442 \u043D\u0435 \u0442\u0443 \u043C\u043E\u0434\u0435\u043B\u044C, \u0447\u0442\u043E \u0432\u044B\u0431\u0440\u0430\u043B \u043C\u0430\u0440\u0448\u0440\u0443\u0442. \u0412\u044B\u0437\u043E\u0432\u0438\u0442\u0435 canvastty-assistant__pick_route \u0435\u0449\u0451 \u0440\u0430\u0437 \u0438 \u043F\u0435\u0440\u0435\u0434\u0430\u0439\u0442\u0435 \u0435\u0433\u043E \u0437\u043D\u0430\u0447\u0435\u043D\u0438\u044F spawn \u0432 spawn_agent \u0431\u0435\u0437 \u0438\u0437\u043C\u0435\u043D\u0435\u043D\u0438\u0439, \u0431\u0435\u0437 \u0441\u0432\u043E\u0435\u0439 \u043C\u043E\u0434\u0435\u043B\u0438.",
+  "wrong-effort": "\xAB\u0410\u0432\u0442\u043E (Jev)\xBB: \u044D\u0442\u043E\u0442 \u0441\u0443\u0431\u0430\u0433\u0435\u043D\u0442 \u043F\u0440\u043E\u0441\u0438\u0442 \u043D\u0435 \u0442\u043E \u0443\u0441\u0438\u043B\u0438\u0435, \u0447\u0442\u043E \u0432\u044B\u0431\u0440\u0430\u043B \u043C\u0430\u0440\u0448\u0440\u0443\u0442. \u0412\u044B\u0437\u043E\u0432\u0438\u0442\u0435 canvastty-assistant__pick_route \u0435\u0449\u0451 \u0440\u0430\u0437 \u0438 \u043F\u0435\u0440\u0435\u0434\u0430\u0439\u0442\u0435 \u0435\u0433\u043E \u0437\u043D\u0430\u0447\u0435\u043D\u0438\u044F spawn \u0432 spawn_agent \u0431\u0435\u0437 \u0438\u0437\u043C\u0435\u043D\u0435\u043D\u0438\u0439, \u0431\u0435\u0437 \u0441\u0432\u043E\u0435\u0433\u043E \u0443\u0441\u0438\u043B\u0438\u044F.",
+  "wrong-account": "\xAB\u0410\u0432\u0442\u043E (Jev)\xBB: \u0443 \u044D\u0442\u043E\u0433\u043E \u0441\u0443\u0431\u0430\u0433\u0435\u043D\u0442\u0430 \u043D\u0435 \u0442\u043E\u0442 \u0430\u043A\u043A\u0430\u0443\u043D\u0442 \u043C\u043E\u0434\u0435\u043B\u0438, \u0447\u0442\u043E \u0432\u044B\u0431\u0440\u0430\u043B \u043C\u0430\u0440\u0448\u0440\u0443\u0442. \u0412\u044B\u0437\u043E\u0432\u0438\u0442\u0435 canvastty-assistant__pick_route \u0435\u0449\u0451 \u0440\u0430\u0437 \u0438 \u043F\u0435\u0440\u0435\u0434\u0430\u0439\u0442\u0435 \u0435\u0433\u043E launchOptions \u0431\u0435\u0437 \u0438\u0437\u043C\u0435\u043D\u0435\u043D\u0438\u0439.",
+  "wrong-options": "\xAB\u0410\u0432\u0442\u043E (Jev)\xBB: \u0443 \u044D\u0442\u043E\u0433\u043E \u0441\u0443\u0431\u0430\u0433\u0435\u043D\u0442\u0430 \u043D\u0435 \u0442\u0435 \u043F\u0430\u0440\u0430\u043C\u0435\u0442\u0440\u044B \u0437\u0430\u043F\u0443\u0441\u043A\u0430, \u0447\u0442\u043E \u0432\u044B\u0431\u0440\u0430\u043B \u043C\u0430\u0440\u0448\u0440\u0443\u0442. \u0412\u044B\u0437\u043E\u0432\u0438\u0442\u0435 canvastty-assistant__pick_route \u0435\u0449\u0451 \u0440\u0430\u0437 \u0438 \u043F\u0435\u0440\u0435\u0434\u0430\u0439\u0442\u0435 \u0435\u0433\u043E \u0437\u043D\u0430\u0447\u0435\u043D\u0438\u044F spawn \u0431\u0435\u0437 \u0438\u0437\u043C\u0435\u043D\u0435\u043D\u0438\u0439.",
+  leaf: "\xAB\u0410\u0432\u0442\u043E (Jev)\xBB: \u0432\u0430\u0441 \u043D\u0430\u043F\u0440\u0430\u0432\u0438\u043B\u0438 \u043A\u0430\u043A \u043E\u0434\u043D\u0443 \u0437\u0430\u0434\u0430\u0447\u0443, \u0431\u0435\u0437 \u0440\u0430\u0437\u0431\u0438\u0435\u043D\u0438\u044F. \u0421\u0434\u0435\u043B\u0430\u0439\u0442\u0435 \u0440\u0430\u0431\u043E\u0442\u0443 \u0441\u0430\u043C\u0438; \u0435\u0441\u043B\u0438 \u0435\u0451 \u043D\u0443\u0436\u043D\u043E \u0440\u0430\u0437\u0431\u0438\u0442\u044C, \u0432\u0430\u0448 \u043E\u0440\u043A\u0435\u0441\u0442\u0440\u0430\u0442\u043E\u0440 \u043D\u0430\u043F\u0440\u0430\u0432\u0438\u0442 \u0435\u0451 \u0447\u0435\u0440\u0435\u0437 canvastty-assistant__pick_route \u0441 orchestrate: true.",
   unrouted: "\xAB\u0410\u0432\u0442\u043E (Jev)\xBB \u0440\u0430\u0441\u043F\u0440\u0435\u0434\u0435\u043B\u044F\u0435\u0442 \u043A\u0430\u0436\u0434\u043E\u0433\u043E \u0441\u0443\u0431\u0430\u0433\u0435\u043D\u0442\u0430: \u0432\u044B\u0437\u043E\u0432\u0438\u0442\u0435 canvastty-assistant__pick_route \u0441 \u044D\u0442\u043E\u0439 \u043F\u043E\u0434\u0437\u0430\u0434\u0430\u0447\u0435\u0439 \u0438 \u043F\u0435\u0440\u0435\u0434\u0430\u0439\u0442\u0435 \u0435\u0433\u043E \u0437\u043D\u0430\u0447\u0435\u043D\u0438\u044F spawn \u0432 spawn_agent \u0431\u0435\u0437 \u0438\u0437\u043C\u0435\u043D\u0435\u043D\u0438\u0439.",
   unknown: "\xAB\u0410\u0432\u0442\u043E (Jev)\xBB: \u044D\u0442\u043E \u0437\u043D\u0430\u0447\u0435\u043D\u0438\u0435 \u043C\u0430\u0440\u0448\u0440\u0443\u0442\u0430 \u0432\u044B\u0434\u0430\u043B \u043D\u0435 pick_route. \u0412\u044B\u0437\u043E\u0432\u0438\u0442\u0435 canvastty-assistant__pick_route \u0435\u0449\u0451 \u0440\u0430\u0437 \u0438 \u043F\u0435\u0440\u0435\u0434\u0430\u0439\u0442\u0435 \u0435\u0433\u043E \u0437\u043D\u0430\u0447\u0435\u043D\u0438\u044F spawn \u0431\u0435\u0437 \u0438\u0437\u043C\u0435\u043D\u0435\u043D\u0438\u0439.",
   used: "\xAB\u0410\u0432\u0442\u043E (Jev)\xBB: \u044D\u0442\u043E\u0442 \u043C\u0430\u0440\u0448\u0440\u0443\u0442 \u0443\u0436\u0435 \u0438\u0441\u043F\u043E\u043B\u044C\u0437\u043E\u0432\u0430\u043D \u0434\u043B\u044F \u0434\u0440\u0443\u0433\u043E\u0433\u043E \u0441\u0443\u0431\u0430\u0433\u0435\u043D\u0442\u0430. \u0412\u044B\u0437\u043E\u0432\u0438\u0442\u0435 canvastty-assistant__pick_route \u0434\u043B\u044F \u044D\u0442\u043E\u0439 \u043F\u043E\u0434\u0437\u0430\u0434\u0430\u0447\u0438 \u0435\u0449\u0451 \u0440\u0430\u0437.",
@@ -16081,6 +16251,16 @@ var DECIDE_BUDGET_MS = 45e3;
 var TRIAGE_DEADLINE_MS = 2e4;
 var TOOL_ADVICE_DEADLINE_MS = 12e3;
 var SETTINGS_KEY2 = "settings";
+var AUTOPILOT_PROMPT = "You were started by Auto (Jev): every subagent you start must be routed with canvastty-assistant__pick_route.";
+var planTask = (value) => typeof value === "string" ? value.replace(/[\u0000-\u0009\u000b-\u001f\u007f]+/gu, " ").trim().slice(0, 2e3) : "";
+function topTargetOf(spawn, onServer) {
+  const account = spawn.launchOptions[ACCOUNTS_ID]?.account;
+  if (typeof account === "string" && account !== "none") return onServer ? null : "off";
+  if (spawn.launchOptions[ASSISTANT_ID]?.model === "auto") return onServer ? null : "auto";
+  if (spawn.provider === "opencode" && spawn.model && spawn.model.includes("/")) return onServer ? null : `plan:${spawn.model}`;
+  if (isOwnSignInCli(spawn.provider)) return ownTarget(spawn.model ?? null, spawn.effort ?? null);
+  return !spawn.model && !spawn.effort ? "off" : null;
+}
 var text5 = (value, max) => typeof value === "string" ? value.replace(/[\u0000-\u001f\u007f]+/gu, " ").trim().slice(0, max) : "";
 var Assistant = class {
   settings;
@@ -16114,6 +16294,10 @@ var Assistant = class {
   bindings;
   /** Leaf cards this service started on servers: the orchestrator that asked, the server, the CLI. */
   leaves = /* @__PURE__ */ new Map();
+  /** Orchestrators "Start with Auto (Jev)" started: where they run. */
+  started = /* @__PURE__ */ new Map();
+  /** Whether this CanvasTTY lets a plugin start an orchestrator (B8): null until asked. */
+  b8 = null;
   constructor(options) {
     this.host = options.host;
     this.settingsReadable = options.settingsUnavailable !== true;
@@ -16278,6 +16462,7 @@ var Assistant = class {
     if (ended) this.bindings.ended(session.id);
     if (event.type === "closed") {
       this.leaves.delete(session.id);
+      this.started.delete(session.id);
       this.sessions.delete(session.id);
       this.review.forget(session.id);
       this.classes.delete(session.id);
@@ -16309,7 +16494,8 @@ var Assistant = class {
    * (which counted it as one) is gone and a saved value of it is ignored.
    */
   async launch(context) {
-    if (context.chosen === false) return null;
+    const ask = launchAsk(context);
+    if (context.chosen === false) return ask ? this.policy(context) : null;
     const options = context.options ?? {};
     const task = text5(options.task, 2e3) || null;
     const requested = DATA_CLASSES.includes(options.dataClass) ? options.dataClass : null;
@@ -16321,12 +16507,20 @@ var Assistant = class {
     const strings3 = AUTOPILOT_STRINGS[this.locale];
     const parent = context.role === "subagent" ? context.parentSessionId ?? null : null;
     let bound = null;
+    let top = null;
     if (parent && this.bindings.isAuto(parent)) {
-      const check = this.bindings.check({ value: model, parent, provider: context.provider, sessionId: context.sessionId });
+      const check = this.bindings.check({ value: model, parent, provider: context.provider, sessionId: context.sessionId, ask });
       if (!check.ok) return { refuse: { reason: strings3[check.reason] } };
       bound = check.target;
+    } else if (parent && ask && this.bindings.isLeaf(parent) && !context.restoring) {
+      return { refuse: { reason: strings3.leaf } };
+    } else if (isTopValue(model)) {
+      if (context.role === "subagent") return { refuse: { reason: strings3.unrouted } };
+      const check = this.bindings.checkTop({ value: model, provider: context.provider, ask });
+      if (!check.ok) return { refuse: { reason: strings3[check.reason] } };
+      top = check.target;
     } else if (isBoundValue(model)) {
-      bound = /^r:[a-z0-9]{12}:(.+)$/u.exec(model)[1];
+      bound = targetOf2(model);
     } else if (model !== "off" && model !== "auto") {
       const refusal = AUTO_STRINGS[this.locale].unknownValue;
       return { refuse: { reason: refusal } };
@@ -16335,6 +16529,12 @@ var Assistant = class {
     const triage = !!task && (mode === "suggest" || mode === "auto" || mode === "shadow");
     this.review.noteLaunch(context.sessionId, { task, dataClass, triage: triage && mode !== "shadow", role: context.role, parentSessionId: context.parentSessionId ?? null });
     if (triage) void this.triage(context.sessionId, task, dataClass, context.cwd);
+    if (top) {
+      this.bindings.markAuto(context.sessionId);
+      const own = ownChoice(top);
+      if (own) return isOwnSignInCli(context.provider) ? { args: ownSignInArgs(context.provider, own) } : null;
+      bound = top;
+    }
     if (bound) {
       if (bound === "off") return null;
       if (bound.startsWith("plan:")) {
@@ -16371,6 +16571,20 @@ var Assistant = class {
     });
   }
   /**
+   * The launch policy (`"policy": true`): a launch where the person did not choose the Assistant. Only on a core
+   * that shows what a launch asks for (B7); older cores get no answer from it but null, as before. A subagent of an
+   * Auto card that does not carry its route (another CLI that did not name the Assistant, a grandchild on another
+   * CLI) is refused with what to do; a leaf's subagent too. Everything else, and every restore, passes. Answers from
+   * memory only, never waits on a model.
+   */
+  policy(context) {
+    if (context.role !== "subagent" || !context.parentSessionId || context.restoring) return null;
+    const strings3 = AUTOPILOT_STRINGS[this.locale];
+    if (this.bindings.isAuto(context.parentSessionId)) return { refuse: { reason: strings3.unrouted } };
+    if (this.bindings.isLeaf(context.parentSessionId)) return { refuse: { reason: strings3.leaf } };
+    return null;
+  }
+  /**
    * D2: the model and effort for an Auto card on its CLI's own sign-in. Jev reads the launcher's Task (at most 2.5 s,
    * then word rules); an orchestrator without a task counts as large, never small.
    */
@@ -16397,28 +16611,114 @@ var Assistant = class {
    */
   async autopilotPlan(caller, input) {
     if (!caller || typeof caller.id !== "string") return { content: "CanvasTTY did not say which card is calling.", isError: true };
-    const task = typeof input.task === "string" ? input.task.replace(/[\u0000-\u0009\u000b-\u001f\u007f]+/gu, " ").trim().slice(0, 2e3) : "";
+    const task = planTask(input.task);
     if (!task) return { content: "Give the whole task in `task`.", isError: true };
-    const dataClass = this.classOf(caller.id);
+    const { plan: plan3, view, shaped, from } = await this.planOf(task, this.classOf(caller.id), caller.id);
+    if (this.bindings.isAuto(caller.id)) this.bindings.setPlan(caller.id, plan3.children);
+    return { content: `${planText(plan3)}
+${JSON.stringify({ ...plan3, type: view.type, level: view.level, shape: shaped.shape, parts: shaped.parts, from })}` };
+  }
+  /** Jev's task.route and task.shape on a whole task (2.5 s, then word rules), and the plan code makes of them. */
+  async planOf(task, dataClass, sessionId) {
     const controller = new AbortController();
     const timer = setTimeout(() => controller.abort(), 2500);
     const ctx = { signal: controller.signal, assertCurrent: () => {
       if (controller.signal.aborted) throw new Error("aborted");
-    }, requester: "orchestrator", sessionId: caller.id };
+    }, requester: "orchestrator", sessionId };
     const quiet = (work) => Promise.race([work.catch(() => null), new Promise((resolve9) => controller.signal.addEventListener("abort", () => resolve9(null)))]);
     const mode = this.engine.mode("task.route");
     const asks = mode === "suggest" || mode === "auto";
     const [decision, shape] = await Promise.all([
-      asks ? quiet(this.turnDifficulty(task, dataClass, caller.id, "orchestrator", controller.signal)) : Promise.resolve(null),
+      asks ? quiet(this.turnDifficulty(task, dataClass, sessionId, "orchestrator", controller.signal)) : Promise.resolve(null),
       asks ? quiet(askTaskShape(this.engine, { task, dataClass }, ctx)) : Promise.resolve(null)
     ]);
     clearTimeout(timer);
     const view = decision ? turnView(decision, "jev", task, { role: "subagent" }) : turnView({ difficulty: ruleDifficulty(task), strong: false }, "rules", task, { role: "subagent" });
     const shaped = shape ?? ruleShape(task);
-    const plan3 = planFor(view, shaped, { perTaskUsd: this.auto.settings.perCardUsdCap });
-    if (this.bindings.isAuto(caller.id)) this.bindings.setPlan(caller.id, plan3.children);
-    return { content: `${planText(plan3)}
-${JSON.stringify({ ...plan3, type: view.type, level: view.level, shape: shaped.shape, parts: shaped.parts, from: shape ? "jev" : "rules" })}` };
+    return { plan: planFor(view, shaped, { perTaskUsd: this.auto.settings.perCardUsdCap }), view, shaped, from: shape ? "jev" : "rules", decision };
+  }
+  /**
+   * Whether this CanvasTTY lets a plugin start an orchestrator (core B8), asked once per service run without
+   * starting anything: a role it does not know is refused by such a core before anything else; an older core ignores
+   * `role` and refuses the call for the missing provider and folder.
+   */
+  async orchestratorsSupported() {
+    if (this.b8 !== null) return this.b8;
+    try {
+      await this.host.callHost("sessions.create", { role: "probe" });
+      this.b8 = false;
+    } catch (error) {
+      this.b8 = /role must be agent or orchestrator/iu.test(error instanceof Error ? error.message : String(error));
+    }
+    return this.b8;
+  }
+  /** Folders of the cards open now (newest first), for the start form; and whether servers are on. */
+  autopilotEntry() {
+    const folders = [];
+    for (const session of [...this.sessions.values()].reverse()) {
+      const folder = typeof session.workingDirectory === "string" && session.workingDirectory ? session.workingDirectory : session.cwd;
+      if (typeof folder === "string" && folder && !folders.includes(folder)) folders.push(folder);
+      if (folders.length >= 8) break;
+    }
+    const route = this.routing.settings;
+    return { folders, servers: route.serversOn && route.servers.length > 0, routing: this.harness.settings.routing };
+  }
+  /**
+   * "Start with Auto (Jev)" (autopilot phase 2, core B8): Jev reads the task, and code chooses the CLI, the sign-in
+   * (a declared subscription or coding plan, or a model account), the model and effort, and with `server` one of the
+   * person's declared servers, for an orchestrator this plugin starts with `sessions.create {role: "orchestrator"}`.
+   * Its launch is bound to that decision (single use), its subagents are routed like any Auto card's, and its first
+   * prompt is the task with the plan. Needs the person's "May start orchestrators" for this plugin; without it, or on
+   * a core without it, nothing starts and the answer says how to start Auto instead. Never an OpenRouter route.
+   */
+  async startAuto(input) {
+    const task = planTask(input.task);
+    const cwd = text5(input.cwd, 4096);
+    if (!task || !cwd || !(cwd.startsWith("/") || /^[A-Za-z]:[\\/]/u.test(cwd))) return { started: false, code: "input" };
+    if (!this.harness.settings.routing) return { started: false, code: "routingOff" };
+    if (!await this.orchestratorsSupported()) return { started: false, code: "core" };
+    const dataClass = this.settings.defaultDataClass;
+    const { plan: plan3, decision } = await this.planOf(task, dataClass, "autopilot-start");
+    const view = decision ? turnView(decision, "jev", task, { role: "orchestrator" }) : turnView({ difficulty: ruleDifficulty(task), strong: false }, "rules", task, { role: "orchestrator" });
+    const route = this.routing.settings;
+    const onServer = input.server === true && route.serversOn && route.servers.length > 0;
+    const busy = (label3) => [...this.leaves.values(), ...this.started.values()].filter((entry) => entry.server === label3).length;
+    const servers = onServer ? route.servers.filter((entry) => busy(entry.label) < entry.maxParallel) : [];
+    if (onServer && !servers.length) return { started: false, code: "noServer" };
+    const { candidates, dropped } = this.routing.orchestratorRoutes(view, dataClass, onServer ? { clis: [...new Set(servers.flatMap((entry) => entry.clis))], ownSignIn: true } : {});
+    const chosen = candidates.map((candidate2) => ({ candidate: candidate2, target: topTargetOf(candidate2.spawn, onServer) })).find((entry) => entry.target !== null);
+    if (!chosen) return { started: false, code: "noRoute", ...dropped.length ? { detail: dropped.join("; ") } : {} };
+    const { candidate } = chosen;
+    const spawn = candidate.spawn;
+    const server = onServer ? servers.find((entry) => entry.clis.includes(spawn.provider)).label : null;
+    const decisionId = randomUUID4().slice(0, 8);
+    const launchOptions = {};
+    for (const [pluginId, values] of Object.entries(spawn.launchOptions)) if (pluginId !== ASSISTANT_ID) launchOptions[pluginId] = { ...values };
+    launchOptions[ASSISTANT_ID] = { model: this.bindings.bindTop(spawn.provider, chosen.target, decisionId, expectedOf({ launchOptions })) };
+    const label2 = `${spawn.provider} \xB7 ${candidate.label}${spawn.model ? ` \xB7 ${spawn.model}` : ""}${spawn.effort ? `@${spawn.effort}` : ""}${server ? ` \xB7 ${server}` : ""}`.slice(0, 160);
+    let sessionId = null;
+    try {
+      const created = await this.host.callHost("sessions.create", {
+        provider: spawn.provider,
+        cwd,
+        role: "orchestrator",
+        title: text5(input.title, 80) || "Auto (Jev)",
+        launchOptions,
+        ...server ? { environment: { pluginId: "canvastty-environments", kind: "ssh-host", options: { host: server } } } : {}
+      });
+      sessionId = typeof created?.sessionId === "string" ? created.sessionId : null;
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      if (/not allowed this plugin to start orchestrators/iu.test(message)) return { started: false, code: "consent" };
+      return { started: false, code: "refused", detail: message.replace(/[\u0000-\u001f\u007f]+/gu, " ").slice(0, 240) };
+    }
+    if (!sessionId) return { started: false, code: "refused" };
+    this.bindings.markAuto(sessionId);
+    this.bindings.setPlan(sessionId, plan3.children);
+    this.started.set(sessionId, { server, provider: spawn.provider });
+    while (this.started.size > 64) this.started.delete(this.started.keys().next().value);
+    void this.host.callHost("sessions.send", { sessionId, text: `${task.replace(/\s*\n\s*/gu, " ")} \u2014 ${AUTOPILOT_PROMPT} ${planText(plan3)}` }).catch(() => void 0);
+    return { started: true, sessionId, provider: spawn.provider, route: label2, kind: candidate.kind, server, plan: { mode: plan3.mode, children: plan3.children } };
   }
   /**
    * start_leaf (D6, Phase 1): an independent leaf task on a server the person declared (Advanced, off by default),
@@ -16472,7 +16772,7 @@ ${JSON.stringify({ sessionId, server: server.label, provider })}` };
       target = `plan:${spawn.model}`;
       delete next.model;
     }
-    next.launchOptions[ASSISTANT_ID] = { model: this.bindings.bind(callerId, spawn.provider, target, decisionId, orchestrate) };
+    next.launchOptions[ASSISTANT_ID] = { model: this.bindings.bind(callerId, spawn.provider, target, decisionId, orchestrate, expectedOf(next)) };
     return next;
   }
   /**
@@ -16862,6 +17162,9 @@ serve({
       return { ok: answer.ok, providers: answer.providers, feed: a.limitsFeed.mode };
     },
     "route.feedback": async (params) => (await ready).routing.feedback(str2(params.id), params.ok === true),
+    // "Start with Auto (Jev)" on the settings page (an orchestrator this plugin starts, with the person's consent).
+    "autopilot.entry": async () => (await ready).autopilotEntry(),
+    "autopilot.start": async (params) => (await ready).startAuto(params ?? {}),
     // The Flow preview and Task board cards.
     "harness.view": async () => (await ready).harness.view(),
     "flows.choices": async (params) => (await ready).harness.flowChoices(str2(params.orchestratorId)),

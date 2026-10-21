@@ -79,6 +79,9 @@ serve({
     'route.save': async params => { const a = await ready; return a.routing.save(params.settings, a.pageLocale); },
     'route.limits': async params => { const a = await ready; const answer = a.routing.receiveLimits(params.snapshot, 'page'); return { ok: answer.ok, providers: answer.providers, feed: a.limitsFeed.mode }; },
     'route.feedback': async params => (await ready).routing.feedback(str(params.id), params.ok === true),
+    // "Start with Auto (Jev)" on the settings page (an orchestrator this plugin starts, with the person's consent).
+    'autopilot.entry': async () => (await ready).autopilotEntry(),
+    'autopilot.start': async params => (await ready).startAuto(params ?? {}),
     // The Flow preview and Task board cards.
     'harness.view': async () => (await ready).harness.view(),
     'flows.choices': async params => (await ready).harness.flowChoices(str(params.orchestratorId)),
