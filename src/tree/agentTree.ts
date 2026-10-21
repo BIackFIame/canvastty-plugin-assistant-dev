@@ -16,7 +16,7 @@ export const TREE_STATUSES: readonly TreeStatus[] = ['running', 'waiting', 'appr
  */
 export type TreeCost =
   | { kind: 'usd'; low: number; high: number; measured?: boolean }
-  | { kind: 'plan'; label: string; share: number | null; window: string | null; measured?: boolean }
+  | { kind: 'plan'; label: string; share: number | null; window: string | null; measured?: boolean; subscription?: boolean }
   | { kind: 'launch'; label: string; used: number; allowance: number; windowHours: number }
   | { kind: 'flat'; label: string };
 
@@ -48,9 +48,16 @@ export interface TreeInputs {
   autoTop?(id: string): { model: string | null; label: string } | null;
   /** Measured usage of a card (null: not measured here). */
   usage?(id: string): TreeUsage | null;
+  /**
+   * A card on Model: Auto (Jev): the models its answered calls used through the Assistant's router, the flat-rate
+   * plan they ran on (a brokered plan account) or their dollars, and their share of the plan's window.
+   */
+  auto?(id: string): TreeAuto | null;
   /** A launch that was refused and never started: left out of the agents and the plan count, counted apart. */
   refused?(id: string): boolean;
 }
+
+export interface TreeAuto { models: Array<{ model: string; calls: number }>; plan: string | null; usd: number | null; share: number | null }
 
 export interface TreeNode {
   id: string;
@@ -58,6 +65,8 @@ export interface TreeNode {
   role: string;
   provider: string;
   model: string | null;
+  /** Model: Auto (Jev): the models its calls used (shown as people say them), most used first; null otherwise. */
+  auto: Array<{ model: string; calls: number }> | null;
   status: TreeStatus;
   task: string | null;
   cost: TreeCost | null;
@@ -117,12 +126,12 @@ export function costOf(route: TreeRoute | null): TreeCost | null {
   if (!route || !estimate) return null;
   switch (estimate.kind) {
     case 'usd': return route.costBasis === 'plan' || route.costBasis === 'flat' ? { kind: 'flat', label: route.label } : { kind: 'usd', low: estimate.low, high: estimate.high };
-    case 'window': return { kind: 'plan', label: route.label, share: Number.isFinite(estimate.share) ? estimate.share : null, window: estimate.window };
+    case 'window': return { kind: 'plan', label: route.label, share: Number.isFinite(estimate.share) ? estimate.share : null, window: estimate.window, subscription: route.kind !== 'coding-plan' };
     case 'launches': return { kind: 'launch', label: route.label, used: estimate.used, allowance: estimate.allowance, windowHours: estimate.windowHours };
     case 'flat': return { kind: 'flat', label: route.label };
     default:
       // A plan whose quota is not known yet is still a plan: shown as such, without a share.
-      return route.kind === 'subscription' || route.kind === 'coding-plan' || route.kind === 'cli-default' ? { kind: 'plan', label: route.label, share: null, window: null } : null;
+      return route.kind === 'subscription' || route.kind === 'coding-plan' || route.kind === 'cli-default' ? { kind: 'plan', label: route.label, share: null, window: null, subscription: route.kind !== 'coding-plan' } : null;
   }
 }
 
@@ -134,6 +143,8 @@ export function measuredCost(cost: TreeCost | null, usage: TreeUsage | null): Tr
   if (!cost || !usage) return cost;
   if (cost.kind === 'usd' && usage.usd !== null) return { kind: 'usd', low: usage.usd, high: usage.usd, measured: true };
   if (cost.kind === 'plan') return { ...cost, share: usage.share, measured: true };
+  // A flat-rate plan account: what the card used, as a share of the plan, once it is measured.
+  if (cost.kind === 'flat') return { kind: 'plan', label: cost.label, share: usage.share, window: null, measured: true, subscription: true };
   return cost;
 }
 
@@ -218,13 +229,18 @@ export function buildTree(input: TreeInputs, options: { focus?: string | null } 
       .sort((a, b) => (a.startedAt ?? 0) - (b.startedAt ?? 0) || a.id.localeCompare(b.id))
       .map(child => node(child, depth + 1));
     const usage = input.usage?.(card.id) ?? null;
-    const cost = measuredCost(costOf(route) ?? (top ? { kind: 'plan', label: top.label, share: null, window: null } as const : null), usage);
+    const auto = !route && !top ? input.auto?.(card.id) ?? null : null;
+    const autoCost: TreeCost | null = !auto ? null
+      : auto.plan ? { kind: 'plan', label: auto.plan, share: auto.share, window: null, subscription: true, ...(auto.share !== null ? { measured: true } : {}) }
+        : auto.usd !== null ? { kind: 'usd', low: auto.usd, high: auto.usd, measured: true } : null;
+    const cost = measuredCost(costOf(route) ?? (top ? { kind: 'plan', label: top.label, share: null, window: null, subscription: true } as const : autoCost), usage);
     return {
       id: card.id,
       title: oneLine(card.title, TREE_LIMITS.title) ?? card.id.slice(0, 8),
       role: card.role,
       provider: card.provider,
       model: modelLabel(card.model ?? route?.model ?? top?.model ?? null),
+      auto: auto && auto.models.length ? auto.models.slice(0, 3).map(entry => ({ model: modelLabel(entry.model) ?? entry.model, calls: entry.calls })) : null,
       status: statusOf(card),
       task: oneLine(input.task(card.id), TREE_LIMITS.task),
       cost,

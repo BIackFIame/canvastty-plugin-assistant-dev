@@ -97,6 +97,9 @@ const NO_PROVIDER = 'Auto (Jev): no model provider is allowed for this card. Ope
 
 const COOLDOWN_MS = Object.freeze({ transient: 30_000, quota: 300_000, missing: 900_000, auth: 900_000, maxRetryAfter: 24 * 3_600_000 });
 
+/** One model a card's answered calls used through the router (the agent tree's Auto line). */
+export interface SessionTurn { upstream: string; model: string; turns: number; tokensIn: number; tokensOut: number; usd: number | null }
+
 export interface DecisionRecord {
   at: number;
   /** The first 8 characters of the card's session id. */
@@ -307,6 +310,7 @@ export class AutoRouter {
   /** Each card's first conversation (keyed hash): the one its new user turns are reported from. */
   private readonly mainConversation = new Map<string, string>();
   private readonly recentRecords: DecisionRecord[] = [];
+  private readonly turnsBySession = new Map<string, Map<string, SessionTurn>>();
   private readonly hosts = new Set<string>();
   /** Conversations (keyed hashes) where a fan-out met a tool call: their turns stay single. */
   private readonly agentic = new Set<string>();
@@ -455,6 +459,30 @@ export class AutoRouter {
     this.mainConversation.delete(sessionId);
     this.spend.forget(sessionId);
     this.outputs.delete(sessionId);
+    this.turnsBySession.delete(sessionId);
+  }
+
+  /**
+   * The models a card's answered calls used through this router, by full session id (for the agent tree): calls,
+   * the upstream, tokens and dollars where known. Memory only, until the card closes.
+   */
+  sessionTurns(sessionId: string): SessionTurn[] { return [...(this.turnsBySession.get(sessionId)?.values() ?? [])].map(entry => ({ ...entry })); }
+
+  private tally(sessionId: string, record: DecisionRecord): void {
+    if (record.status !== 200 || !record.model || !record.upstream) return;
+    let byModel = this.turnsBySession.get(sessionId);
+    if (!byModel) {
+      byModel = new Map();
+      this.turnsBySession.set(sessionId, byModel);
+      while (this.turnsBySession.size > ROUTER_LIMITS.conversations) this.turnsBySession.delete(this.turnsBySession.keys().next().value!);
+    }
+    const key = `${record.upstream}|${record.model}`;
+    const entry = byModel.get(key) ?? { upstream: record.upstream, model: record.model, turns: 0, tokensIn: 0, tokensOut: 0, usd: null };
+    entry.turns++;
+    entry.tokensIn += record.tokensIn ?? 0;
+    entry.tokensOut += record.tokensOut ?? 0;
+    if (record.costUsd !== null) entry.usd = Math.round(((entry.usd ?? 0) + record.costUsd) * 1e6) / 1e6;
+    byModel.set(key, entry);
   }
 
   /** Cards CanvasTTY no longer lists lose their keys (after a restart of the service). */
@@ -691,6 +719,7 @@ export class AutoRouter {
       if (!sessionSet.size) this.active.delete(grant.sessionId);
       record.totalMs = this.now() - started;
       this.remember(record);
+      this.tally(grant.sessionId, record);
       this.idle();
     }
   }

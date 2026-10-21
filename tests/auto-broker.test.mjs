@@ -312,3 +312,15 @@ test('broker client: only not_granted and grant_changed count as withdrawn; othe
     assert.equal(broker.withdrawn(REF), false, reason);
   }
 });
+
+test('router (live run 18 A): each card\'s answered calls are counted per model by full session id, for the agent tree', async (t) => {
+  const core = fakeCore({ answer: () => ({ status: 200, chunks: [sse([{ choices: [{ delta: { content: 'x' } }] }, { choices: [], usage: { prompt_tokens: 100, completion_tokens: 10 } }])] }) });
+  const { token, port, router } = await routerWith(t, { core, upstreams: [{ ...accountUpstream(ACCOUNT, []), models: [{ id: 'glm-4.6', tier: 'medium' }] }] });
+  for (const text of ['one', 'two', 'three']) assert.equal((await call(port, token, turn({ messages: [{ role: 'user', content: `task ${text}` }] }))).status, 200);
+  const [entry] = router.sessionTurns('card-0001-aaaa');
+  assert.deepEqual({ model: entry.model, turns: entry.turns, tokensIn: entry.tokensIn, tokensOut: entry.tokensOut }, { model: 'glm-4.6', turns: 3, tokensIn: 300, tokensOut: 30 });
+  assert.equal(entry.upstream, router['deps'].settings().upstreams[0].id);
+  assert.deepEqual(router.sessionTurns('card-0001'), [], 'by full session id, never a prefix');
+  router.closeSession('card-0001-aaaa');
+  assert.deepEqual(router.sessionTurns('card-0001-aaaa'), [], 'gone when the card closes');
+});
