@@ -166,7 +166,8 @@ model account (an account and Auto on one launch are refused: both configure Ope
   unknown. Old scores still count (marked old); prices older than 7 days are not compared. Measured rows ship with the
   plugin for a computer that never went online. Artificial Analysis's page now carries full rows only for the models
   of its default chart, so a refresh with fewer than half the known rows keeps the earlier ones it lacks.
-- **Upstreams** (Decision models page): **OpenRouter** (its own key or the Jev · OpenRouter key) offers its whole list of
+- **OpenRouter serves only Jev.** Auto never sends model calls to openrouter.ai (any spelling of its host, its subdomains, or an IP address it resolves to): such an upstream cannot be added or switched on, one saved earlier stays off, agent-level routes through it are left out, and the router refuses it again on every call. With no other provider, an Auto turn fails with a message pointing to the card's own model.
+- **Upstreams** (Decision models page; the OpenRouter kind below is no longer used for Auto): **OpenRouter** (its own key or the Jev · OpenRouter key) offers its whole list of
   suitable models (tools, text, a fixed price; no `:free` variants) with OpenRouter's context and prices; a model with
   measured efforts is offered at each of them, and Auto sends that effort (`reasoning.effort`) unless the CLI set one.
   **OpenAI-compatible** base URLs take your exact model ids; prices come from models.dev when it lists that address,

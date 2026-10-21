@@ -20,18 +20,18 @@
   "coreFiles": [
     {
       "path": "README.md",
-      "bytes": 24048,
-      "sha256": "fc91e45a53e7c7a51d560492f50f38d63c61e397b84f5c1a90e55d51507fa8c4"
+      "bytes": 24520,
+      "sha256": "9f88cfb815c8ba42a0728169a65cec50a649d0b79807e4a338d7dd93e3eb0c1c"
     },
     {
       "path": "README.ru.md",
-      "bytes": 42788,
-      "sha256": "64bf319fb913f97b35c0d40ecce3bfa35ac4efc76b37409bc592d99283e20217"
+      "bytes": 43602,
+      "sha256": "4443d5547ec7724ae4ff260e276ef946d3f3d03687f889220791f2f9567bbec6"
     },
     {
       "path": "services/assistant.mjs",
-      "bytes": 925834,
-      "sha256": "f2776a546b5e569061b0a1f1d15b35cfd37f315bb042073168117eefaf501185"
+      "bytes": 930271,
+      "sha256": "c56c3fe33d41976ada071f890f67d350348049b1fe3704cad71b5f16878f5f22"
     },
     {
       "path": "settings/assistant.html",
@@ -40,8 +40,8 @@
     },
     {
       "path": "settings/assistant.js",
-      "bytes": 153273,
-      "sha256": "eaf5bfbdb55ef8fe312d922d63b9b91ac5daa265270e68418b0ae0448706ba3f"
+      "bytes": 154667,
+      "sha256": "e7575872b16991da7e260b502f7c3c78f20b1a7e8152492888f31a4556c78385"
     },
     {
       "path": "settings/assistant.css",
