@@ -24,16 +24,19 @@ export function withoutPolicy(manifest) {
   }) };
 }
 
+const declaresPolicy = manifest => manifest.services.some(service => service.launch?.policy !== undefined);
+
 /**
  * `{ manifest, localized, policy }`: localized is false when the core refused the localized keys and they were
- * dropped; policy is false when it refused the scoped launch policy and the policy was dropped.
+ * dropped; policy says whether the accepted manifest declares a launch policy (false when the core refused the
+ * scoped form and it was dropped, or the manifest has none: the 1.8.x variant).
  */
 export function manifestForCore(validatePluginManifest, manifest) {
   let current = manifest, localized = true, policy = true;
   for (let attempt = 0; attempt < 3; attempt++) {
     try {
       validatePluginManifest(current);
-      return { manifest: current, localized, policy };
+      return { manifest: current, localized, policy: policy && declaresPolicy(current) };
     } catch (error) {
       const message = String(error?.message);
       if (localized && /unknown field: [A-Za-z]+\.(?:ru|en|zh-CN)\b/u.test(message)) { current = withoutLocalizedKeys(current); localized = false; continue; }
@@ -42,5 +45,5 @@ export function manifestForCore(validatePluginManifest, manifest) {
     }
   }
   validatePluginManifest(current);
-  return { manifest: current, localized, policy };
+  return { manifest: current, localized, policy: policy && declaresPolicy(current) };
 }
