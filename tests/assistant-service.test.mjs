@@ -82,9 +82,13 @@ function service(engine, patch = {}, extra = {}) {
 const settle = () => new Promise(resolve => setTimeout(resolve, 30));
 
 test('catalog: the two use cases, their pinned question sets and the one-way rules', () => {
-  const hash = createHash('sha256').update(JSON.stringify(QUESTION_SETS)).digest('hex');
+  // The three sets of catalog 1 keep their hash; task.shape (autopilot) was added beside them with its own pin.
+  const { 'task.shape': shape, ...first } = QUESTION_SETS;
+  const hash = createHash('sha256').update(JSON.stringify({ 'task.route': first['task.route'], 'command.review': first['command.review'], 'command.review@meta': first['command.review@meta'] })).digest('hex');
   assert.equal(ASSISTANT_CATALOG_VERSION, 1);
-  assert.deepEqual(Object.keys(QUESTION_SETS), ['task.route', 'command.review', 'command.review@meta']);
+  assert.deepEqual(Object.keys(QUESTION_SETS), ['task.route', 'task.shape', 'command.review', 'command.review@meta']);
+  assert.equal(createHash('sha256').update(JSON.stringify(shape)).digest('hex'), 'cf3e3b6873e022c0fbe59584fde33d9b43d3f577753b57b48570c27b5e6b17dc', 'task.shape changed: record the new hash (it is its own set)');
+  assert.deepEqual(Object.keys(shape), ['shape', 'parts']);
   assert.equal(Object.keys(QUESTION_SETS['command.review']).length, 9);
   assert.equal(Object.keys(QUESTION_SETS['task.route']).length, 10);
   // Changing a question without a catalog version bump must fail here (the chain's golden rule).

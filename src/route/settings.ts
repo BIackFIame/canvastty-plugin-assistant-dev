@@ -60,6 +60,14 @@ export interface PlanDecl {
 
 export interface AliasOverride { cli: string; alias: string; identity: string }
 
+/**
+ * A server the person declared for leaf tasks (autopilot D6): its label exactly as in the Environments plugin's
+ * ssh-host list, the CLIs signed in there (their own sign-in: nothing from this computer reaches a server), and how
+ * many leaf cards may run there at once.
+ */
+export interface ServerDecl { label: string; clis: string[]; maxParallel: number }
+export const MAX_SERVERS = 8;
+
 export interface RouteSettings {
   version: 1;
   plans: PlanDecl[];
@@ -96,6 +104,9 @@ export interface RouteSettings {
   /** Confidently small tasks go to a plan or subscription whose score is within `planWindowSmall` points of the best. */
   preferPlansSmall: boolean;
   planWindowSmall: number;
+  /** Leaf cards on servers (off unless the person turns it on), and the servers. */
+  serversOn: boolean;
+  servers: ServerDecl[];
 }
 
 export const MAX_PLANS = 16;
@@ -109,7 +120,7 @@ export const MAX_SETTINGS_CHARS = 16_384;
 
 export const DEFAULT_ROUTE_SETTINGS: Readonly<RouteSettings> = Object.freeze({
   version: 1, plans: [], preferSubscriptions: true, expectedShare: { small: 3, medium: 8, large: 15 },
-  allow: {}, trust: {}, pins: {}, boosts: {}, newModels: 'wait', exploreShare: 0.05, aliases: [], notEquivalent: [], flat: [], valueSpeed: 'moderate', speeds: {}, quotaWeights: {}, preferPlansSmall: true, planWindowSmall: 30
+  allow: {}, trust: {}, pins: {}, boosts: {}, newModels: 'wait', exploreShare: 0.05, aliases: [], notEquivalent: [], flat: [], valueSpeed: 'moderate', speeds: {}, quotaWeights: {}, preferPlansSmall: true, planWindowSmall: 30, serversOn: false, servers: []
 }) as Readonly<RouteSettings>;
 
 class RouteSettingsError extends Error {}
@@ -198,7 +209,7 @@ export function validateRouteSettings(value: unknown): RouteSettings {
     expectedShare: { small: share.small as number, medium: share.medium as number, large: share.large as number },
     allow, trust, pins, boosts, newModels: v.newModels as NewModelPolicy, exploreShare: v.exploreShare as number, aliases,
     notEquivalent: [...new Set(v.notEquivalent as string[])], flat: [...new Set(flat as string[])],
-    valueSpeed: 'moderate', speeds: {}, quotaWeights: {}, preferPlansSmall: true, planWindowSmall: 30
+    valueSpeed: 'moderate', speeds: {}, quotaWeights: {}, preferPlansSmall: true, planWindowSmall: 30, serversOn: false, servers: []
   };
   // Saved before plan cost by quota and speed existed: moderate, none.
   if (v.valueSpeed !== undefined && !VALUE_SPEEDS.includes(v.valueSpeed as ValueSpeed)) fail('Invalid speed preference.');
@@ -210,6 +221,20 @@ export function validateRouteSettings(value: unknown): RouteSettings {
   if (v.planWindowSmall !== undefined && !intIn(v.planWindowSmall, 0, 60)) fail('Invalid plan window.');
   result.preferPlansSmall = (v.preferPlansSmall as boolean | undefined) ?? true;
   result.planWindowSmall = (v.planWindowSmall as number | undefined) ?? 30;
+  // Saved before servers existed: off, none.
+  if (v.serversOn !== undefined && typeof v.serversOn !== 'boolean') fail('Invalid servers switch.');
+  result.serversOn = v.serversOn === true;
+  const servers = v.servers ?? [];
+  if (!Array.isArray(servers) || servers.length > MAX_SERVERS) fail('Invalid servers.');
+  result.servers = (servers as unknown[]).map(entry => {
+    if (!isRecord(entry) || Object.keys(entry).some(key => !['label', 'clis', 'maxParallel'].includes(key))) fail('Invalid server.');
+    const e = entry as Record<string, unknown>;
+    if (!plain(e.label, 64) || !/^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$/u.test(e.label as string)) fail('Invalid server name.');
+    if (!Array.isArray(e.clis) || !e.clis.length || e.clis.length > 8 || e.clis.some(cli => !(ROUTE_CLIS as readonly unknown[]).includes(cli))) fail('Invalid server CLIs.');
+    if (!intIn(e.maxParallel, 1, 8)) fail('Invalid server parallel limit.');
+    return { label: e.label as string, clis: [...new Set(e.clis as string[])], maxParallel: e.maxParallel as number };
+  });
+  if (new Set(result.servers.map(server => server.label)).size !== result.servers.length) fail('Two servers have the same name.');
   // Plugin storage holds 64 KB for everything the Assistant keeps: this part stays small.
   if (JSON.stringify(result).length > MAX_SETTINGS_CHARS) fail('The routing settings are too large: remove some plans, models or aliases.');
   return result;

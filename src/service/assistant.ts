@@ -20,6 +20,13 @@ import { clampClass } from '../auto/launch.ts';
 import type { RouterDeps } from '../auto/router.ts';
 import { decisionFromTriage, type TurnDecision } from '../auto/select.ts';
 import { RouteService } from '../route/service.ts';
+import { ASSISTANT_ID, type Spawn } from '../route/engine.ts';
+import { Bindings, isBoundValue, type BindTarget } from '../autopilot/binding.ts';
+import { isOwnSignInCli, openCodePlanContribution, ownSignInArgs } from '../autopilot/topLevel.ts';
+import { askTaskShape, planFor, planText, ruleShape } from '../autopilot/shape.ts';
+import { AUTOPILOT_STRINGS } from '../autopilot/i18n.ts';
+import { ruleDifficulty } from '../harness/router.ts';
+import { turnView } from '../auto/select.ts';
 import { DEFAULT_MAX_PARALLEL } from '../route/settings.ts';
 
 /**
@@ -50,6 +57,9 @@ export interface LaunchContext {
   parentSessionId?: string;
 }
 
+/** What prepare answers: the Auto proxy, own-sign-in args, an OpenCode plan pin, or a refusal. */
+export type LaunchAnswer = AutoPrepareAnswer | { args: string[]; env?: Record<string, string>; files?: Array<{ relPath: string; content: string }> };
+
 const text = (value: unknown, max: number): string => typeof value === 'string' ? value.replace(/[\u0000-\u001f\u007f]+/gu, ' ').trim().slice(0, max) : '';
 
 export class Assistant {
@@ -78,6 +88,10 @@ export class Assistant {
   private readonly classes = new Map<string, DataClass>();
   /** Each card's triage advice, so its badge can be written again in another language. */
   private readonly triaged = new Map<string, Advice>();
+  /** Auto (Jev) autopilot: Auto cards and the single-use route values their subagents launch with. */
+  readonly bindings: Bindings;
+  /** Leaf cards this service started on servers: the orchestrator that asked, the server, the CLI. */
+  private readonly leaves = new Map<string, { parent: string; server: string; provider: string }>();
 
   constructor(options: { host: Host; dataDir: string; settings?: unknown; settingsUnavailable?: boolean; harness?: unknown; harnessUnavailable?: boolean; autoRouting?: unknown; autoRoutingUnavailable?: boolean; routing?: unknown; routingUnavailable?: boolean; locale?: unknown; transport?: typeof fetch; catalogTransport?: typeof fetch; git?: null; now?: () => number; autoTimeouts?: RouterDeps['timeouts'] }) {
     this.host = options.host;
@@ -129,7 +143,9 @@ export class Assistant {
       ...(options.now ? { now: options.now } : {}),
       ...(options.autoTimeouts ? { timeouts: options.autoTimeouts } : {})
     });
+    this.bindings = new Bindings(options.now);
     this.routing = new RouteService({
+      bindSpawn: (callerId, spawn, decisionId, orchestrate) => this.bindSpawn(callerId, spawn, decisionId, orchestrate),
       host: options.host, dataDir: options.dataDir, saved: options.routing, savedUnavailable: options.routingUnavailable === true,
       enabled: () => this.harness.settings.routing,
       // Jev reads the subagent's task under the caller's data class, within the caller's own per-card budget.
@@ -214,7 +230,9 @@ export class Assistant {
     if (!session || typeof session.id !== 'string') return;
     this.harness.sessionEvent(event);
     this.routing.sessionEvent(event);
-    if (event.type === 'closed') { this.sessions.delete(session.id); this.review.forget(session.id); this.classes.delete(session.id); this.triaged.delete(session.id); this.auto.sessionClosed(session.id); return; }
+    const ended = event.type === 'closed' || event.type === 'exited' || session.status === 'exited';
+    if (ended) this.bindings.ended(session.id);
+    if (event.type === 'closed') { this.leaves.delete(session.id); this.sessions.delete(session.id); this.review.forget(session.id); this.classes.delete(session.id); this.triaged.delete(session.id); this.auto.sessionClosed(session.id); return; }
     this.sessions.set(session.id, session);
   }
 
@@ -240,7 +258,7 @@ export class Assistant {
    * `isolation.state` says which. A worktree is not an isolated environment, so the old "YOLO only isolated" option
    * (which counted it as one) is gone and a saved value of it is ignored.
    */
-  async launch(context: LaunchContext): Promise<AutoPrepareAnswer | null> {
+  async launch(context: LaunchContext): Promise<LaunchAnswer | null> {
     if (context.chosen === false) return null;
     const options = context.options ?? {};
     const task = text(options.task, 2_000) || null;
@@ -251,16 +269,150 @@ export class Assistant {
     this.classes.set(context.sessionId, dataClass ?? this.settings.defaultDataClass);
     while (this.classes.size > 4_096) this.classes.delete(this.classes.keys().next().value!);
     const model = options.model ?? 'off';
-    if (model !== 'off' && model !== 'auto') { const refusal = AUTO_STRINGS[this.locale].unknownValue; return { refuse: { reason: refusal } }; }
+    const strings = AUTOPILOT_STRINGS[this.locale];
+    // Auto (Jev) autopilot: a subagent of an Auto card launches only with a route value pick_route gave out.
+    const parent = context.role === 'subagent' ? context.parentSessionId ?? null : null;
+    let bound: BindTarget | null = null;
+    if (parent && this.bindings.isAuto(parent)) {
+      const check = this.bindings.check({ value: model, parent, provider: context.provider, sessionId: context.sessionId });
+      if (!check.ok) return { refuse: { reason: strings[check.reason] } };
+      bound = check.target;
+    } else if (isBoundValue(model)) {
+      // A route value outside an Auto tree: what it names, without the binding checks (nothing to enforce there).
+      bound = /^r:[a-z0-9]{12}:(.+)$/u.exec(model)![1] as BindTarget;
+    } else if (model !== 'off' && model !== 'auto') { const refusal = AUTO_STRINGS[this.locale].unknownValue; return { refuse: { reason: refusal } }; }
     const mode = this.engine.mode('task.route');
     const triage = !!task && (mode === 'suggest' || mode === 'auto' || mode === 'shadow');
     this.review.noteLaunch(context.sessionId, { task, dataClass, triage: triage && mode !== 'shadow', role: context.role, parentSessionId: context.parentSessionId ?? null });
     if (triage) void this.triage(context.sessionId, task!, dataClass, context.cwd);
+    if (bound) {
+      if (bound === 'off') return null;
+      if (bound.startsWith('plan:')) {
+        const pinned = context.provider === 'opencode' ? openCodePlanContribution(bound.slice(5)) : null;
+        return pinned ?? { refuse: { reason: strings.planUnusable } };
+      }
+      return this.auto.prepare({
+        sessionId: context.sessionId, provider: context.provider, role: context.role, cwd: context.cwd, parentSessionId: context.parentSessionId ?? null,
+        environment: context.environment, dataClass: dataClass ?? this.settings.defaultDataClass
+      });
+    }
     if (model !== 'auto') return null;
+    // An Auto card: its subagents are routed (above). On Claude Code and Codex it runs on the CLI's own sign-in
+    // with the model and effort Jev chose; on OpenCode, the Auto proxy.
+    if (isOwnSignInCli(context.provider)) {
+      const choice = await this.topLevelChoice(context.provider, task, dataClass ?? this.settings.defaultDataClass, context.sessionId, context.role);
+      if ('exhausted' in choice) return { refuse: { reason: strings.exhausted.replace('{why}', choice.exhausted) } };
+      this.bindings.markAuto(context.sessionId);
+      return { args: ownSignInArgs(context.provider, choice) };
+    }
+    if (context.provider !== 'opencode') return { refuse: { reason: strings.provider } };
+    this.bindings.markAuto(context.sessionId);
     return this.auto.prepare({
       sessionId: context.sessionId, provider: context.provider, role: context.role, cwd: context.cwd, parentSessionId: context.parentSessionId ?? null,
       environment: context.environment, dataClass: dataClass ?? this.settings.defaultDataClass
     });
+  }
+
+  /**
+   * D2: the model and effort for an Auto card on its CLI's own sign-in. Jev reads the launcher's Task (at most 2.5 s,
+   * then word rules); an orchestrator without a task counts as large, never small.
+   */
+  private async topLevelChoice(cli: string, task: string | null, dataClass: DataClass, sessionId: string, role: string): Promise<{ model: string | null; effort: string | null } | { exhausted: string }> {
+    let decision: TurnDecision | null = null;
+    if (task) {
+      const controller = new AbortController();
+      const timer = setTimeout(() => controller.abort(), 2_500);
+      try { decision = await Promise.race([this.turnDifficulty(task, dataClass, sessionId, role, controller.signal), new Promise<null>(resolve => controller.signal.addEventListener('abort', () => resolve(null)))]); }
+      catch { decision = null; } finally { clearTimeout(timer); }
+    }
+    const view = decision ? turnView(decision, 'jev', task ?? '', { role }) : task ? turnView({ difficulty: ruleDifficulty(task), strong: false }, 'rules', task, { role })
+      : turnView({ difficulty: role === 'orchestrator' ? 'hard' : 'normal', strong: role === 'orchestrator' }, 'rules', '', { role });
+    return this.routing.topLevelChoice(cli, view, dataClass, role === 'orchestrator');
+  }
+
+  /**
+   * autopilot_plan (D3, D5, D9): how the orchestrator's task splits. Jev answers task.route and task.shape on the
+   * task (2.5 s, then word rules); code turns that into solo / orchestrate N / deep, the strategy and the budget.
+   * For an Auto card the child count is enforced at each subagent's launch; calling again replaces the plan.
+   */
+  private async autopilotPlan(caller: SessionSummary | undefined, input: Record<string, unknown>): Promise<{ content: unknown; isError?: boolean }> {
+    if (!caller || typeof caller.id !== 'string') return { content: 'CanvasTTY did not say which card is calling.', isError: true };
+    // Lines kept: a list of parts is part of the task's shape.
+    const task = typeof input.task === 'string' ? input.task.replace(/[\u0000-\u0009\u000b-\u001f\u007f]+/gu, ' ').trim().slice(0, 2_000) : '';
+    if (!task) return { content: 'Give the whole task in `task`.', isError: true };
+    const dataClass = this.classOf(caller.id);
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), 2_500);
+    const ctx = { signal: controller.signal, assertCurrent: () => { if (controller.signal.aborted) throw new Error('aborted'); }, requester: 'orchestrator' as const, sessionId: caller.id };
+    const quiet = <T>(work: Promise<T>): Promise<T | null> => Promise.race([work.catch(() => null), new Promise<null>(resolve => controller.signal.addEventListener('abort', () => resolve(null)))]);
+    const mode = this.engine.mode('task.route');
+    const asks = mode === 'suggest' || mode === 'auto';
+    const [decision, shape] = await Promise.all([
+      asks ? quiet(this.turnDifficulty(task, dataClass, caller.id, 'orchestrator', controller.signal)) : Promise.resolve(null),
+      asks ? quiet(askTaskShape(this.engine, { task, dataClass }, ctx)) : Promise.resolve(null)
+    ]);
+    clearTimeout(timer);
+    const view = decision ? turnView(decision, 'jev', task, { role: 'subagent' }) : turnView({ difficulty: ruleDifficulty(task), strong: false }, 'rules', task, { role: 'subagent' });
+    const shaped = shape ?? ruleShape(task);
+    const plan = planFor(view, shaped, { perTaskUsd: this.auto.settings.perCardUsdCap });
+    if (this.bindings.isAuto(caller.id)) this.bindings.setPlan(caller.id, plan.children);
+    return { content: `${planText(plan)}\n${JSON.stringify({ ...plan, type: view.type, level: view.level, shape: shaped.shape, parts: shaped.parts, from: shape ? 'jev' : 'rules' })}` };
+  }
+
+  /**
+   * start_leaf (D6, Phase 1): an independent leaf task on a server the person declared (Advanced, off by default),
+   * as a card this plugin starts there (Environments ssh-host) on that server's own CLI sign-in. Only a leaf: it
+   * cannot start subagents. Nothing from this computer's sign-ins or keys reaches the server.
+   */
+  private async startLeaf(caller: SessionSummary | undefined, input: Record<string, unknown>): Promise<{ content: unknown; isError?: boolean }> {
+    if (!caller || typeof caller.id !== 'string') return { content: 'CanvasTTY did not say which card is calling.', isError: true };
+    const route = this.routing.settings;
+    if (!route.serversOn || !route.servers.length) return { content: 'Servers are off in the Assistant settings: run this part with pick_route and spawn_agent here.', isError: true };
+    const task = text(input.task, 4_000);
+    const cwd = text(input.cwd, 4_096);
+    if (!task || !cwd) return { content: 'Give `task` and `cwd` (the project folder as on the server).', isError: true };
+    const wanted = text(input.server, 64);
+    const cli = text(input.provider, 40);
+    const running = (label: string): number => [...this.leaves.values()].filter(leaf => leaf.server === label).length;
+    const server = route.servers.find(entry => (!wanted || entry.label === wanted) && (!cli || entry.clis.includes(cli)) && running(entry.label) < entry.maxParallel);
+    if (!server) return { content: wanted ? `Server ${wanted} is not declared, has no ${cli || 'such'} CLI, or is full now.` : 'No declared server has room now: run this part here with pick_route and spawn_agent.', isError: true };
+    const provider = cli && server.clis.includes(cli) ? cli : server.clis[0]!;
+    try {
+      const created = await this.host.callHost('sessions.create', {
+        provider, cwd, title: text(input.title, 80) || 'Leaf task',
+        launchOptions: { [ASSISTANT_ID]: { model: 'off' } },
+        environment: { pluginId: 'canvastty-environments', kind: 'ssh-host', options: { host: server.label } }
+      }) as { sessionId?: unknown };
+      const sessionId = typeof created?.sessionId === 'string' ? created.sessionId : null;
+      if (!sessionId) return { content: 'CanvasTTY did not start the card.', isError: true };
+      this.leaves.set(sessionId, { parent: caller.id, server: server.label, provider });
+      await this.host.callHost('sessions.send', { sessionId, text: task });
+      return { content: `Started on ${server.label} (${provider}, its own sign-in). Check it with leaf_status {sessionId:"${sessionId}"}.\n${JSON.stringify({ sessionId, server: server.label, provider })}` };
+    } catch (error) {
+      return { content: `CanvasTTY refused the card: ${error instanceof Error ? error.message.slice(0, 200) : 'error'}.`, isError: true };
+    }
+  }
+
+  private leafStatus(caller: SessionSummary | undefined, input: Record<string, unknown>): { content: unknown; isError?: boolean } {
+    const sessionId = text(input.sessionId, 80);
+    const leaf = this.leaves.get(sessionId);
+    if (!caller || !leaf || leaf.parent !== caller.id) return { content: 'No leaf card of yours with that sessionId.', isError: true };
+    const session = this.sessions.get(sessionId) as (SessionSummary & { status?: string; exitCode?: number | null }) | undefined;
+    return { content: JSON.stringify({ sessionId, server: leaf.server, provider: leaf.provider, status: session?.status ?? 'unknown', exitCode: session?.exitCode ?? null }) };
+  }
+
+  /** pick_route for a caller in an Auto tree: each option's spawn carries a single-use route value. */
+  private bindSpawn(callerId: string, spawn: Spawn, decisionId: string, orchestrate: boolean): Spawn | null {
+    if (!this.bindings.isAuto(callerId)) return null;
+    const next: Spawn = { ...spawn, launchOptions: { ...spawn.launchOptions } };
+    let target: BindTarget = spawn.launchOptions[ASSISTANT_ID]?.model === 'auto' ? 'auto' : 'off';
+    // An OpenCode coding-plan model is pinned by the Assistant (the model travels in its option, not next to it).
+    if (target === 'off' && spawn.provider === 'opencode' && spawn.model && /^[a-z0-9][a-z0-9._-]*\//u.test(spawn.model)) {
+      target = `plan:${spawn.model}`;
+      delete next.model;
+    }
+    next.launchOptions[ASSISTANT_ID] = { model: this.bindings.bind(callerId, spawn.provider, target, decisionId, orchestrate) };
+    return next;
   }
 
   /**
@@ -316,6 +468,9 @@ export class Assistant {
       if (!caller || typeof caller.id !== 'string') return { content: 'CanvasTTY did not say which card is calling.', isError: true };
       return this.routing.tool(name, caller, input);
     }
+    if (name === 'autopilot_plan') return this.autopilotPlan(caller, input);
+    if (name === 'start_leaf') return this.startLeaf(caller, input);
+    if (name === 'leaf_status') return this.leafStatus(caller, input);
     if (name === 'recommend') {
       const task = text(input.task, 2_000);
       if (!task) return { content: 'Give the task text in `task`.', isError: true };

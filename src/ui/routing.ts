@@ -55,6 +55,8 @@ export const ROUTE_PAGE_STRINGS = {
     add: 'Add', newPlan: 'Declare a subscription or plan', name: 'Name (Max, Pro, GLM plan…)', cli: 'CLI', planKind: 'Kind',
     accounts: 'Model accounts (CanvasTTY Accounts)', accountsSeen: (age: string) => `As the orchestrator last passed them, ${age}.`, accountsNone: 'Not passed by an orchestrator since the Assistant started.',
     flatRate: 'flat-rate plan',
+    servers: 'Servers', serversOn: 'Let orchestrators run independent leaf tasks on these servers', serverList: 'Servers (name=cli+cli/at once, …)',
+    serversHelp: 'Names as in the Environments plugin\'s servers. A leaf card runs on the server\'s own CLI sign-in; nothing from this computer goes there.',
     plansSmall: 'Prefer plans and subscriptions for small tasks', plansWindow: 'when its score is close to the best (points)',
     quotaBy: 'Quota counted by', quotaKind: { tokens: 'tokens', prompts: 'prompts', unknown: 'not known' } as Record<string, string>,
     weights: 'Quota weights (model=weight, …; 1 = like the plan\'s top model)', speeds: 'Output speeds (model=tokens/s, …; empty: Artificial Analysis\'s measured speeds)',
@@ -102,6 +104,8 @@ export const ROUTE_PAGE_STRINGS = {
     add: 'Добавить', newPlan: 'Объявить подписку или план', name: 'Название (Max, Pro, план GLM…)', cli: 'CLI', planKind: 'Вид',
     accounts: 'Аккаунты моделей (CanvasTTY Accounts)', accountsSeen: (age: string) => `Как их последний раз передал оркестратор, ${age}.`, accountsNone: 'С запуска Ассистента оркестратор их не передавал.',
     flatRate: 'фиксированный тариф',
+    servers: 'Серверы', serversOn: 'Разрешить оркестраторам запускать независимые листовые задачи на этих серверах', serverList: 'Серверы (имя=cli+cli/одновременно, …)',
+    serversHelp: 'Имена — как у серверов в плагине Environments. Листовое окно работает на собственном входе CLI на сервере; с этого компьютера туда ничего не уходит.',
     plansSmall: 'Для маленьких задач предпочитать планы и подписки', plansWindow: 'если её оценка близка к лучшей (баллов)',
     quotaBy: 'Квота считается по', quotaKind: { tokens: 'токенам', prompts: 'запросам', unknown: 'неизвестно' } as Record<string, string>,
     weights: 'Веса квоты (модель=вес, …; 1 — как у старшей модели плана)', speeds: 'Скорость вывода (модель=токенов/с, …; пусто — скорости, измеренные Artificial Analysis)',
@@ -226,6 +230,21 @@ export function renderRouting(state: RouteState, t: Strings, page: RoutePageHost
     pairsRow('route-speeds', t.speeds, settings.speeds, next => save(s => { s.speeds = next; })),
     pairsRow('route-quota-weights', t.weights, settings.quotaWeights, next => save(s => { s.quotaWeights = next; })),
     el('p', { className: 'muted', textContent: t.planHelp }));
+
+  // Servers for leaf tasks (autopilot): off unless the person turns it on.
+  const serversOn = el('input', { type: 'checkbox', checked: settings.serversOn === true, name: 'route-servers-on' });
+  serversOn.addEventListener('change', () => save(next => { next.serversOn = serversOn.checked; }));
+  const servers = el('input', { name: 'route-servers', value: (settings.servers ?? []).map(server => `${server.label}=${server.clis.join('+')}/${server.maxParallel}`).join(', ') });
+  servers.addEventListener('change', () => save(next => {
+    next.servers = servers.value.split(/[,;\s]+/u).filter(Boolean).slice(0, 8).map(part => {
+      const [label, rest = ''] = part.split('=');
+      const [clis = '', max = '1'] = rest.split('/');
+      return { label: (label ?? '').trim(), clis: clis.split('+').map(cli => cli.trim()).filter(Boolean), maxParallel: Math.max(1, Math.min(8, Math.round(Number(max)) || 1)) };
+    });
+  }));
+  section.append(el('h2', { textContent: t.servers }), el('label', { className: 'check' }, serversOn, ` ${t.serversOn}`),
+    el('div', { className: 'row' }, el('span', { className: 'label', textContent: t.serverList }), servers),
+    el('p', { className: 'muted', textContent: t.serversHelp }));
 
   // Pins and boosts.
   section.append(el('h2', { textContent: t.pins }), el('p', { className: 'muted', textContent: t.pinsHelp }));
