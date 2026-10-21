@@ -92,6 +92,7 @@
       flowsHelp: "An orchestrator may ask you to approve its roles and tasks first (a request, not a lock).",
       models: (n) => n ? `Decision models: ${n} on` : "Decision models: none (simple rules are used)",
       openModels: "Decision models\u2026",
+      openTree: "Agent tree\u2026",
       saved: "Saved.",
       notSaved: "Not saved: "
     },
@@ -122,6 +123,7 @@
       flowsHelp: "\u041E\u0440\u043A\u0435\u0441\u0442\u0440\u0430\u0442\u043E\u0440 \u043C\u043E\u0436\u0435\u0442 \u0441\u043D\u0430\u0447\u0430\u043B\u0430 \u043F\u043E\u043F\u0440\u043E\u0441\u0438\u0442\u044C \u0432\u0430\u0441 \u043E\u0434\u043E\u0431\u0440\u0438\u0442\u044C \u0440\u043E\u043B\u0438 \u0438 \u0437\u0430\u0434\u0430\u0447\u0438 (\u044D\u0442\u043E \u043F\u0440\u043E\u0441\u044C\u0431\u0430, \u0430 \u043D\u0435 \u0437\u0430\u043F\u0440\u0435\u0442).",
       models: (n) => n ? `\u041C\u043E\u0434\u0435\u043B\u0438 \u0440\u0435\u0448\u0435\u043D\u0438\u0439: \u0432\u043A\u043B\u044E\u0447\u0435\u043D\u043E ${n}` : "\u041C\u043E\u0434\u0435\u043B\u0438 \u0440\u0435\u0448\u0435\u043D\u0438\u0439: \u043D\u0435\u0442 (\u0440\u0430\u0431\u043E\u0442\u0430\u044E\u0442 \u043F\u0440\u043E\u0441\u0442\u044B\u0435 \u043F\u0440\u0430\u0432\u0438\u043B\u0430)",
       openModels: "\u041C\u043E\u0434\u0435\u043B\u0438 \u0440\u0435\u0448\u0435\u043D\u0438\u0439\u2026",
+      openTree: "\u0414\u0435\u0440\u0435\u0432\u043E \u0430\u0433\u0435\u043D\u0442\u043E\u0432\u2026",
       saved: "\u0421\u043E\u0445\u0440\u0430\u043D\u0435\u043D\u043E.",
       notSaved: "\u041D\u0435 \u0441\u043E\u0445\u0440\u0430\u043D\u0435\u043D\u043E: "
     }
@@ -164,6 +166,10 @@
     openModels.addEventListener("click", () => {
       host.canvas?.open("models").catch((error) => say(errorText(error), true));
     });
+    const openTree = el("button", { type: "button", className: "link-button", textContent: t.openTree });
+    openTree.addEventListener("click", () => {
+      host.canvas?.open("tree").catch((error) => say(errorText(error), true));
+    });
     const levels = [["strict", t.strict], ["basic", t.basic], ["off", t.off]];
     if (s.commandReview === "custom") levels.push(["custom", t.custom]);
     const review = segmented(t.review, s.commandReview, levels, (value) => {
@@ -181,7 +187,7 @@
         settingRow(t.loops, t.loopsHelp, toggle("loopAlerts", s.loopAlerts, t.loops, (value) => save({ loopAlerts: value }))),
         settingRow(t.flows, t.flowsHelp, toggle("flows", s.flows, t.flows, (value) => save({ flows: value })))
       ),
-      el("div", { className: "row" }, el("span", { className: "muted", textContent: t.models(s.models) }), openModels)
+      el("div", { className: "row" }, el("span", { className: "muted", textContent: t.models(s.models) }), openModels, openTree)
     );
   }
   onContext((locale) => {

@@ -26,7 +26,7 @@ const STRINGS = {
     routing: 'Automatic routing', routingHelp: 'Orchestrators get a provider and model suggestion for each subagent.',
     loops: 'Loop alerts', loopsHelp: 'A "loop?" badge when a card repeats the same command in one turn with no file edits seen.',
     flows: 'Flows', flowsHelp: 'An orchestrator may ask you to approve its roles and tasks first (a request, not a lock).',
-    models: (n: number) => n ? `Decision models: ${n} on` : 'Decision models: none (simple rules are used)', openModels: 'Decision models…',
+    models: (n: number) => n ? `Decision models: ${n} on` : 'Decision models: none (simple rules are used)', openModels: 'Decision models…', openTree: 'Agent tree…',
     saved: 'Saved.', notSaved: 'Not saved: '
   },
   ru: {
@@ -46,7 +46,7 @@ const STRINGS = {
     routing: 'Автоматический выбор модели', routingHelp: 'Оркестратор получает предложение провайдера и модели для каждого субагента.',
     loops: 'Сигнал зацикливания', loopsHelp: 'Значок «цикл?», когда окно за один ход повторяет одну команду, а правок файлов не видно.',
     flows: 'Сценарии', flowsHelp: 'Оркестратор может сначала попросить вас одобрить роли и задачи (это просьба, а не запрет).',
-    models: (n: number) => n ? `Модели решений: включено ${n}` : 'Модели решений: нет (работают простые правила)', openModels: 'Модели решений…',
+    models: (n: number) => n ? `Модели решений: включено ${n}` : 'Модели решений: нет (работают простые правила)', openModels: 'Модели решений…', openTree: 'Дерево агентов…',
     saved: 'Сохранено.', notSaved: 'Не сохранено: '
   }
 };
@@ -88,6 +88,8 @@ function render(): void {
   const s = state;
   const openModels = el('button', { type: 'button', className: 'link-button', textContent: t.openModels });
   openModels.addEventListener('click', () => { host.canvas?.open('models').catch(error => say(errorText(error), true)); });
+  const openTree = el('button', { type: 'button', className: 'link-button', textContent: t.openTree });
+  openTree.addEventListener('click', () => { host.canvas?.open('tree').catch(error => say(errorText(error), true)); });
   const levels: Array<[Level | 'custom', string]> = [['strict', t.strict], ['basic', t.basic], ['off', t.off]];
   // A custom setting is shown, pressed and read-only; choosing a level replaces it.
   if (s.commandReview === 'custom') levels.push(['custom', t.custom]);
@@ -101,7 +103,7 @@ function render(): void {
       settingRow(t.routing, t.routingHelp, toggle('routing', s.routing, t.routing, value => save({ routing: value }))),
       settingRow(t.loops, t.loopsHelp, toggle('loopAlerts', s.loopAlerts, t.loops, value => save({ loopAlerts: value }))),
       settingRow(t.flows, t.flowsHelp, toggle('flows', s.flows, t.flows, value => save({ flows: value })))),
-    el('div', { className: 'row' }, el('span', { className: 'muted', textContent: t.models(s.models) }), openModels)
+    el('div', { className: 'row' }, el('span', { className: 'muted', textContent: t.models(s.models) }), openModels, openTree)
   );
 }
 

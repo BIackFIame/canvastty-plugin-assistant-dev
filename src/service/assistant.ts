@@ -28,6 +28,7 @@ import { AUTOPILOT_STRINGS } from '../autopilot/i18n.ts';
 import { ruleDifficulty } from '../harness/router.ts';
 import { turnView } from '../auto/select.ts';
 import { DEFAULT_MAX_PARALLEL } from '../route/settings.ts';
+import { buildTree, type TreeView } from '../tree/agentTree.ts';
 
 /**
  * The Assistant service: one process that answers CanvasTTY's decision hook (command review), its launch pipeline
@@ -90,6 +91,8 @@ export class Assistant {
   private readonly triaged = new Map<string, Advice>();
   /** Auto (Jev) autopilot: Auto cards and the single-use route values their subagents launch with. */
   readonly bindings: Bindings;
+  /** Auto cards on their CLI's own sign-in: the model chosen at launch and the plan it runs on (agent tree). */
+  private readonly autoTop = new Map<string, { model: string | null; label: string }>();
   /** Leaf cards this service started on servers: the orchestrator that asked, the server, the CLI. */
   private readonly leaves = new Map<string, { parent: string; server: string; provider: string }>();
 
@@ -232,7 +235,7 @@ export class Assistant {
     this.routing.sessionEvent(event);
     const ended = event.type === 'closed' || event.type === 'exited' || session.status === 'exited';
     if (ended) this.bindings.ended(session.id);
-    if (event.type === 'closed') { this.leaves.delete(session.id); this.sessions.delete(session.id); this.review.forget(session.id); this.classes.delete(session.id); this.triaged.delete(session.id); this.auto.sessionClosed(session.id); return; }
+    if (event.type === 'closed') { this.autoTop.delete(session.id); this.leaves.delete(session.id); this.sessions.delete(session.id); this.review.forget(session.id); this.classes.delete(session.id); this.triaged.delete(session.id); this.auto.sessionClosed(session.id); return; }
     this.sessions.set(session.id, session);
   }
 
@@ -303,6 +306,9 @@ export class Assistant {
       const choice = await this.topLevelChoice(context.provider, task, dataClass ?? this.settings.defaultDataClass, context.sessionId, context.role);
       if ('exhausted' in choice) return { refuse: { reason: strings.exhausted.replace('{why}', choice.exhausted) } };
       this.bindings.markAuto(context.sessionId);
+      // The agent tree shows the model chosen here and that the card runs on the person's own sign-in.
+      this.autoTop.set(context.sessionId, { model: choice.model, label: choice.label ?? context.provider });
+      while (this.autoTop.size > 1_024) this.autoTop.delete(this.autoTop.keys().next().value!);
       return { args: ownSignInArgs(context.provider, choice) };
     }
     if (context.provider !== 'opencode') return { refuse: { reason: strings.provider } };
@@ -317,7 +323,7 @@ export class Assistant {
    * D2: the model and effort for an Auto card on its CLI's own sign-in. Jev reads the launcher's Task (at most 2.5 s,
    * then word rules); an orchestrator without a task counts as large, never small.
    */
-  private async topLevelChoice(cli: string, task: string | null, dataClass: DataClass, sessionId: string, role: string): Promise<{ model: string | null; effort: string | null } | { exhausted: string }> {
+  private async topLevelChoice(cli: string, task: string | null, dataClass: DataClass, sessionId: string, role: string): Promise<{ model: string | null; effort: string | null; label?: string } | { exhausted: string }> {
     let decision: TurnDecision | null = null;
     if (task) {
       const controller = new AbortController();
@@ -519,6 +525,22 @@ export class Assistant {
    * The harness page: its four controls (command review here, the rest in the harness) and nothing else. A command
    * review the levels do not describe exactly is `custom`, with what it is, shown read-only until a level is chosen.
    */
+  /**
+   * The Agent tree card: who started whom, with each card's model, status, task, route cost and times. Built on
+   * request from what the service already holds; nothing is stored for it.
+   */
+  treeView(): TreeView & { focus: string | null; now: number } {
+    const view = buildTree({
+      cards: this.harness.cards(),
+      route: id => this.routing.routeOf(id),
+      task: id => this.review.taskOf(id),
+      planChildren: id => this.bindings.planOf(id),
+      endedAt: id => this.harness.finished(id),
+      autoTop: id => this.autoTop.get(id) ?? null
+    }, { focus: this.harness.treeFocus() });
+    return { ...view, focus: this.harness.treeFocus(), now: Date.now() };
+  }
+
   harnessState(): { commandReview: CommandReviewState; custom: { mode: string; strictness: string } | null; settingsUnavailable: boolean; routing: boolean; loopAlerts: boolean; flows: boolean; trustChain: boolean; models: number } {
     const level = commandReviewLevel(this.settings);
     return {

@@ -76,6 +76,8 @@ serve({
     'route.feedback': async params => (await ready).routing.feedback(str(params.id), params.ok === true),
     // The Flow preview and Task board cards.
     'harness.view': async () => (await ready).harness.view(),
+    // The Agent tree card.
+    'tree.view': async () => (await ready).treeView(),
     'flows.choices': async params => (await ready).harness.flowChoices(str(params.orchestratorId)),
     'flows.create': async params => (await ready).harness.createPlan(str(params.orchestratorId), str(params.flowId), str(params.goal)),
     'flows.decide': async params => (await ready).harness.decidePlan(str(params.planId), params.decision)

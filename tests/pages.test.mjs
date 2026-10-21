@@ -177,7 +177,7 @@ test('no page or manifest text promises that the flow preview enforces anything'
 test('Russian names: every card action has title.ru, and Russian text names the plugin as it is shown (Ассистент CanvasTTY)', () => {
   const manifest = JSON.parse(readFileSync(join(root, 'canvastty.plugin.json'), 'utf8'));
   const actions = manifest.services.flatMap(service => service.cardActions ?? []);
-  assert.deepEqual(actions.map(action => action['title.ru']), ['План по сценарию…', 'Доска задач', 'Отчёт']);
+  assert.deepEqual(actions.map(action => action['title.ru']), ['План по сценарию…', 'Доска задач', 'Отчёт', 'Дерево агентов']);
   for (const action of actions) assert.ok(action['title.ru'].length <= 40 && action.title.length <= 40, action.id);
   assert.equal(manifest['name.ru'], 'Ассистент CanvasTTY');
   assert.match(manifest['description.ru'], /Плагины → Ассистент CanvasTTY → Настройки/u);

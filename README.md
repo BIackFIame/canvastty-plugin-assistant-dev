@@ -76,6 +76,15 @@ Settings → Plugins → CanvasTTY Assistant.
 - **Task board**: `task_add` (orchestrator), `task_update` and `task_list` (orchestrator and its subagents; a subagent
   changes only its own tasks or claims a free one). The **Task board** card shows them by status; the orchestrator
   card shows `tasks 2/5`, and its menu action **Task board** points the card at it.
+- **Agent tree**: who started whom. The **Agent tree** card (Settings → Plugins → CanvasTTY Assistant → Agent tree, or
+  the settings page link) draws the orchestrator on top and the agents it started below, joined by lines. Each card
+  shows its name, model, status (Running, Waiting, Needs approval, Done, Failed), task, cost and time, and how many
+  agents it started (of how many the autopilot plan allows); a branch folds away. The header says `N agents · M running`
+  with the dollars of paid routes; a subscription, coding plan or flat-rate account shows as a plan with its share of
+  the window or its launches, never as money. Cost is the route's estimate for one task, not a bill. A click shows that
+  card on the canvas (CanvasTTY with `sessions.focus`; older versions say so). The menu action **Agent tree** on an
+  orchestrator or subagent points the card at its tree. The model comes from CanvasTTY when it sends the launch model,
+  else from the route the Assistant chose; a card the Assistant did not route says "cost unknown".
 - **Loop alerts**: every shell command reaches the plugin before it runs. The same command (spacing, numbers and a
   trailing `| tail -50`-style filter aside) five times in one turn with no file edit seen in between puts `loop?` on the
   card; it clears when the next turn starts (not on a brief status flicker). Edits made through the shell (`sed -i`,

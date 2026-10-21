@@ -11,6 +11,7 @@ import { Journals, reportText } from './report.ts';
 import type { ProviderEntry } from './router.ts';
 import { DEFAULT_HARNESS_SETTINGS, normalizeHarnessSettings, validateHarnessSettings, type HarnessSettings } from './settings.ts';
 import { boardText, TaskBoards, type Board } from './tasks.ts';
+import { statusOf } from '../tree/agentTree.ts';
 
 /**
  * The harness: routing, flows, task boards, loop alerts and session reports, on the host APIs CanvasTTY has today
@@ -23,6 +24,8 @@ import { boardText, TaskBoards, type Board } from './tasks.ts';
 export interface CardSummary {
   id: string; provider: string; role: 'agent' | 'orchestrator' | 'subagent'; parentSessionId?: string;
   title: string; status: string; exitCode?: number | null; startedAt?: number; cwd: string; workingDirectory: string;
+  /** The model the launch asked the CLI for (hosts that send it). */
+  model?: string;
   environment?: { pluginId: string; kind: string; label: string };
 }
 
@@ -30,7 +33,7 @@ export type ToolAnswer = { content: unknown; isError?: boolean };
 
 /** `route`, `pick_route` and `route_outcome` are the route service's (src/route). */
 export const HARNESS_TOOLS = ['flows_list', 'flow_plan', 'flow_status', 'task_add', 'task_update', 'task_list'] as const;
-export const HARNESS_ACTIONS = ['flow-preview', 'task-board', 'report'] as const;
+export const HARNESS_ACTIONS = ['flow-preview', 'task-board', 'report', 'agent-tree'] as const;
 const SETTINGS_KEY = 'harness';
 /** flow_status may wait for the person this long; CanvasTTY gives a tool 15 s. */
 const STATUS_WAIT_MAX_MS = 10_000;
@@ -72,6 +75,8 @@ export class Harness {
   private readonly sessions = new Map<string, CardSummary>();
   /** When a card last stopped working (turn boundaries; a short flicker is not a new turn). */
   private readonly stoppedAt = new Map<string, number>();
+  /** When a card finished (done, failed, exited), for the agent tree's elapsed time. */
+  private readonly finishedAt = new Map<string, number>();
   /** flow_plan calls per orchestrator, for the rate limit. */
   private readonly planCalls = new Map<string, number[]>();
   private readonly pendingWrites = new Map<string, () => unknown>();
@@ -79,7 +84,7 @@ export class Harness {
   private writing: Promise<void> = Promise.resolve();
   private pruneTimer: ReturnType<typeof setTimeout> | null = null;
   /** What the person last opened from a card menu: the board and the preview cards follow it. */
-  private focus: { board: string | null; flows: string | null } = { board: null, flows: null };
+  private focus: { board: string | null; flows: string | null; tree: string | null } = { board: null, flows: null, tree: null };
 
   constructor(options: HarnessOptions) {
     this.host = options.host;
@@ -187,6 +192,7 @@ export class Harness {
     if (event.type === 'closed') {
       this.sessions.delete(session.id);
       this.stoppedAt.delete(session.id);
+      this.finishedAt.delete(session.id);
       this.planCalls.delete(session.id);
       this.loops.forget(session.id);
       this.badges.forget(session.id);
@@ -199,6 +205,9 @@ export class Harness {
     this.sessions.set(session.id, session);
     const now = this.now();
     if (before?.status === 'working' && session.status !== 'working') this.stoppedAt.set(session.id, now);
+    const finished = statusOf(session);
+    if (finished === 'done' || finished === 'failed') { if (!this.finishedAt.has(session.id)) this.finishedAt.set(session.id, now); }
+    else this.finishedAt.delete(session.id);
     const { turnStarted } = this.journals.observe(session);
     // A new turn: the person (or the orchestrator) gave new input, so the last turn's loop evidence and badge go. A
     // flicker (working again within a moment) is the same turn: its evidence stays.
@@ -206,7 +215,7 @@ export class Harness {
     if (turnStarted && (stopped === undefined || now - stopped >= TURN_GAP_MS) && this.loops.turnStarted(session.id)) void this.badges.set(session.id, 'loop', null);
     if (event.type === 'exited') { this.loops.forget(session.id); void this.badges.set(session.id, 'loop', null); }
     if (session.role === 'orchestrator' && before?.title !== session.title) this.boards.rename(session.id, session.title);
-    if (!before || before.title !== session.title || before.status !== session.status) this.surfacesChanged();
+    if (!before || before.title !== session.title || before.status !== session.status || before.exitCode !== session.exitCode) this.surfacesChanged();
   }
 
   /** Every pre-tool call CanvasTTY asked the plugin about, with the answer it got. */
@@ -409,6 +418,11 @@ export class Harness {
       const { done, total } = this.boards.progress(sessionId);
       return { message: this.strings.boardToast(title, done, total), tone: 'info' };
     }
+    if (actionId === 'agent-tree') {
+      this.focus.tree = sessionId;
+      this.host.emit('focus', { ...this.focus });
+      return { message: this.strings.treeToast(title), tone: 'info' };
+    }
     if (actionId === 'flow-preview') {
       if (!this.settings.flows) return { message: this.strings.flowsOff, tone: 'warn' };
       this.focus.flows = sessionId;
@@ -428,6 +442,11 @@ export class Harness {
   // ---------------------------------------------------------------------------------------------------------------
   // The plugin's own cards (Flow preview, Task board) and settings page. No folder paths reach a page.
   // ---------------------------------------------------------------------------------------------------------------
+
+  /** Open cards as CanvasTTY last described them (the agent tree reads them). */
+  cards(): CardSummary[] { return [...this.sessions.values()]; }
+  finished(sessionId: string): number | null { return this.finishedAt.get(sessionId) ?? null; }
+  treeFocus(): string | null { return this.focus.tree; }
 
   private orchestrators(): Array<{ id: string; title: string; status: string }> {
     return [...this.sessions.values()].filter(session => session.role === 'orchestrator')

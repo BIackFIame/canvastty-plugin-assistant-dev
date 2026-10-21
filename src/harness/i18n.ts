@@ -32,6 +32,7 @@ const EN = {
     strict: 'strict command review', strong: 'use a strong model', split: 'splits into subagents', missing: 'the task misses information',
     tip: (hints: string) => `Assistant triage: ${hints || 'nothing to add'}`
   },
+  treeToast: (title: string) => `Agent tree now shows "${title}" and the agents it started. Open it from Settings → Plugins → CanvasTTY Assistant → Agent tree; an open tree switches by itself.`,
   boardToast: (title: string, done: number, total: number) => total
     ? `Task board now shows "${title}" (${done}/${total} done). Open it from Settings → Plugins → CanvasTTY Assistant → Task board; an open board switches by itself.`
     : `"${title}" has no tasks yet. The board fills when the orchestrator adds tasks or starts a flow.`,
@@ -109,6 +110,7 @@ const RU: Strings = {
     strict: 'строгая проверка команд', strong: 'нужна сильная модель', split: 'делится на субагентов', missing: 'в задаче не хватает данных',
     tip: hints => `Разбор Помощника: ${hints || 'добавить нечего'}`
   },
+  treeToast: title => `Дерево агентов показывает «${title}» и запущенных им агентов. Откройте его: Настройки → Плагины → Ассистент CanvasTTY → Дерево агентов; открытое дерево переключится само.`,
   boardToast: (title, done, total) => total
     ? `Доска задач показывает «${title}» (готово ${done} из ${total}). Откройте её: Настройки → Плагины → Ассистент CanvasTTY → Доска задач; открытая доска переключится сама.`
     : `У «${title}» пока нет задач. Доска заполнится, когда оркестратор добавит задачи или запустит сценарий.`,

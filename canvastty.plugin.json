@@ -17,23 +17,24 @@
     "cards:decorate",
     "limits:read",
     "sessions:launch",
-    "sessions:control"
+    "sessions:control",
+    "sessions:read"
   ],
   "coreFiles": [
     {
       "path": "README.md",
-      "bytes": 27025,
-      "sha256": "7c6f55cf95bf98ee5f499e6e5227b3e242c1a892b6718edd7bc25fc42deb89b3"
+      "bytes": 28076,
+      "sha256": "1c12752b4a6cd545f1fedf510fbf7e9ffc22c1422f87b68906f711b922d75fce"
     },
     {
       "path": "README.ru.md",
-      "bytes": 47954,
-      "sha256": "18606784b076384604aca7cbccb239ea32c6e9e66074dfbdf98fcf16e4f43542"
+      "bytes": 49825,
+      "sha256": "e520e319a8c017a711d222d0a73ed320bf99f2cc425445cfdb617c02febb8494"
     },
     {
       "path": "services/assistant.mjs",
-      "bytes": 959972,
-      "sha256": "a566dc7a5bd3d0c9d10bed2dedf6d2cc10f39c2fa86c7af720c20cb19db4344f"
+      "bytes": 970980,
+      "sha256": "c4139dde2a987fb616ac96d2b73fe5abdaedc78aa22222e76a8166ae8c8e873e"
     },
     {
       "path": "settings/assistant.html",
@@ -57,13 +58,13 @@
     },
     {
       "path": "settings/harness.js",
-      "bytes": 15438,
-      "sha256": "086ad4edf8a81d3319164dc730fffec11efa2937bbe58e954da11abb5d10ec34"
+      "bytes": 15829,
+      "sha256": "937d7b63150c9b2979a4fe026a280c210ee9bfc10791fdd6117ead35dc540e33"
     },
     {
       "path": "apps/harness.css",
-      "bytes": 6532,
-      "sha256": "607f3ac3315ba7b9376f59dcc60810847eee25941a3a4a130656aad7b4f0eef4"
+      "bytes": 9918,
+      "sha256": "9f849740eeec3105ed37c9e25aed27a07f0e0e843d27fab41fb1826ca7f28f24"
     },
     {
       "path": "apps/flows.html",
@@ -84,6 +85,16 @@
       "path": "apps/board.js",
       "bytes": 6892,
       "sha256": "58d87917e1b8e45a3305e9b7a537f4d7290db0bcf1bddfaf871d03da4f8d8f29"
+    },
+    {
+      "path": "apps/tree.html",
+      "bytes": 451,
+      "sha256": "d530424bcae7cbdf87d7a73f5cabbdfa664b3e7f7dae571b72373c48b29c6f15"
+    },
+    {
+      "path": "apps/tree.js",
+      "bytes": 17241,
+      "sha256": "a7792f3efad256092f0e9ebcc7d11819bc453b0f4f97e4f6bacec63e926d1b9d"
     }
   ],
   "services": [
@@ -626,6 +637,17 @@
               "subagent"
             ]
           }
+        },
+        {
+          "id": "agent-tree",
+          "title": "Agent tree",
+          "title.ru": "Дерево агентов",
+          "when": {
+            "roles": [
+              "orchestrator",
+              "subagent"
+            ]
+          }
         }
       ]
     }
@@ -688,6 +710,22 @@
       },
       "minSize": {
         "width": 420,
+        "height": 300
+      }
+    },
+    {
+      "id": "tree",
+      "kind": "canvas-app",
+      "title": "Agent tree",
+      "title.ru": "Дерево агентов",
+      "description": "Who started whom: an orchestrator and its agents with model, status, task, cost and time. Click a card to show it on the canvas.",
+      "entry": "apps/tree.html",
+      "defaultSize": {
+        "width": 640,
+        "height": 560
+      },
+      "minSize": {
+        "width": 380,
         "height": 300
       }
     }

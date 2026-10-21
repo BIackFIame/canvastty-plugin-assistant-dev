@@ -6,6 +6,7 @@
  * Nothing is started here: the orchestrator passes the answer's spawn values to CanvasTTY's own `spawn_agent`, and
  * CanvasTTY checks every value. A recommendation never grants anything.
  */
+import type { TreeRoute } from '../tree/agentTree.ts';
 import { randomUUID } from 'node:crypto';
 import { readFileSync } from 'node:fs';
 import { mkdir, rename, writeFile } from 'node:fs/promises';
@@ -233,6 +234,14 @@ export class RouteService {
 
   busy(signIn: string): number { return this.live.get(signIn)?.size ?? 0; }
 
+  /** The route a subagent was started on (model, plan or price, estimate), for the agent tree; null if not routed. */
+  routeOf(sessionId: string): TreeRoute | null {
+    const record = this.records.bySession(sessionId);
+    const option = record?.spawned ? record.options[record.spawned.option] : undefined;
+    if (!record || !option || record.spawned!.session !== sessionId.slice(0, 8)) return null;
+    return { model: option.model, kind: option.kind, label: option.label, costBasis: option.costBasis, estimate: option.estimateData ?? null };
+  }
+
   private launches(planId: string, windowMs: number): number {
     const since = this.now() - windowMs;
     return this.records.all().filter(record => record.spawned && record.spawned.at >= since && record.options[record.spawned.option]?.signIn === `plan:${planId}`).length;
@@ -282,7 +291,7 @@ export class RouteService {
    * by the same engine as `route`, among that CLI's own sign-in routes only (never a paid route). A declared plan
    * with no room left gives `exhausted` with the reason; no declared plan gives the CLI's own default model.
    */
-  topLevelChoice(cli: string, view: TurnView, cardClass: DataClass, orchestrate: boolean): { model: string | null; effort: string | null; why: string } | { exhausted: string } {
+  topLevelChoice(cli: string, view: TurnView, cardClass: DataClass, orchestrate: boolean): { model: string | null; effort: string | null; why: string; label?: string } | { exhausted: string } {
     const { catalog, index } = this.options.catalog();
     const now = this.now();
     const result = decide({
@@ -299,7 +308,7 @@ export class RouteService {
       if (why) return { exhausted: why };
     }
     if (!best) return { model: null, effort: null, why: 'no declared plan: the CLI\'s own default model' };
-    return { model: best.spawn.model ?? null, effort: best.spawn.effort ?? null, why: best.kind === 'subscription' ? `${best.label}: ${best.model ?? 'default'}${best.effort ? `@${best.effort}` : ''}` : 'the CLI\'s own default model' };
+    return { model: best.spawn.model ?? null, effort: best.spawn.effort ?? null, ...(best.kind === 'subscription' ? { label: best.label } : {}), why: best.kind === 'subscription' ? `${best.label}: ${best.model ?? 'default'}${best.effort ? `@${best.effort}` : ''}` : 'the CLI\'s own default model' };
   }
 
   /**

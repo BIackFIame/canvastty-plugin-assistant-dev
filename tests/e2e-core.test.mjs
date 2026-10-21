@@ -194,6 +194,22 @@ test('the built plugin installs into CanvasTTY\'s PluginManager and its tools, h
   for (let i = 0; i < 5; i++) await hooks.decide(child.id, request('npm test'), live());
   await waitFor(() => badges.at(-1)?.[child.id]?.[0]?.text === 'loop?');
 
+  // Agent tree: who started whom, from the same session events; the launch model when CanvasTTY sends it.
+  const helper = terminals.create({ provider: 'claude', cwd: project, profile: 'normal', position: { x: 0, y: 0 }, role: 'subagent', parentSessionId: orchestrator.id, title: 'Helper', model: 'claude-haiku-4' });
+  await waitFor(async () => (await supervisor.request('canvastty-assistant', 'assistant', 'tree.view', {})).trees[0]?.root.children.length === 2);
+  const tree = await supervisor.request('canvastty-assistant', 'assistant', 'tree.view', {});
+  assert.equal(tree.trees.length, 1);
+  assert.equal(tree.trees[0].root.title, 'Lead');
+  assert.deepEqual(tree.trees[0].root.children.map(node => node.title), ['Worker', 'Helper']);
+  const sendsModel = 'model' in (sessions.summary(helper.id) ?? {});
+  assert.equal(tree.trees[0].root.children[1].model, sendsModel ? 'Haiku 4' : null, 'the launch model, on hosts that send it');
+  assert.equal(tree.trees[0].totals.agents, 3);
+  assert.ok(!JSON.stringify(tree).includes(project), 'no folder path reaches the tree');
+  const pointed = await cards.invoke('canvastty-assistant', 'agent-tree', helper.id);
+  assert.match(pointed.message, /Agent tree now shows "Helper"/u);
+  assert.equal((await supervisor.request('canvastty-assistant', 'assistant', 'tree.view', {})).focus, helper.id);
+  terminals.dispose(helper.id);
+
   // Card actions: shown per role, answered as toasts.
   const report = await cards.invoke('canvastty-assistant', 'report', child.id);
   assert.equal(report.tone, 'info');

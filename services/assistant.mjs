@@ -8293,6 +8293,11 @@ var ReviewService = class {
     state.turns.push(value);
     if (state.turns.length > MAX_TURNS) state.turns.splice(1, 1);
   }
+  /** The task a card was given, for the agent tree: the launcher's task, else its first turn. */
+  taskOf(sessionId) {
+    const state = this.sessions.get(sessionId);
+    return state ? state.launchTask ?? state.turns[0] ?? null : null;
+  }
   /** A card's own texts, most recent first: its latest turn, its earlier turns, then the launcher's task. */
   ownTexts(state) {
     return distinct([...[...state.turns].reverse(), state.launchTask]);
@@ -9065,6 +9070,7 @@ var EN = {
     missing: "the task misses information",
     tip: (hints) => `Assistant triage: ${hints || "nothing to add"}`
   },
+  treeToast: (title) => `Agent tree now shows "${title}" and the agents it started. Open it from Settings \u2192 Plugins \u2192 CanvasTTY Assistant \u2192 Agent tree; an open tree switches by itself.`,
   boardToast: (title, done, total) => total ? `Task board now shows "${title}" (${done}/${total} done). Open it from Settings \u2192 Plugins \u2192 CanvasTTY Assistant \u2192 Task board; an open board switches by itself.` : `"${title}" has no tasks yet. The board fills when the orchestrator adds tasks or starts a flow.`,
   flowToast: (title) => `Flow preview now shows "${title}". Open it from Settings \u2192 Plugins \u2192 CanvasTTY Assistant \u2192 Flow preview, pick a flow and a goal, then press Start. Tell the orchestrator to run the approved flow.`,
   flowsOff: "Flows are off in the Assistant settings.",
@@ -9182,6 +9188,7 @@ var RU = {
     missing: "\u0432 \u0437\u0430\u0434\u0430\u0447\u0435 \u043D\u0435 \u0445\u0432\u0430\u0442\u0430\u0435\u0442 \u0434\u0430\u043D\u043D\u044B\u0445",
     tip: (hints) => `\u0420\u0430\u0437\u0431\u043E\u0440 \u041F\u043E\u043C\u043E\u0449\u043D\u0438\u043A\u0430: ${hints || "\u0434\u043E\u0431\u0430\u0432\u0438\u0442\u044C \u043D\u0435\u0447\u0435\u0433\u043E"}`
   },
+  treeToast: (title) => `\u0414\u0435\u0440\u0435\u0432\u043E \u0430\u0433\u0435\u043D\u0442\u043E\u0432 \u043F\u043E\u043A\u0430\u0437\u044B\u0432\u0430\u0435\u0442 \xAB${title}\xBB \u0438 \u0437\u0430\u043F\u0443\u0449\u0435\u043D\u043D\u044B\u0445 \u0438\u043C \u0430\u0433\u0435\u043D\u0442\u043E\u0432. \u041E\u0442\u043A\u0440\u043E\u0439\u0442\u0435 \u0435\u0433\u043E: \u041D\u0430\u0441\u0442\u0440\u043E\u0439\u043A\u0438 \u2192 \u041F\u043B\u0430\u0433\u0438\u043D\u044B \u2192 \u0410\u0441\u0441\u0438\u0441\u0442\u0435\u043D\u0442 CanvasTTY \u2192 \u0414\u0435\u0440\u0435\u0432\u043E \u0430\u0433\u0435\u043D\u0442\u043E\u0432; \u043E\u0442\u043A\u0440\u044B\u0442\u043E\u0435 \u0434\u0435\u0440\u0435\u0432\u043E \u043F\u0435\u0440\u0435\u043A\u043B\u044E\u0447\u0438\u0442\u0441\u044F \u0441\u0430\u043C\u043E.`,
   boardToast: (title, done, total) => total ? `\u0414\u043E\u0441\u043A\u0430 \u0437\u0430\u0434\u0430\u0447 \u043F\u043E\u043A\u0430\u0437\u044B\u0432\u0430\u0435\u0442 \xAB${title}\xBB (\u0433\u043E\u0442\u043E\u0432\u043E ${done} \u0438\u0437 ${total}). \u041E\u0442\u043A\u0440\u043E\u0439\u0442\u0435 \u0435\u0451: \u041D\u0430\u0441\u0442\u0440\u043E\u0439\u043A\u0438 \u2192 \u041F\u043B\u0430\u0433\u0438\u043D\u044B \u2192 \u0410\u0441\u0441\u0438\u0441\u0442\u0435\u043D\u0442 CanvasTTY \u2192 \u0414\u043E\u0441\u043A\u0430 \u0437\u0430\u0434\u0430\u0447; \u043E\u0442\u043A\u0440\u044B\u0442\u0430\u044F \u0434\u043E\u0441\u043A\u0430 \u043F\u0435\u0440\u0435\u043A\u043B\u044E\u0447\u0438\u0442\u0441\u044F \u0441\u0430\u043C\u0430.` : `\u0423 \xAB${title}\xBB \u043F\u043E\u043A\u0430 \u043D\u0435\u0442 \u0437\u0430\u0434\u0430\u0447. \u0414\u043E\u0441\u043A\u0430 \u0437\u0430\u043F\u043E\u043B\u043D\u0438\u0442\u0441\u044F, \u043A\u043E\u0433\u0434\u0430 \u043E\u0440\u043A\u0435\u0441\u0442\u0440\u0430\u0442\u043E\u0440 \u0434\u043E\u0431\u0430\u0432\u0438\u0442 \u0437\u0430\u0434\u0430\u0447\u0438 \u0438\u043B\u0438 \u0437\u0430\u043F\u0443\u0441\u0442\u0438\u0442 \u0441\u0446\u0435\u043D\u0430\u0440\u0438\u0439.`,
   flowToast: (title) => `\xAB\u041F\u0440\u043E\u0441\u043C\u043E\u0442\u0440 \u0441\u0446\u0435\u043D\u0430\u0440\u0438\u044F\xBB \u043F\u043E\u043A\u0430\u0437\u044B\u0432\u0430\u0435\u0442 \xAB${title}\xBB. \u041E\u0442\u043A\u0440\u043E\u0439\u0442\u0435 \u0435\u0433\u043E: \u041D\u0430\u0441\u0442\u0440\u043E\u0439\u043A\u0438 \u2192 \u041F\u043B\u0430\u0433\u0438\u043D\u044B \u2192 \u0410\u0441\u0441\u0438\u0441\u0442\u0435\u043D\u0442 CanvasTTY \u2192 \u041F\u0440\u043E\u0441\u043C\u043E\u0442\u0440 \u0441\u0446\u0435\u043D\u0430\u0440\u0438\u044F, \u0432\u044B\u0431\u0435\u0440\u0438\u0442\u0435 \u0441\u0446\u0435\u043D\u0430\u0440\u0438\u0439 \u0438 \u0446\u0435\u043B\u044C, \u043D\u0430\u0436\u043C\u0438\u0442\u0435 \xAB\u0417\u0430\u043F\u0443\u0441\u0442\u0438\u0442\u044C\xBB. \u0417\u0430\u0442\u0435\u043C \u043F\u043E\u043F\u0440\u043E\u0441\u0438\u0442\u0435 \u043E\u0440\u043A\u0435\u0441\u0442\u0440\u0430\u0442\u043E\u0440 \u0432\u044B\u043F\u043E\u043B\u043D\u0438\u0442\u044C \u043E\u0434\u043E\u0431\u0440\u0435\u043D\u043D\u044B\u0439 \u0441\u0446\u0435\u043D\u0430\u0440\u0438\u0439.`,
   flowsOff: "\u0421\u0446\u0435\u043D\u0430\u0440\u0438\u0438 \u0432\u044B\u043A\u043B\u044E\u0447\u0435\u043D\u044B \u0432 \u043D\u0430\u0441\u0442\u0440\u043E\u0439\u043A\u0430\u0445 \u041F\u043E\u043C\u043E\u0449\u043D\u0438\u043A\u0430.",
@@ -10038,6 +10045,147 @@ ${lines.join("\n")}
 ${JSON.stringify(board.tasks.map(({ id, title, status, assignee, note, detail }) => ({ id, title, status, assignee, note, detail })))}`;
 }
 
+// src/tree/agentTree.ts
+var TREE_LIMITS = Object.freeze({ depth: 12, cards: 400, task: 160, title: 120 });
+var oneLine = (value, max) => {
+  if (typeof value !== "string") return null;
+  const line = value.replace(/[\u0000-\u001f\u007f\u2028\u2029]+/gu, " ").replace(/\s+/gu, " ").trim();
+  if (!line) return null;
+  return line.length > max ? `${line.slice(0, max - 1).trimEnd()}\u2026` : line;
+};
+function statusOf(card) {
+  if (card.status === "failed") return "failed";
+  if (card.status === "done") return "done";
+  if (typeof card.exitCode === "number") return card.exitCode === 0 ? "done" : "failed";
+  if (card.status === "exited") return "done";
+  if (card.status === "needs_approval") return "approval";
+  if (card.status === "working") return "running";
+  return "waiting";
+}
+function costOf(route) {
+  const estimate2 = route?.estimate;
+  if (!route || !estimate2) return null;
+  switch (estimate2.kind) {
+    case "usd":
+      return route.costBasis === "plan" || route.costBasis === "flat" ? { kind: "flat", label: route.label } : { kind: "usd", low: estimate2.low, high: estimate2.high };
+    case "window":
+      return { kind: "plan", label: route.label, share: Number.isFinite(estimate2.share) ? estimate2.share : null, window: estimate2.window };
+    case "launches":
+      return { kind: "launch", label: route.label, used: estimate2.used, allowance: estimate2.allowance, windowHours: estimate2.windowHours };
+    case "flat":
+      return { kind: "flat", label: route.label };
+    default:
+      return route.kind === "subscription" || route.kind === "coding-plan" || route.kind === "cli-default" ? { kind: "plan", label: route.label, share: null, window: null } : null;
+  }
+}
+function modelLabel2(model) {
+  if (typeof model !== "string" || !model.trim()) return null;
+  let id = model.trim().slice(0, 120);
+  id = id.replace(/^[a-z0-9-]+\/(?=.)/iu, "").replace(/\[[^\]]*\]$/u, "");
+  const claude = /^claude-(opus|sonnet|haiku|fable)-(\d+)(?:[-.](\d+))?(?:-\d{8})?$/iu.exec(id);
+  if (claude) return `${claude[1][0].toUpperCase()}${claude[1].slice(1).toLowerCase()} ${claude[2]}${claude[3] ? `.${claude[3]}` : ""}`;
+  const bare = /^(opus|sonnet|haiku|fable)$/iu.exec(id);
+  if (bare) return `${bare[1][0].toUpperCase()}${bare[1].slice(1).toLowerCase()}`;
+  const upper = /^(glm|gpt|qwen|kimi|grok|minimax)(?=[-\d.])/iu.exec(id);
+  if (upper) {
+    const name = upper[1].toLowerCase();
+    const shown = name === "qwen" || name === "kimi" || name === "grok" ? `${name[0].toUpperCase()}${name.slice(1)}` : name === "minimax" ? "MiniMax" : name.toUpperCase();
+    return `${shown}${id.slice(upper[1].length)}`;
+  }
+  return id;
+}
+function priceKey(cost) {
+  return cost.kind === "plan" || cost.kind === "launch" || cost.kind === "flat" ? cost.label : null;
+}
+function totalsOf(root) {
+  const totals = { agents: 0, running: 0, usd: null, plans: [], unpriced: 0 };
+  const plans = /* @__PURE__ */ new Map();
+  const visit = (node) => {
+    totals.agents++;
+    if (node.status === "running") totals.running++;
+    const cost = node.cost;
+    if (!cost) totals.unpriced++;
+    else if (cost.kind === "usd") totals.usd = { low: round2((totals.usd?.low ?? 0) + cost.low), high: round2((totals.usd?.high ?? 0) + cost.high) };
+    else {
+      const key = priceKey(cost);
+      const plan3 = plans.get(key) ?? { label: key, share: null, window: null, cards: 0, launches: 0 };
+      plan3.cards++;
+      if (cost.kind === "launch") plan3.launches++;
+      if (cost.kind === "plan" && cost.share !== null) {
+        plan3.share = round2((plan3.share ?? 0) + cost.share);
+        plan3.window ??= cost.window;
+      }
+      plans.set(key, plan3);
+    }
+    node.children.forEach(visit);
+  };
+  visit(root);
+  totals.plans = [...plans.values()].sort((a, b) => b.cards - a.cards || a.label.localeCompare(b.label));
+  return totals;
+}
+var round2 = (value) => Math.round(value * 1e3) / 1e3;
+function buildTree(input, options = {}) {
+  const cards = input.cards.filter((card) => card && typeof card.id === "string" && card.id).slice(0, TREE_LIMITS.cards);
+  const byId = new Map(cards.map((card) => [card.id, card]));
+  const kids = /* @__PURE__ */ new Map();
+  for (const card of cards) {
+    const parent = card.parentSessionId;
+    if (!parent || parent === card.id || !byId.has(parent)) continue;
+    const list = kids.get(parent) ?? [];
+    list.push(card);
+    kids.set(parent, list);
+  }
+  const placed = /* @__PURE__ */ new Set();
+  const node = (card, depth) => {
+    placed.add(card.id);
+    const route = input.route(card.id);
+    const top = input.autoTop?.(card.id) ?? null;
+    const children = depth >= TREE_LIMITS.depth ? [] : (kids.get(card.id) ?? []).filter((child) => !placed.has(child.id)).sort((a, b) => (a.startedAt ?? 0) - (b.startedAt ?? 0) || a.id.localeCompare(b.id)).map((child) => node(child, depth + 1));
+    const cost = costOf(route) ?? (top ? { kind: "plan", label: top.label, share: null, window: null } : null);
+    return {
+      id: card.id,
+      title: oneLine(card.title, TREE_LIMITS.title) ?? card.id.slice(0, 8),
+      role: card.role,
+      provider: card.provider,
+      model: modelLabel2(card.model ?? route?.model ?? top?.model ?? null),
+      status: statusOf(card),
+      task: oneLine(input.task(card.id), TREE_LIMITS.task),
+      cost,
+      startedAt: typeof card.startedAt === "number" && Number.isFinite(card.startedAt) ? card.startedAt : null,
+      endedAt: input.endedAt(card.id),
+      planChildren: card.role === "orchestrator" || children.length ? input.planChildren(card.id) : null,
+      descendants: children.reduce((sum, child) => sum + 1 + child.descendants, 0),
+      children
+    };
+  };
+  const isRoot = (card) => !card.parentSessionId || card.parentSessionId === card.id || !byId.has(card.parentSessionId);
+  const roots = cards.filter((card) => isRoot(card) && (card.role === "orchestrator" || kids.has(card.id))).sort((a, b) => (b.startedAt ?? 0) - (a.startedAt ?? 0) || a.id.localeCompare(b.id));
+  const trees = roots.map((card) => node(card, 0));
+  for (const card of cards) {
+    if (placed.has(card.id) || !kids.has(card.id)) continue;
+    let top = card;
+    const seen = /* @__PURE__ */ new Set();
+    while (top.parentSessionId && byId.has(top.parentSessionId) && !seen.has(top.id)) {
+      seen.add(top.id);
+      top = byId.get(top.parentSessionId);
+    }
+    if (!placed.has(top.id)) trees.push(node(top, 0));
+  }
+  const focusRoot = options.focus ? rootOf(options.focus, byId) : null;
+  if (focusRoot) trees.sort((a, b) => Number(b.id === focusRoot) - Number(a.id === focusRoot));
+  return { trees: trees.map((root) => ({ root, totals: totalsOf(root) })) };
+}
+function rootOf(id, byId) {
+  let current = byId.get(id);
+  if (!current) return null;
+  const seen = /* @__PURE__ */ new Set();
+  while (current.parentSessionId && byId.has(current.parentSessionId) && !seen.has(current.id) && seen.size < TREE_LIMITS.cards) {
+    seen.add(current.id);
+    current = byId.get(current.parentSessionId);
+  }
+  return current.id;
+}
+
 // src/harness/harness.ts
 var HARNESS_TOOLS = ["flows_list", "flow_plan", "flow_status", "task_add", "task_update", "task_list"];
 var SETTINGS_KEY = "harness";
@@ -10063,6 +10211,8 @@ var Harness = class {
   sessions = /* @__PURE__ */ new Map();
   /** When a card last stopped working (turn boundaries; a short flicker is not a new turn). */
   stoppedAt = /* @__PURE__ */ new Map();
+  /** When a card finished (done, failed, exited), for the agent tree's elapsed time. */
+  finishedAt = /* @__PURE__ */ new Map();
   /** flow_plan calls per orchestrator, for the rate limit. */
   planCalls = /* @__PURE__ */ new Map();
   pendingWrites = /* @__PURE__ */ new Map();
@@ -10070,7 +10220,7 @@ var Harness = class {
   writing = Promise.resolve();
   pruneTimer = null;
   /** What the person last opened from a card menu: the board and the preview cards follow it. */
-  focus = { board: null, flows: null };
+  focus = { board: null, flows: null, tree: null };
   constructor(options) {
     this.host = options.host;
     this.locale = options.locale;
@@ -10195,6 +10345,7 @@ var Harness = class {
     if (event.type === "closed") {
       this.sessions.delete(session.id);
       this.stoppedAt.delete(session.id);
+      this.finishedAt.delete(session.id);
       this.planCalls.delete(session.id);
       this.loops.forget(session.id);
       this.badges.forget(session.id);
@@ -10210,6 +10361,10 @@ var Harness = class {
     this.sessions.set(session.id, session);
     const now = this.now();
     if (before?.status === "working" && session.status !== "working") this.stoppedAt.set(session.id, now);
+    const finished = statusOf(session);
+    if (finished === "done" || finished === "failed") {
+      if (!this.finishedAt.has(session.id)) this.finishedAt.set(session.id, now);
+    } else this.finishedAt.delete(session.id);
     const { turnStarted } = this.journals.observe(session);
     const stopped = this.stoppedAt.get(session.id);
     if (turnStarted && (stopped === void 0 || now - stopped >= TURN_GAP_MS) && this.loops.turnStarted(session.id)) void this.badges.set(session.id, "loop", null);
@@ -10218,7 +10373,7 @@ var Harness = class {
       void this.badges.set(session.id, "loop", null);
     }
     if (session.role === "orchestrator" && before?.title !== session.title) this.boards.rename(session.id, session.title);
-    if (!before || before.title !== session.title || before.status !== session.status) this.surfacesChanged();
+    if (!before || before.title !== session.title || before.status !== session.status || before.exitCode !== session.exitCode) this.surfacesChanged();
   }
   /** Every pre-tool call CanvasTTY asked the plugin about, with the answer it got. */
   observeDecision(request, verdict) {
@@ -10430,6 +10585,11 @@ ${JSON.stringify(task)}` };
       const { done, total } = this.boards.progress(sessionId);
       return { message: this.strings.boardToast(title, done, total), tone: "info" };
     }
+    if (actionId === "agent-tree") {
+      this.focus.tree = sessionId;
+      this.host.emit("focus", { ...this.focus });
+      return { message: this.strings.treeToast(title), tone: "info" };
+    }
     if (actionId === "flow-preview") {
       if (!this.settings.flows) return { message: this.strings.flowsOff, tone: "warn" };
       this.focus.flows = sessionId;
@@ -10448,6 +10608,16 @@ ${JSON.stringify(task)}` };
   // ---------------------------------------------------------------------------------------------------------------
   // The plugin's own cards (Flow preview, Task board) and settings page. No folder paths reach a page.
   // ---------------------------------------------------------------------------------------------------------------
+  /** Open cards as CanvasTTY last described them (the agent tree reads them). */
+  cards() {
+    return [...this.sessions.values()];
+  }
+  finished(sessionId) {
+    return this.finishedAt.get(sessionId) ?? null;
+  }
+  treeFocus() {
+    return this.focus.tree;
+  }
   orchestrators() {
     return [...this.sessions.values()].filter((session) => session.role === "orchestrator").map((session) => ({ id: session.id, title: session.title || session.id.slice(0, 8), status: session.status }));
   }
@@ -10560,13 +10730,13 @@ var slug = (v) => {
 };
 var points = (v) => typeof v === "number" && Number.isFinite(v) && v >= 0 && v <= 100 ? v : null;
 var percent = (v) => typeof v === "number" && Number.isFinite(v) && v >= 0 && v <= 1 ? v * 100 : null;
-var round2 = (v, digits) => Math.round(v * 10 ** digits) / 10 ** digits;
+var round3 = (v, digits) => Math.round(v * 10 ** digits) / 10 ** digits;
 function speedOf(row) {
   const medium = object(object(row.performanceByPromptType)?.medium);
   const tps = medium?.medianOutputSpeed;
   if (typeof tps !== "number" || !Number.isFinite(tps) || tps < 0.1 || tps > 1e5) return null;
   const latency = medium?.medianTimeToFirstChunk;
-  return { outputTps: round2(tps, 2), latencyS: typeof latency === "number" && Number.isFinite(latency) && latency >= 0 && latency <= 3600 ? round2(latency, 3) : null };
+  return { outputTps: round3(tps, 2), latencyS: typeof latency === "number" && Number.isFinite(latency) && latency >= 0 && latency <= 3600 ? round3(latency, 3) : null };
 }
 function normalizeArtificialAnalysis(html, fetchedAt) {
   if (Buffer.byteLength(html) > ARTIFICIAL_ANALYSIS_BYTES) throw Error("Artificial Analysis response too large");
@@ -12210,10 +12380,10 @@ function chooseStrategy(input) {
   const judgeTime = input.seconds(judges[0]);
   const singleTime = input.seconds(primary);
   const time2 = drafts.every((value) => value !== null) && judgeTime !== null && singleTime ? TIME_WEIGHT * Math.log2((Math.max(...drafts) + judgeTime) / singleTime) : 0;
-  const round4 = (value) => Math.round(value * 1e3) / 1e3;
-  const ev = { gain: round4(gain), quality: round4(quality), cost: round4(cost), time: round4(time2), total: round4(quality - cost - time2) };
+  const round5 = (value) => Math.round(value * 1e3) / 1e3;
+  const ev = { gain: round5(gain), quality: round5(quality), cost: round5(cost), time: round5(time2), total: round5(quality - cost - time2) };
   if (kind === "consensus" && settings.consensus === "auto" && ev.total <= 0) return { ...single("single_better"), ev };
-  return { kind, reason: kind === "best-of-n" ? "best_of_n_on" : settings.consensus === "always" ? "consensus_always" : "consensus_pays", members, judges, estimateUsd: round4(estimateUsd * 1e3) / 1e3, ev };
+  return { kind, reason: kind === "best-of-n" ? "best_of_n_on" : settings.consensus === "always" ? "consensus_always" : "consensus_pays", members, judges, estimateUsd: round5(estimateUsd * 1e3) / 1e3, ev };
 }
 function parseAnswer(raw) {
   const result = { text: "", toolCalls: false, usage: { in: null, out: null, cost: null } };
@@ -13926,18 +14096,18 @@ function quotaOf(limits, reserve, now) {
   }
   if (!tight) return { state: "presumed-reset", headroom: null, pace: null, window: null, readAt: limits.fetchedAt, note: "its windows have probably reset since the last read", code: "reset" };
   const view = { label: tight.label, usedPercent: tight.usedPercent, minutes: tight.windowMinutes };
-  if (headroom <= 0) return { state: "exhausted", headroom: 0, pace: paced ? round3(pace) : null, window: view, readAt: limits.fetchedAt, note: "no headroom above the reserve", code: "no-headroom" };
-  return { state: presumed ? "presumed-reset" : "known", headroom: round3(headroom), pace: paced ? round3(pace) : null, window: view, readAt: limits.fetchedAt, note: presumed ? "one window has probably reset since the last read" : "", code: presumed ? "reset" : "" };
+  if (headroom <= 0) return { state: "exhausted", headroom: 0, pace: paced ? round4(pace) : null, window: view, readAt: limits.fetchedAt, note: "no headroom above the reserve", code: "no-headroom" };
+  return { state: presumed ? "presumed-reset" : "known", headroom: round4(headroom), pace: paced ? round4(pace) : null, window: view, readAt: limits.fetchedAt, note: presumed ? "one window has probably reset since the last read" : "", code: presumed ? "reset" : "" };
 }
-var round3 = (value) => Math.round(value * 1e3) / 1e3;
+var round4 = (value) => Math.round(value * 1e3) / 1e3;
 function shadowPrice(quota, share, ref) {
   if (quota.state === "exhausted") return { usd: null, basis: "unavailable" };
   if (quota.state !== "known" || quota.headroom === null) return { usd: 0, basis: "unknown" };
   const burning = quota.pace !== null && quota.pace > 1;
   if (quota.headroom >= share && !burning) return { usd: 0, basis: "free" };
   const base = ref ?? 0;
-  if (quota.headroom < share) return { usd: round3(base * Math.max(1, burning ? quota.pace - 1 : 1)), basis: "low" };
-  return { usd: round3(base * (quota.pace - 1)), basis: "burning" };
+  if (quota.headroom < share) return { usd: round4(base * Math.max(1, burning ? quota.pace - 1 : 1)), basis: "low" };
+  return { usd: round4(base * (quota.pace - 1)), basis: "burning" };
 }
 
 // src/route/settings.ts
@@ -15114,6 +15284,13 @@ var RouteService = class {
   busy(signIn) {
     return this.live.get(signIn)?.size ?? 0;
   }
+  /** The route a subagent was started on (model, plan or price, estimate), for the agent tree; null if not routed. */
+  routeOf(sessionId) {
+    const record4 = this.records.bySession(sessionId);
+    const option = record4?.spawned ? record4.options[record4.spawned.option] : void 0;
+    if (!record4 || !option || record4.spawned.session !== sessionId.slice(0, 8)) return null;
+    return { model: option.model, kind: option.kind, label: option.label, costBasis: option.costBasis, estimate: option.estimateData ?? null };
+  }
   launches(planId, windowMs) {
     const since = this.now() - windowMs;
     return this.records.all().filter((record4) => record4.spawned && record4.spawned.at >= since && record4.options[record4.spawned.option]?.signIn === `plan:${planId}`).length;
@@ -15220,7 +15397,7 @@ var RouteService = class {
       if (why) return { exhausted: why };
     }
     if (!best) return { model: null, effort: null, why: "no declared plan: the CLI's own default model" };
-    return { model: best.spawn.model ?? null, effort: best.spawn.effort ?? null, why: best.kind === "subscription" ? `${best.label}: ${best.model ?? "default"}${best.effort ? `@${best.effort}` : ""}` : "the CLI's own default model" };
+    return { model: best.spawn.model ?? null, effort: best.spawn.effort ?? null, ...best.kind === "subscription" ? { label: best.label } : {}, why: best.kind === "subscription" ? `${best.label}: ${best.model ?? "default"}${best.effort ? `@${best.effort}` : ""}` : "the CLI's own default model" };
   }
   /**
    * What the orchestrator passed, or what it passed earlier: the full list_providers and list_routes are large, so a
@@ -15471,6 +15648,9 @@ var Bindings = class {
     const card = this.autoCards.get(sessionId);
     if (card) card.maxChildren = children;
   }
+  planOf(sessionId) {
+    return this.autoCards.get(sessionId)?.maxChildren ?? null;
+  }
   running(sessionId) {
     return this.autoCards.get(sessionId)?.children.size ?? 0;
   }
@@ -15641,6 +15821,8 @@ var Assistant = class {
   triaged = /* @__PURE__ */ new Map();
   /** Auto (Jev) autopilot: Auto cards and the single-use route values their subagents launch with. */
   bindings;
+  /** Auto cards on their CLI's own sign-in: the model chosen at launch and the plan it runs on (agent tree). */
+  autoTop = /* @__PURE__ */ new Map();
   /** Leaf cards this service started on servers: the orchestrator that asked, the server, the CLI. */
   leaves = /* @__PURE__ */ new Map();
   constructor(options) {
@@ -15805,6 +15987,7 @@ var Assistant = class {
     const ended = event.type === "closed" || event.type === "exited" || session.status === "exited";
     if (ended) this.bindings.ended(session.id);
     if (event.type === "closed") {
+      this.autoTop.delete(session.id);
       this.leaves.delete(session.id);
       this.sessions.delete(session.id);
       this.review.forget(session.id);
@@ -15884,6 +16067,8 @@ var Assistant = class {
       const choice2 = await this.topLevelChoice(context.provider, task, dataClass ?? this.settings.defaultDataClass, context.sessionId, context.role);
       if ("exhausted" in choice2) return { refuse: { reason: strings3.exhausted.replace("{why}", choice2.exhausted) } };
       this.bindings.markAuto(context.sessionId);
+      this.autoTop.set(context.sessionId, { model: choice2.model, label: choice2.label ?? context.provider });
+      while (this.autoTop.size > 1024) this.autoTop.delete(this.autoTop.keys().next().value);
       return { args: ownSignInArgs(context.provider, choice2) };
     }
     if (context.provider !== "opencode") return { refuse: { reason: strings3.provider } };
@@ -16120,6 +16305,21 @@ ${JSON.stringify({ ...a, model: answer.model })}` };
    * The harness page: its four controls (command review here, the rest in the harness) and nothing else. A command
    * review the levels do not describe exactly is `custom`, with what it is, shown read-only until a level is chosen.
    */
+  /**
+   * The Agent tree card: who started whom, with each card's model, status, task, route cost and times. Built on
+   * request from what the service already holds; nothing is stored for it.
+   */
+  treeView() {
+    const view = buildTree({
+      cards: this.harness.cards(),
+      route: (id) => this.routing.routeOf(id),
+      task: (id) => this.review.taskOf(id),
+      planChildren: (id) => this.bindings.planOf(id),
+      endedAt: (id) => this.harness.finished(id),
+      autoTop: (id) => this.autoTop.get(id) ?? null
+    }, { focus: this.harness.treeFocus() });
+    return { ...view, focus: this.harness.treeFocus(), now: Date.now() };
+  }
   harnessState() {
     const level = commandReviewLevel(this.settings);
     return {
@@ -16379,6 +16579,8 @@ serve({
     "route.feedback": async (params) => (await ready).routing.feedback(str2(params.id), params.ok === true),
     // The Flow preview and Task board cards.
     "harness.view": async () => (await ready).harness.view(),
+    // The Agent tree card.
+    "tree.view": async () => (await ready).treeView(),
     "flows.choices": async (params) => (await ready).harness.flowChoices(str2(params.orchestratorId)),
     "flows.create": async (params) => (await ready).harness.createPlan(str2(params.orchestratorId), str2(params.flowId), str2(params.goal)),
     "flows.decide": async (params) => (await ready).harness.decidePlan(str2(params.planId), params.decision)
