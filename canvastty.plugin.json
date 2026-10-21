@@ -21,18 +21,18 @@
   "coreFiles": [
     {
       "path": "README.md",
-      "bytes": 29007,
-      "sha256": "3e65666c862897d53f738e627231c48a821c6dd0ee556a1878c30ca96ee39070"
+      "bytes": 30655,
+      "sha256": "94abcf97df99625f55f6125f5ac20f2c419bd9b67cff9076507c32bf8152a081"
     },
     {
       "path": "README.ru.md",
-      "bytes": 51426,
-      "sha256": "2872e25a480545783628fca9de1d4906e241a8ac05ade844681a8cc3737967fb"
+      "bytes": 54325,
+      "sha256": "c7f75a042f06dade8a02c993caae172d41b8feccd74400f6fcdb0089e2203dab"
     },
     {
       "path": "services/assistant.mjs",
-      "bytes": 985543,
-      "sha256": "ea98595429b384cce0553b6f426bcc41fc995103a487beb018f98bfe566eca27"
+      "bytes": 1007546,
+      "sha256": "ba61ed35c98923dbd935f054661a5fedea9c3016d90d781721cdb80853f8b832"
     },
     {
       "path": "settings/assistant.html",
@@ -56,8 +56,8 @@
     },
     {
       "path": "settings/harness.js",
-      "bytes": 15438,
-      "sha256": "086ad4edf8a81d3319164dc730fffec11efa2937bbe58e954da11abb5d10ec34"
+      "bytes": 25423,
+      "sha256": "8c490ab280aa56a44e48f51af4963c2387de2d967bafa10abbca8fd04105d279"
     },
     {
       "path": "apps/harness.css",
@@ -98,6 +98,7 @@
         "timeoutMs": 45000
       },
       "launch": {
+        "policy": true,
         "delegable": true,
         "fields": [
           {

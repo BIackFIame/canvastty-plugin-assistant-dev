@@ -456,7 +456,7 @@ function hostFake(storage = {}, secrets = {}) {
   return host;
 }
 
-test('launch: the Assistant never refuses a launch (YOLO and isolation are CanvasTTY\'s own rules); no launch policy', async () => {
+test('launch: the Assistant never refuses a launch (YOLO and isolation are CanvasTTY\'s own rules); its launch policy lets everything outside an Auto tree through', async () => {
   const host = hostFake();
   const dataDir = mkdtempSync(join(base, 'data-'));
   // A saved value of the removed option changes nothing, a worktree included (it was counted as isolated).
@@ -466,10 +466,15 @@ test('launch: the Assistant never refuses a launch (YOLO and isolation are Canva
     assert.equal(await assistant.launch({ ...context, profile: 'yolo', chosen: false, environment }), null);
     assert.equal(await assistant.launch({ ...context, profile: 'yolo', chosen: true, environment }), null);
   }
+  // A core that shows what a launch asks for (B7): the policy answers too, and lets it through.
+  const requested = { requested: { plugins: [] }, peerOptions: {} };
+  for (const role of ['agent', 'orchestrator', 'subagent']) {
+    assert.equal(await assistant.launch({ ...context, ...requested, role, parentSessionId: role === 'subagent' ? 'someone' : undefined, profile: 'yolo', chosen: false, environment: null }), null);
+  }
   assert.equal(host.calls.length, 0, 'nothing is called without a task');
   const { readFileSync } = await import('node:fs');
   const manifest = JSON.parse(readFileSync(new URL('../canvastty.plugin.json', import.meta.url), 'utf8'));
-  assert.equal(manifest.services[0].launch.policy, undefined, 'not asked before launches the person did not choose it for');
+  assert.equal(manifest.services[0].launch.policy, true, 'asked before every launch: the Auto (Jev) tree checks (autopilot.test.mjs)');
 });
 
 test('launch triage: the person\'s task feeds review and, when a model answers, a badge and the card\'s strictness', async t => {

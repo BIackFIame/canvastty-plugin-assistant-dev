@@ -110,6 +110,47 @@ test('settings page: a custom command review is shown read-only with what it is;
   assert.equal(ui.requests.find(request => request.method === 'harness.saveSettings').params.settings.commandReview, 'custom');
 });
 
+test('settings page: one action, Start with Auto (Jev): task and folder; without consent a one-line hint says how; started says where; ru/en', async () => {
+  const state = { commandReview: 'off', custom: null, settingsUnavailable: false, routing: true, loopAlerts: true, flows: true, models: 0 };
+  let answer = { started: false, code: 'consent' };
+  const ui = page('settings/harness.js', {
+    'harness.settings': state, 'autopilot.entry': { folders: ['/work/app', '/work/lib'], servers: false, routing: true }, 'autopilot.start': () => answer
+  });
+  await settle();
+  ui.context('en', 'sage');
+  assert.match(ui.app.text(), /Start with Auto \(Jev\) Jev reads the task and chooses where an orchestrator runs/u);
+  assert.equal(ui.app.all().filter(node => node.className === 'setting-row').length, 5, 'no new setting: servers are off');
+  const folder = ui.app.all().find(node => node.name === 'autoFolder');
+  assert.equal(folder.value, '/work/app', 'the newest open card\'s folder');
+  assert.deepEqual(ui.app.all().filter(node => node.tagName === 'OPTION').map(node => node.value), ['/work/app', '/work/lib']);
+  const task = ui.app.all().find(node => node.name === 'autoTask');
+  task.value = 'Add a dark theme';
+  task.listeners.input[0]();
+  ui.app.all().find(node => node.tagName === 'BUTTON' && node.textContent === 'Start with Auto (Jev)').click();
+  await settle();
+  assert.deepEqual(ui.requests.find(request => request.method === 'autopilot.start').params, { task: 'Add a dark theme', cwd: '/work/app', server: false });
+  const hint = ui.app.all().find(node => node.className === 'notice');
+  assert.match(hint.textContent, /allow “May start orchestrators” for the Assistant in Settings → Extension native code\. Or start an orchestrator yourself in the launcher with Model: Auto \(Jev\)\./u);
+  ui.context('ru', 'sage');
+  assert.match(ui.app.text(), /Запустить с «Авто \(Jev\)»/u);
+  assert.match(ui.app.text(), /Задача Папка проекта/u);
+  assert.match(ui.app.all().find(node => node.className === 'notice').textContent, /разрешите Помощнику «Может запускать оркестраторов»/u, 'the hint follows the language');
+  answer = { started: false, code: 'core' };
+  ui.app.all().find(node => node.tagName === 'BUTTON' && node.textContent === 'Запустить с «Авто (Jev)»').click();
+  await settle();
+  assert.match(ui.app.all().find(node => node.className === 'notice').textContent, /не разрешает плагинам запускать оркестраторы/u);
+  answer = { started: true, route: 'codex · Pro · gpt-5.5@high' };
+  ui.app.all().find(node => node.tagName === 'BUTTON' && node.textContent === 'Запустить с «Авто (Jev)»').click();
+  await settle();
+  assert.equal(ui.app.all().some(node => node.className === 'notice'), false, 'the hint is gone');
+  // With servers on: one more row, the server switch.
+  const servers = page('settings/harness.js', { 'harness.settings': state, 'autopilot.entry': { folders: [], servers: true, routing: true } });
+  await settle();
+  servers.context('en', 'sage');
+  assert.equal(servers.app.all().filter(node => node.className === 'setting-row').length, 6);
+  assert.match(servers.app.text(), /On one of your servers \(Jev picks one\)/u);
+});
+
 test('Flow preview: a waiting plan shows roles, models and tasks with Start and Cancel; Start decides it', async () => {
   const plan = {
     id: 'p1', orchestratorId: 'o1', orchestratorTitle: 'Lead', flowId: 'docs', source: 'project', name: 'Docs pass', description: 'Writer drafts',

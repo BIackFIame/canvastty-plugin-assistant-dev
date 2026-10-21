@@ -5,6 +5,11 @@ import type { BindCheck } from './binding.ts';
 type Reason = Exclude<BindCheck, { ok: true }>['reason'];
 
 const EN: Record<Reason | 'exhausted' | 'provider' | 'planUnusable', string> = {
+  'wrong-model': 'Auto (Jev): this subagent asks for another model than its route. Call canvastty-assistant__pick_route again and pass its spawn values to spawn_agent unchanged, with no model of your own.',
+  'wrong-effort': 'Auto (Jev): this subagent asks for another effort than its route. Call canvastty-assistant__pick_route again and pass its spawn values to spawn_agent unchanged, with no effort of your own.',
+  'wrong-account': 'Auto (Jev): this subagent\'s model account is not the one its route chose. Call canvastty-assistant__pick_route again and pass its launchOptions unchanged.',
+  'wrong-options': 'Auto (Jev): this subagent\'s launch options are not the ones its route chose. Call canvastty-assistant__pick_route again and pass its spawn values unchanged.',
+  leaf: 'Auto (Jev): you were routed as one task, not to split it. Do the work yourself; if it must be split, your orchestrator routes it with canvastty-assistant__pick_route and orchestrate: true.',
   unrouted: 'Auto (Jev) routes every subagent: call canvastty-assistant__pick_route with this subtask and pass its spawn values to spawn_agent unchanged.',
   unknown: 'Auto (Jev): this route value is not one pick_route gave out. Call canvastty-assistant__pick_route again and pass its spawn values unchanged.',
   used: 'Auto (Jev): this route was already used for another subagent. Call canvastty-assistant__pick_route again for this subtask.',
@@ -18,6 +23,11 @@ const EN: Record<Reason | 'exhausted' | 'provider' | 'planUnusable', string> = {
 };
 
 const RU: typeof EN = {
+  'wrong-model': '«Авто (Jev)»: этот субагент просит не ту модель, что выбрал маршрут. Вызовите canvastty-assistant__pick_route ещё раз и передайте его значения spawn в spawn_agent без изменений, без своей модели.',
+  'wrong-effort': '«Авто (Jev)»: этот субагент просит не то усилие, что выбрал маршрут. Вызовите canvastty-assistant__pick_route ещё раз и передайте его значения spawn в spawn_agent без изменений, без своего усилия.',
+  'wrong-account': '«Авто (Jev)»: у этого субагента не тот аккаунт модели, что выбрал маршрут. Вызовите canvastty-assistant__pick_route ещё раз и передайте его launchOptions без изменений.',
+  'wrong-options': '«Авто (Jev)»: у этого субагента не те параметры запуска, что выбрал маршрут. Вызовите canvastty-assistant__pick_route ещё раз и передайте его значения spawn без изменений.',
+  leaf: '«Авто (Jev)»: вас направили как одну задачу, без разбиения. Сделайте работу сами; если её нужно разбить, ваш оркестратор направит её через canvastty-assistant__pick_route с orchestrate: true.',
   unrouted: '«Авто (Jev)» распределяет каждого субагента: вызовите canvastty-assistant__pick_route с этой подзадачей и передайте его значения spawn в spawn_agent без изменений.',
   unknown: '«Авто (Jev)»: это значение маршрута выдал не pick_route. Вызовите canvastty-assistant__pick_route ещё раз и передайте его значения spawn без изменений.',
   used: '«Авто (Jev)»: этот маршрут уже использован для другого субагента. Вызовите canvastty-assistant__pick_route для этой подзадачи ещё раз.',

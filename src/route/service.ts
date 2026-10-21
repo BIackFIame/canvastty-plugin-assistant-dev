@@ -353,6 +353,37 @@ export class RouteService {
   }
 
   /**
+   * "Start with Auto (Jev)" (core B8): where a top-level orchestrator runs. The same engine as `route`, for a task
+   * that must orchestrate, among the routes the person declared (subscriptions and coding plans, by their CLI) and the
+   * model accounts an orchestrator's list_routes showed in the last day (Accounts' state as it was then; Accounts
+   * still checks the account at launch). `clis`: only these CLIs; `ownSignIn`: only a CLI's own sign-in (a server
+   * gets nothing from this computer). Best first, never an OpenRouter route (the engine drops those).
+   */
+  orchestratorRoutes(view: TurnView, cardClass: DataClass, limit: { clis?: readonly string[]; ownSignIn?: boolean } = {}): { candidates: Candidate[]; dropped: string[] } {
+    const now = this.now();
+    const allowed = (cli: string): boolean => !limit.clis || limit.clis.includes(cli);
+    const rows: AccountRow[] = limit.ownSignIn || !this.accountsSeen || now - this.accountsSeen.at > 24 * 3_600_000 ? []
+      : this.accountsSeen.rows.filter(row => allowed(row.provider)).map(row => ({ ...row, launchOptions: { 'canvastty-accounts': { account: row.accountId, effort: 'default', trustFolder: false } } }));
+    const clis = [...new Set([...this.settings.plans.filter(plan => plan.allow !== 'never').map(plan => plan.cli), ...rows.map(row => row.provider), ...(limit.clis ?? [])])].filter(allowed);
+    if (!clis.length) return { candidates: [], dropped: [] };
+    const { catalog, index } = this.options.catalog();
+    const decision = decide({
+      view, preference: this.options.preference(), settings: this.settings,
+      providers: clis.map(id => ({ id, installed: true, available: true, subagent: true, orchestrator: true })), providersGiven: true, accountRows: rows,
+      callerProvider: null, cardClass, mode: this.options.dataClassMode(), limits: this.limits, catalog, index, auto: null, now,
+      busy: key => this.busy(key), launches: (id, ms) => this.launches(id, ms), cooldown: key => { const c = this.cooldowns.get(key); return c && c.until > now ? c : null; },
+      launchesSinceRead: id => this.launchesSinceRead(id), stats: this.records.routeStats(), prefer: null, orchestrate: true,
+      explore: { roll: 1, retired: new Set(), highRisk: true }
+    });
+    const seen = new Set<string>();
+    const candidates = [decision.top, ...decision.alternatives, ...decision.groups.flat()]
+      .filter((c): c is Candidate => !!c && !seen.has(c.key) && !!seen.add(c.key))
+      .filter(c => !limit.ownSignIn || c.kind === 'subscription' || c.kind === 'cli-default');
+    const dropped = [...new Set(decision.dropped.map(entry => `${entry.cli}${entry.model ? ` ${entry.model}` : ''}: ${entry.reason}`))].slice(0, 4);
+    return { candidates, dropped };
+  }
+
+  /**
    * What the orchestrator passed, or what it passed earlier: the full list_providers and list_routes are large, so a
    * card's last full lists are kept (memory, 30 min) and a later call may send only the task, or a `digest` such as
    * "claude:ok codex:signed_out opencode @glm-53" (CLIs with their sign-in, `@` a ready account id from list_routes).
