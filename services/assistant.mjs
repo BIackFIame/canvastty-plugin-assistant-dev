@@ -8253,6 +8253,8 @@ var ReviewService = class {
   circuit = new ReviewCircuit(MAX_SESSIONS);
   sessions = /* @__PURE__ */ new Map();
   recentReviews = [];
+  /** Each recent entry's full session id (never shown; the page sees 8-character prefixes only). */
+  recentOwners = /* @__PURE__ */ new WeakMap();
   now;
   constructor(options) {
     this.options = options;
@@ -8351,6 +8353,10 @@ var ReviewService = class {
   }
   recent() {
     return structuredClone(this.recentReviews);
+  }
+  /** Recent decisions on these cards only, matched by full session id (an agent's view of its own tree). */
+  recentFor(sessionIds) {
+    return structuredClone(this.recentReviews.filter((entry) => sessionIds.has(this.recentOwners.get(entry) ?? "")));
   }
   setLocale(locale) {
     this.options.locale = locale;
@@ -8643,7 +8649,9 @@ var ReviewService = class {
     this.remember(sessionId, summary, mode, { outcome: verdict.outcome, act, tier: tierOf(verdict), reason: verdict.reason, model: verdict.model ?? null, auditId: verdict.auditId });
   }
   remember(sessionId, summary, mode, entry) {
-    this.recentReviews.unshift({ at: this.now(), session: sessionId.slice(0, 8), summary, mode, ...entry, label: null });
+    const recent = { at: this.now(), session: sessionId.slice(0, 8), summary, mode, ...entry, label: null };
+    this.recentOwners.set(recent, sessionId);
+    this.recentReviews.unshift(recent);
     this.recentReviews.splice(MAX_RECENT);
   }
 };
@@ -15802,6 +15810,14 @@ var RouteService = class {
   /** The task text of each recent decision until its child appears (memory only, never in the decision file). */
   tasks = /* @__PURE__ */ new Map();
   kept = /* @__PURE__ */ new Map();
+  /**
+   * Full session ids behind each decision of this run: the card that asked and the child started from it. The
+   * decision file keeps 8-character prefixes only, so matching, outcomes and the agent tree use these (a prefix shared
+   * by two cards never hands one card's decision, task or outcome to the other). Decisions read back from an earlier
+   * run have none and are not matched.
+   */
+  owners = /* @__PURE__ */ new Map();
+  children = /* @__PURE__ */ new Map();
   dir;
   writeTimer = null;
   pending = null;
@@ -15859,7 +15875,9 @@ var RouteService = class {
     this.seen.add(session.id);
     while (this.seen.size > 4096) this.seen.delete(this.seen.values().next().value);
     const where = [session.cwd, session.workingDirectory].filter((path) => typeof path === "string").map(trimSlash);
-    const match = this.records.unmatched(session.parentSessionId, session.provider, this.now(), MATCH_MS, (record4) => {
+    const parentId = session.parentSessionId;
+    const match = this.records.unmatched(parentId, session.provider, this.now(), MATCH_MS, (record4) => {
+      if (this.owners.get(record4.id) !== parentId) return false;
       const cwd = this.tasks.get(record4.id)?.cwd;
       return !cwd || !where.length || where.includes(cwd);
     });
@@ -15868,6 +15886,8 @@ var RouteService = class {
     this.tasks.delete(match.record.id);
     if (task) this.options.delegatedTask?.(session.id, task.text, session.parentSessionId);
     match.record.spawned = { session: session.id.slice(0, 8), option: match.option, at: this.now() };
+    this.children.set(match.record.id, session.id);
+    while (this.children.size > 4096) this.children.delete(this.children.keys().next().value);
     const signIn = match.record.options[match.option].signIn;
     this.childSignIn.set(session.id, signIn);
     this.live.set(signIn, /* @__PURE__ */ new Set([...this.live.get(signIn) ?? [], session.id]));
@@ -15878,7 +15898,7 @@ var RouteService = class {
     if (!signIn) return;
     this.childSignIn.delete(sessionId);
     this.live.get(signIn)?.delete(sessionId);
-    const record4 = this.records.bySession(sessionId);
+    const record4 = this.bySessionFull(sessionId);
     if (record4?.spawned && !record4.spawned.endedAt) {
       record4.spawned.endedAt = this.now();
       this.records.changed();
@@ -15902,10 +15922,15 @@ var RouteService = class {
   }
   /** The route a subagent was started on (model, plan or price, estimate), for the agent tree; null if not routed. */
   routeOf(sessionId) {
-    const record4 = this.records.bySession(sessionId);
+    const record4 = this.bySessionFull(sessionId);
     const option = record4?.spawned ? record4.options[record4.spawned.option] : void 0;
-    if (!record4 || !option || record4.spawned.session !== sessionId.slice(0, 8)) return null;
+    if (!record4 || !option) return null;
     return { model: option.model, identity: option.identity, kind: option.kind, label: option.label, costBasis: option.costBasis, estimate: option.estimateData ?? null };
+  }
+  /** The decision of this run a child was started from, by the child's full session id. */
+  bySessionFull(sessionId) {
+    for (const [decisionId, child] of [...this.children].reverse()) if (child === sessionId) return this.records.get(decisionId);
+    return void 0;
   }
   launches(planId, windowMs) {
     const since = this.now() - windowMs;
@@ -16208,6 +16233,8 @@ ${JSON.stringify({ servers })}` };
       options: options.map((option) => optionRecord(option, decision, now))
     };
     this.records.add(record4);
+    this.owners.set(record4.id, caller.id);
+    while (this.owners.size > 4096) this.owners.delete(this.owners.keys().next().value);
     if (this.options.bindSpawn) {
       for (const option of options) {
         const bound = this.options.bindSpawn(caller.id, option.spawn, record4.id, input.orchestrate === true);
@@ -16292,8 +16319,8 @@ ${JSON.stringify({
   outcome(caller, input) {
     const id = clean4(input.decisionId, 40);
     const session = clean4(input.sessionId, 80);
-    const record4 = (id ? this.records.get(id) : void 0) ?? (session ? this.records.bySession(session) : void 0);
-    if (!record4 || record4.card !== caller.id.slice(0, 8)) return { content: "No route decision of yours with that decisionId (or sessionId).", isError: true };
+    const record4 = (id ? this.records.get(id) : void 0) ?? (session ? this.bySessionFull(session) : void 0);
+    if (!record4 || this.owners.get(record4.id) !== caller.id) return { content: "No route decision of yours with that decisionId (or sessionId).", isError: true };
     const status = clean4(input.status, 20).toLowerCase();
     if (!["done", "failed", "error", "cancelled", "canceled", "timeout", "idle", "exited"].includes(status)) return { content: "status must be done, failed, cancelled or timeout (from wait_for_agent / get_agent_result).", isError: true };
     const result = classifyOutcome(status === "timeout" ? "failed" : status, strings2(input.exitLines, 40, 400));
@@ -17185,6 +17212,23 @@ var Assistant = class {
     void this.harness.relocalize();
     return locale;
   }
+  /** A card and every card below it (CanvasTTY's parent links, full ids; bounded, a circle stops where it closes). */
+  treeBelow(sessionId) {
+    const tree = /* @__PURE__ */ new Set([sessionId]);
+    const children = /* @__PURE__ */ new Map();
+    for (const session of this.sessions.values()) {
+      if (typeof session.parentSessionId !== "string" || session.parentSessionId === session.id) continue;
+      children.set(session.parentSessionId, [...children.get(session.parentSessionId) ?? [], session.id]);
+    }
+    const queue = [sessionId];
+    while (queue.length && tree.size < 4096) {
+      for (const child of children.get(queue.shift()) ?? []) if (!tree.has(child)) {
+        tree.add(child);
+        queue.push(child);
+      }
+    }
+    return tree;
+  }
   /** A card's effective data class (its launch's, else the default). */
   classOf(sessionId) {
     return this.classes.get(sessionId) ?? this.settings.defaultDataClass;
@@ -17634,8 +17678,7 @@ ${JSON.stringify({ ...a, model: answer.model })}` };
     }
     if (name === "review_status") {
       const status = await this.engine.status();
-      const mine = new Set([caller?.id, ...[...this.sessions.values()].filter((session) => caller && session.parentSessionId === caller.id).map((session) => session.id)].filter(Boolean).map((id) => String(id).slice(0, 8)));
-      const recent = this.review.recent().filter((entry) => mine.has(entry.session)).slice(0, 10).map(({ at, session, summary, act, outcome, tier, reason }) => ({ at: new Date(at).toISOString(), session, summary, act, outcome, tier, reason }));
+      const recent = (caller && typeof caller.id === "string" ? this.review.recentFor(this.treeBelow(caller.id)) : []).slice(0, 10).map(({ at, session, summary, act, outcome, tier, reason }) => ({ at: new Date(at).toISOString(), session, summary, act, outcome, tier, reason }));
       return {
         content: JSON.stringify({
           enabled: this.settings.enabled,

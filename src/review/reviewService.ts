@@ -440,6 +440,8 @@ export class ReviewService {
   private readonly circuit = new ReviewCircuit(MAX_SESSIONS);
   private readonly sessions = new Map<string, SessionState>();
   private readonly recentReviews: RecentReview[] = [];
+  /** Each recent entry's full session id (never shown; the page sees 8-character prefixes only). */
+  private readonly recentOwners = new WeakMap<RecentReview, string>();
   private readonly now: () => number;
 
   constructor(options: ReviewServiceOptions) {
@@ -539,6 +541,8 @@ export class ReviewService {
   }
 
   recent(): RecentReview[] { return structuredClone(this.recentReviews); }
+  /** Recent decisions on these cards only, matched by full session id (an agent's view of its own tree). */
+  recentFor(sessionIds: ReadonlySet<string>): RecentReview[] { return structuredClone(this.recentReviews.filter(entry => sessionIds.has(this.recentOwners.get(entry) ?? ''))); }
   setLocale(locale: 'en' | 'ru'): void { this.options.locale = locale; }
 
   /** «верно / неверно» on the settings page: the person's own label (R11), once per review. */
@@ -816,7 +820,9 @@ export class ReviewService {
   }
 
   private remember(sessionId: string, summary: string, mode: string, entry: Pick<RecentReview, 'outcome' | 'act' | 'tier' | 'reason' | 'model' | 'auditId'>): void {
-    this.recentReviews.unshift({ at: this.now(), session: sessionId.slice(0, 8), summary, mode, ...entry, label: null });
+    const recent: RecentReview = { at: this.now(), session: sessionId.slice(0, 8), summary, mode, ...entry, label: null };
+    this.recentOwners.set(recent, sessionId);
+    this.recentReviews.unshift(recent);
     this.recentReviews.splice(MAX_RECENT);
   }
 }

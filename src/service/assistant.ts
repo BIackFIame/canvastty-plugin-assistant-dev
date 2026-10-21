@@ -261,6 +261,21 @@ export class Assistant {
     return locale;
   }
 
+  /** A card and every card below it (CanvasTTY's parent links, full ids; bounded, a circle stops where it closes). */
+  treeBelow(sessionId: string): Set<string> {
+    const tree = new Set<string>([sessionId]);
+    const children = new Map<string, string[]>();
+    for (const session of this.sessions.values()) {
+      if (typeof session.parentSessionId !== 'string' || session.parentSessionId === session.id) continue;
+      children.set(session.parentSessionId, [...children.get(session.parentSessionId) ?? [], session.id]);
+    }
+    const queue = [sessionId];
+    while (queue.length && tree.size < 4_096) {
+      for (const child of children.get(queue.shift()!) ?? []) if (!tree.has(child)) { tree.add(child); queue.push(child); }
+    }
+    return tree;
+  }
+
   /** A card's effective data class (its launch's, else the default). */
   classOf(sessionId: string): DataClass { return this.classes.get(sessionId) ?? this.settings.defaultDataClass; }
 
@@ -690,8 +705,8 @@ export class Assistant {
     }
     if (name === 'review_status') {
       const status = await this.engine.status();
-      const mine = new Set([caller?.id, ...[...this.sessions.values()].filter(session => caller && session.parentSessionId === caller.id).map(session => session.id)].filter(Boolean).map(id => String(id).slice(0, 8)));
-      const recent = this.review.recent().filter(entry => mine.has(entry.session)).slice(0, 10).map(({ at, session, summary, act, outcome, tier, reason }) => ({ at: new Date(at).toISOString(), session, summary, act, outcome, tier, reason }));
+      // The caller's own card and every card below it, by full session id (never by prefix).
+      const recent = (caller && typeof caller.id === 'string' ? this.review.recentFor(this.treeBelow(caller.id)) : []).slice(0, 10).map(({ at, session, summary, act, outcome, tier, reason }) => ({ at: new Date(at).toISOString(), session, summary, act, outcome, tier, reason }));
       return {
         content: JSON.stringify({
           enabled: this.settings.enabled, commandReview: this.engine.mode('command.review'), triage: this.engine.mode('task.route'), strictness: this.settings.reviewStrictness,

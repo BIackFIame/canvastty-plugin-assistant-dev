@@ -216,6 +216,14 @@ export class RouteService {
   /** The task text of each recent decision until its child appears (memory only, never in the decision file). */
   private readonly tasks = new Map<string, { text: string; cwd: string | null; at: number }>();
   private readonly kept = new Map<string, { at: number; providers: ProviderInfo[] | null; rows: AccountRow[] | null }>();
+  /**
+   * Full session ids behind each decision of this run: the card that asked and the child started from it. The
+   * decision file keeps 8-character prefixes only, so matching, outcomes and the agent tree use these (a prefix shared
+   * by two cards never hands one card's decision, task or outcome to the other). Decisions read back from an earlier
+   * run have none and are not matched.
+   */
+  private readonly owners = new Map<string, string>();
+  private readonly children = new Map<string, string>();
   private readonly dir: string;
   private writeTimer: ReturnType<typeof setTimeout> | null = null;
   private pending: RouteRecord[] | null = null;
@@ -261,7 +269,9 @@ export class RouteService {
     while (this.seen.size > 4_096) this.seen.delete(this.seen.values().next().value!);
     const where = [session.cwd, session.workingDirectory].filter((path): path is string => typeof path === 'string').map(trimSlash);
     // A decision for which the orchestrator said where the child works matches only a child there.
-    const match = this.records.unmatched(session.parentSessionId, session.provider, this.now(), MATCH_MS, record => {
+    const parentId = session.parentSessionId;
+    const match = this.records.unmatched(parentId, session.provider, this.now(), MATCH_MS, record => {
+      if (this.owners.get(record.id) !== parentId) return false;
       const cwd = this.tasks.get(record.id)?.cwd;
       return !cwd || !where.length || where.includes(cwd);
     });
@@ -270,6 +280,8 @@ export class RouteService {
     this.tasks.delete(match.record.id);
     if (task) this.options.delegatedTask?.(session.id, task.text, session.parentSessionId);
     match.record.spawned = { session: session.id.slice(0, 8), option: match.option, at: this.now() };
+    this.children.set(match.record.id, session.id);
+    while (this.children.size > 4_096) this.children.delete(this.children.keys().next().value!);
     const signIn = match.record.options[match.option]!.signIn;
     this.childSignIn.set(session.id, signIn);
     this.live.set(signIn, new Set([...this.live.get(signIn) ?? [], session.id]));
@@ -281,7 +293,7 @@ export class RouteService {
     if (!signIn) return;
     this.childSignIn.delete(sessionId);
     this.live.get(signIn)?.delete(sessionId);
-    const record = this.records.bySession(sessionId);
+    const record = this.bySessionFull(sessionId);
     if (record?.spawned && !record.spawned.endedAt) { record.spawned.endedAt = this.now(); this.records.changed(); }
   }
 
@@ -302,10 +314,16 @@ export class RouteService {
 
   /** The route a subagent was started on (model, plan or price, estimate), for the agent tree; null if not routed. */
   routeOf(sessionId: string): TreeRoute | null {
-    const record = this.records.bySession(sessionId);
+    const record = this.bySessionFull(sessionId);
     const option = record?.spawned ? record.options[record.spawned.option] : undefined;
-    if (!record || !option || record.spawned!.session !== sessionId.slice(0, 8)) return null;
+    if (!record || !option) return null;
     return { model: option.model, identity: option.identity, kind: option.kind, label: option.label, costBasis: option.costBasis, estimate: option.estimateData ?? null };
+  }
+
+  /** The decision of this run a child was started from, by the child's full session id. */
+  private bySessionFull(sessionId: string): RouteRecord | undefined {
+    for (const [decisionId, child] of [...this.children].reverse()) if (child === sessionId) return this.records.get(decisionId);
+    return undefined;
   }
 
   private launches(planId: string, windowMs: number): number {
@@ -535,6 +553,8 @@ export class RouteService {
       explored: decision.explored, preferred: decision.preferred, options: options.map(option => optionRecord(option, decision, now))
     };
     this.records.add(record);
+    this.owners.set(record.id, caller.id);
+    while (this.owners.size > 4_096) this.owners.delete(this.owners.keys().next().value!);
     // An Auto (Jev) tree: every option's spawn carries a single-use value bound to this decision.
     if (this.options.bindSpawn) {
       for (const option of options) {
@@ -612,8 +632,9 @@ export class RouteService {
   private outcome(caller: CallerCard, input: Record<string, unknown>): ToolAnswer {
     const id = clean(input.decisionId, 40);
     const session = clean(input.sessionId, 80);
-    const record = (id ? this.records.get(id) : undefined) ?? (session ? this.records.bySession(session) : undefined);
-    if (!record || record.card !== caller.id.slice(0, 8)) return { content: 'No route decision of yours with that decisionId (or sessionId).', isError: true };
+    const record = (id ? this.records.get(id) : undefined) ?? (session ? this.bySessionFull(session) : undefined);
+    // Only the card that asked, by its full id (decisions of an earlier run cannot be reported any more).
+    if (!record || this.owners.get(record.id) !== caller.id) return { content: 'No route decision of yours with that decisionId (or sessionId).', isError: true };
     const status = clean(input.status, 20).toLowerCase();
     if (!['done', 'failed', 'error', 'cancelled', 'canceled', 'timeout', 'idle', 'exited'].includes(status)) return { content: 'status must be done, failed, cancelled or timeout (from wait_for_agent / get_agent_result).', isError: true };
     // Exit lines are only classified here, never stored.
