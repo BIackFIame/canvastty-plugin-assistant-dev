@@ -142,6 +142,7 @@ export class Bindings {
   isLeaf(sessionId: string | null | undefined): boolean { return !!sessionId && this.leaves.has(sessionId); }
   /** The autopilot plan's child count for this orchestrator (D3); null: no plan, only CanvasTTY's own caps. */
   setPlan(sessionId: string, children: number | null): void { const card = this.autoCards.get(sessionId); if (card) card.maxChildren = children; }
+  planOf(sessionId: string): number | null { return this.autoCards.get(sessionId)?.maxChildren ?? null; }
   running(sessionId: string): number { return this.autoCards.get(sessionId)?.children.size ?? 0; }
   /** The plan's child count for this card (null: none, or not an Auto card). */
   planned(sessionId: string): number | null { return this.autoCards.get(sessionId)?.maxChildren ?? null; }

@@ -487,6 +487,12 @@ export class ReviewService {
     if (state.turns.length > MAX_TURNS) state.turns.splice(1, 1);
   }
 
+  /** The task a card was given, for the agent tree: the launcher's task, else its first turn. */
+  taskOf(sessionId: string): string | null {
+    const state = this.sessions.get(sessionId);
+    return state ? state.launchTask ?? state.turns[0] ?? null : null;
+  }
+
   /** A card's own texts, most recent first: its latest turn, its earlier turns, then the launcher's task. */
   private ownTexts(state: SessionState): string[] { return distinct([...[...state.turns].reverse(), state.launchTask]); }
 

@@ -9,6 +9,8 @@ export interface PluginHost {
     onEvent(listener: (event: { serviceId: string; event: string; data: unknown }) => void): void;
   };
   canvas?: { open(contributionId: string): Promise<void> };
+  /** Host methods by name (`sessions.focus` on hosts that offer it). */
+  request?(method: string, params?: unknown): Promise<unknown>;
   onVisibilityChange?(listener: (state: 'visible' | 'hidden') => void): void;
 }
 
