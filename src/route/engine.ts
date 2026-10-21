@@ -76,6 +76,8 @@ export interface AccountRow {
   state: string;
   reason?: string;
   launchOptions?: Record<string, Record<string, string | boolean>>;
+  /** The account's plan quota as Accounts read it (unknown and stale are never used up). */
+  quota?: { state: 'ok' | 'low' | 'exhausted' | 'presumed-reset' | 'unknown' | 'stale'; remainingPercent: number | null; resetsAt: number | null; observedAt: number | null; source: string | null; confidence: 'exact' | 'estimated' | 'none'; note: string };
 }
 
 /** What Model: Auto (Jev) would pick for this task (its request router still decides per turn). */
@@ -112,6 +114,8 @@ export interface RouteContext {
   /** Routed launches on a coding plan in the last `windowMs`. */
   launches(planId: string, windowMs: number): number;
   cooldown(signIn: string): { until: number; reason: string } | null;
+  /** Routed launches on a CLI's own sign-in since its limits were read (own usage accounting between reads). */
+  launchesSinceRead?(cli: string): number;
   /** Outcomes per route key. */
   stats: ReadonlyMap<string, RouteStats>;
   /** Learned tokens per task of a model, as a factor of TASK_TOKENS (null: not enough outcomes with tokens). */
@@ -489,7 +493,7 @@ export function decide(ctx: RouteContext): RouteDecision {
     let availability: Candidate['availability'] = { state: 'ready', reason: entry?.signIn === 'ok' ? 'signed in' : 'not checked' };
     if (raw.kind === 'subscription' || raw.kind === 'cli-default') {
       const limits = ctx.limits?.providers.find(provider => provider.provider === raw.cli);
-      quota = quotaOf(limits, raw.plan?.reserve ?? DEFAULT_RESERVE, ctx.now);
+      quota = quotaOf(limits, raw.plan?.reserve ?? DEFAULT_RESERVE, ctx.now, ctx.launchesSinceRead?.(raw.cli) ?? 0);
       const price = shadowPrice(quota, share, ref);
       cost = price.usd; costBasis = price.basis;
       if (price.basis === 'unavailable') availability = { state: 'exhausted', reason: quota.note };
@@ -504,6 +508,9 @@ export function decide(ctx: RouteContext): RouteDecision {
       if (plan.allowance === undefined) { availability = { state: 'unknown', reason: `quota unknown (no allowance set; ${used} launches counted in ${hours} h)` }; estimate = { kind: 'unknown', note: `quota unknown, ${used} launches counted in ${hours} h` }; }
       else if (used >= plan.allowance) { availability = { state: 'exhausted', reason: `${used} of ${plan.allowance} launches used in this ${hours} h window` }; cost = null; }
       else estimate = { kind: 'launches', used, allowance: plan.allowance, windowHours: hours };
+    } else if (raw.kind === 'account' && raw.row?.quota?.state === 'exhausted' && (raw.row.quota.resetsAt === null || raw.row.quota.resetsAt > ctx.now)) {
+      // Accounts read the plan's quota: used up until its reset (a fresh read that shows room clears it there).
+      availability = { state: 'exhausted', reason: `the account's quota is used up${raw.row.quota.note ? ` (${raw.row.quota.note})` : ''}` };
     } else if (raw.kind === 'account' && raw.endpoint && isLocalHost(raw.endpoint)) {
       cost = 0; costBasis = 'local'; estimate = { kind: 'usd', low: 0, high: 0 };
     } else {
@@ -512,6 +519,7 @@ export function decide(ctx: RouteContext): RouteDecision {
       // A coding-plan account has no price per call: free within the plan's limits (a limit exit rests it).
       else if (raw.kind === 'account' && flatRate(raw, ctx.settings)) { cost = 0; costBasis = 'flat'; estimate = { kind: 'flat' }; }
     }
+    if (raw.kind === 'account' && availability.state === 'ready' && raw.row?.quota?.state === 'presumed-reset') availability = { state: 'presumed-reset', reason: raw.row.quota.note || 'its quota has probably reset' };
     const cooling = ctx.cooldown(raw.signIn);
     if (cooling && cooling.until > ctx.now) availability = { state: 'cooldown', reason: cooling.reason };
     const maxParallel = raw.plan?.maxParallel ?? (raw.kind === 'cli-default' ? DEFAULT_MAX_PARALLEL : Infinity);

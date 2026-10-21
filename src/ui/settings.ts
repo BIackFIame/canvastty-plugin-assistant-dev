@@ -148,9 +148,10 @@ async function load(): Promise<void> {
 }
 
 /**
- * CanvasTTY gives a service no limit windows of its own (phase 1): this page reads them with `limits.get` when it
- * opens and every 60 s while it is visible, and forwards the sanitized snapshot. The service counts anything older
- * than 30 minutes as unknown.
+ * On a core that lets services read limits the service reads them itself; on an older one this page reads them with
+ * `limits.get` when it opens and every 60 s while it is visible, and forwards the sanitized snapshot (the newer read
+ * per provider wins, so both together never move the data backwards). The service counts anything older than 30
+ * minutes as unknown.
  */
 const LIMITS_EVERY_MS = 60_000;
 let visible = true;

@@ -96,7 +96,8 @@ test('route_outcome: a usage-limit exit rests the route (its window\'s reset, or
   assert.equal((await route.tool('route_outcome', orchestrator, { decisionId: answer.decisionId, status: 'weird' })).isError, true);
   const recorded = await route.tool('route_outcome', orchestrator, { sessionId: 'child-9', status: 'failed', tokens: 123_456, exitLines: ['Claude usage limit reached. Your limit will reset at 5pm.'] });
   assert.equal(route.records.get(answer.decisionId).outcome.tokens, 123_456, 'tokens are kept for the plan cost');
-  assert.match(recorded.content, /Recorded limit: Max rests for a while/u);
+  // The time its message names (5pm local) bounds the rest: never beyond 24 h.
+  assert.match(recorded.content, /Recorded limit: Max rests until \d\d:\d\d UTC and route picks another one/u);
   const record = route.records.get(answer.decisionId);
   assert.deepEqual([record.outcome.result, record.outcome.ok, record.outcome.by], ['limit', false, 'orchestrator']);
   assert.ok(!JSON.stringify(route.records.all()).includes('usage limit reached'), 'exit lines are not kept');
@@ -117,8 +118,8 @@ test('page: state shows plans with alias resolution, quota and its age; saving v
   const assistant = new Assistant({ host, dataDir: mkdtempSync(join(base, 'data-')), git: null, routing: declared(), now: () => NOW });
   const answer = limitsAnswer();
   answer.snapshot.providers[0].accountScope = 'scope-SECRET';
-  assert.deepEqual(assistant.routing.receiveLimits(answer), { ok: true, providers: 4 });
-  assert.deepEqual(assistant.routing.receiveLimits({ nope: true }), { ok: false, providers: 0 });
+  assert.deepEqual(assistant.routing.receiveLimits(answer), { ok: true, providers: 4, changes: [] });
+  assert.deepEqual(assistant.routing.receiveLimits({ nope: true }), { ok: false, providers: 0, changes: [] });
   const state = assistant.routing.state();
   assert.ok(!JSON.stringify(state).includes('SECRET'));
   const max = state.plans.find(plan => plan.id === 'claude-max');

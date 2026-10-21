@@ -105,7 +105,7 @@ function serve({ methods, notifications = {}, onInitialize, input = process.stdi
     }
   };
   const record4 = (value) => value && typeof value === "object" && !Array.isArray(value) ? value : {};
-  const errorText = (error) => error instanceof Error ? error.message : String(error);
+  const errorText2 = (error) => error instanceof Error ? error.message : String(error);
   const track = (run) => {
     active++;
     return Promise.resolve().then(run).finally(() => {
@@ -139,7 +139,7 @@ function serve({ methods, notifications = {}, onInitialize, input = process.stdi
     }
     const method = message.method;
     if (method === "canvastty.initialize") {
-      Promise.resolve().then(() => onInitialize?.(record4(message.params), host)).catch((error2) => host.log("error", `initialize failed: ${errorText(error2)}`));
+      Promise.resolve().then(() => onInitialize?.(record4(message.params), host)).catch((error2) => host.log("error", `initialize failed: ${errorText2(error2)}`));
       return;
     }
     if (method === "canvastty.shutdown") {
@@ -153,7 +153,7 @@ function serve({ methods, notifications = {}, onInitialize, input = process.stdi
         return;
       }
       const handler = Object.hasOwn(notifications, method) ? notifications[method] : void 0;
-      track(() => handler?.(record4(message.params), host)).catch((error2) => host.log("warn", `${method}: ${errorText(error2)}`));
+      track(() => handler?.(record4(message.params), host)).catch((error2) => host.log("warn", `${method}: ${errorText2(error2)}`));
       return;
     }
     if (typeof method === "string") {
@@ -169,7 +169,7 @@ function serve({ methods, notifications = {}, onInitialize, input = process.stdi
         (result) => {
           if (!send({ id: message.id, result: result ?? null })) send({ id: message.id, error: { code: -32e3, message: "The answer is larger than the frame limit." } });
         },
-        (error2) => send({ id: message.id, error: { code: error2?.code ?? -32e3, message: errorText(error2).slice(0, 400) } })
+        (error2) => send({ id: message.id, error: { code: error2?.code ?? -32e3, message: errorText2(error2).slice(0, 400) } })
       );
       return;
     }
@@ -13892,13 +13892,14 @@ function parseLimits(value, receivedAt) {
       const window = w;
       const used = num(window.usedPercent);
       if (used === null) continue;
-      windows.push({ label: short(window.label, 60), usedPercent: Math.max(0, Math.min(100, used)), windowMinutes: num(window.windowMinutes), resetsAt: num(window.resetsAt) });
+      windows.push({ id: short(window.id, 80), label: short(window.label, 60), usedPercent: Math.max(0, Math.min(100, used)), windowMinutes: num(window.windowMinutes), resetsAt: num(window.resetsAt) });
     }
     providers.push({ provider, state, reason: short(entry.reason, 40), fetchedAt: num(entry.fetchedAt) ?? (state === "unavailable" ? num(entry.checkedAt) : null), windows });
   }
   return { receivedAt, providers };
 }
-function quotaOf(limits, reserve, now) {
+var PER_LAUNCH_PERCENT = 2;
+function quotaOf(limits, reserve, now, launchesSinceRead = 0) {
   const unknown = (note, code, readAt = null) => ({ state: "unknown", headroom: null, pace: null, window: null, readAt, note, code });
   if (!limits) return unknown("not read yet", "unread");
   if (limits.state === "unavailable") return unknown(limits.reason ? `not readable (${limits.reason})` : "not readable", "unreadable");
@@ -13925,9 +13926,12 @@ function quotaOf(limits, reserve, now) {
     }
   }
   if (!tight) return { state: "presumed-reset", headroom: null, pace: null, window: null, readAt: limits.fetchedAt, note: "its windows have probably reset since the last read", code: "reset" };
+  const spent = Math.max(0, Math.min(launchesSinceRead, 100)) * PER_LAUNCH_PERCENT;
+  if (spent > 0 && headroom > 0) headroom = Math.max(1e-3, headroom - spent);
+  const estimated = spent > 0 ? `; ${launchesSinceRead} routed launch(es) since the read counted as ~${spent}%` : "";
   const view = { label: tight.label, usedPercent: tight.usedPercent, minutes: tight.windowMinutes };
   if (headroom <= 0) return { state: "exhausted", headroom: 0, pace: paced ? round3(pace) : null, window: view, readAt: limits.fetchedAt, note: "no headroom above the reserve", code: "no-headroom" };
-  return { state: presumed ? "presumed-reset" : "known", headroom: round3(headroom), pace: paced ? round3(pace) : null, window: view, readAt: limits.fetchedAt, note: presumed ? "one window has probably reset since the last read" : "", code: presumed ? "reset" : "" };
+  return { state: presumed ? "presumed-reset" : "known", headroom: round3(headroom), pace: paced ? round3(pace) : null, window: view, readAt: limits.fetchedAt, note: `${presumed ? "one window has probably reset since the last read" : ""}${estimated}`.replace(/^; /u, ""), code: presumed ? "reset" : "" };
 }
 var round3 = (value) => Math.round(value * 1e3) / 1e3;
 function shadowPrice(quota, share, ref) {
@@ -13938,6 +13942,144 @@ function shadowPrice(quota, share, ref) {
   const base = ref ?? 0;
   if (quota.headroom < share) return { usd: round3(base * Math.max(1, burning ? quota.pace - 1 : 1)), basis: "low" };
   return { usd: round3(base * (quota.pace - 1)), basis: "burning" };
+}
+var RESET_TOLERANCE_MS = 2 * 6e4;
+var windowKey = (window, index) => window.id ?? `${window.label ?? "?"}#${window.windowMinutes ?? index}`;
+var hhmm = (at) => new Date(at).toISOString().slice(11, 16);
+function earlyResetOf(provider, key, previous, next, now) {
+  if (previous.resetsAt === null || now >= previous.resetsAt - RESET_TOLERANCE_MS) return null;
+  const drop = previous.usedPercent - next.usedPercent;
+  if (drop <= 0) return null;
+  if (drop < Math.max(5, previous.usedPercent / 2) && !(next.usedPercent <= 5 && previous.usedPercent > 5)) return null;
+  return {
+    provider,
+    window: key,
+    usedBefore: previous.usedPercent,
+    usedAfter: next.usedPercent,
+    announcedResetAt: previous.resetsAt,
+    reportedResetAtAfter: next.resetsAt,
+    resetTimeKept: next.resetsAt !== null && Math.abs(next.resetsAt - previous.resetsAt) <= RESET_TOLERANCE_MS
+  };
+}
+var earlyNote = (detail, label2) => `${label2 ?? detail.window} ${detail.usedBefore === null ? "?" : Math.round(detail.usedBefore)}% \u2192 ${detail.usedAfter === null ? "?" : Math.round(detail.usedAfter)}%${detail.announcedResetAt !== null ? ` before ${hhmm(detail.announcedResetAt)} UTC` : ""}${detail.resetTimeKept ? " (old reset time still shown)" : ""}`;
+function limitChanges(previous, next, now) {
+  if (!previous) return [];
+  const changes = [];
+  for (const provider of next.providers) {
+    const before = previous.providers.find((entry) => entry.provider === provider.provider);
+    if (!before || provider.state !== "available" || !provider.fetchedAt || before.fetchedAt !== null && provider.fetchedAt <= before.fetchedAt) continue;
+    const old = new Map(before.windows.map((window, i) => [windowKey(window, i), window]));
+    const early = [];
+    const notes = [];
+    let reset = null, full = null, recovered = null;
+    provider.windows.forEach((window, i) => {
+      const key = windowKey(window, i);
+      const prior = old.get(key);
+      if (window.usedPercent >= 100 && (!prior || prior.usedPercent < 100)) full = window.label ?? "a window";
+      if (!prior || prior.resetsAt === null) return;
+      const detail = earlyResetOf(provider.provider, key, prior, window, now);
+      if (detail) {
+        early.push(detail);
+        notes.push(earlyNote(detail, window.label));
+        return;
+      }
+      const drop = prior.usedPercent - window.usedPercent;
+      if (now >= prior.resetsAt - RESET_TOLERANCE_MS && drop >= 5) reset = `${window.label ?? "window"} reset at ${hhmm(prior.resetsAt)} UTC`;
+      else if (prior.usedPercent >= 100 && window.usedPercent < 100) recovered = `${window.label ?? "window"} has ${Math.round(100 - window.usedPercent)}% room again`;
+    });
+    if (early.length) changes.push({ provider: provider.provider, kind: "early-reset", note: notes.join("; "), early });
+    else if (reset) changes.push({ provider: provider.provider, kind: "reset", note: reset });
+    else if (recovered) changes.push({ provider: provider.provider, kind: "recovered", note: recovered });
+    if (full) changes.push({ provider: provider.provider, kind: "exhausted", note: `${full} at 100%` });
+  }
+  return changes;
+}
+function coreEarlyResets(value) {
+  if (!Array.isArray(value)) return [];
+  const number = (raw) => typeof raw === "number" && Number.isFinite(raw) ? raw : null;
+  const out = [];
+  for (const entry of value.slice(0, 32)) {
+    if (!entry || typeof entry !== "object") continue;
+    const e = entry;
+    if (e.home !== void 0 && e.home !== null) continue;
+    const provider = short(e.provider, 40);
+    const window = short(e.window, 80) ?? short(e.windowId, 80);
+    if (!provider || !/^[a-z0-9-]{1,40}$/u.test(provider)) continue;
+    const announced = number(e.announcedResetAt) ?? number(e.previousResetsAt);
+    const reported = number(e.reportedResetAtAfter) ?? number(e.resetsAt);
+    out.push({
+      provider,
+      window: window ?? "window",
+      usedBefore: number(e.usedBefore) ?? number(e.previousUsedPercent),
+      usedAfter: number(e.usedAfter) ?? number(e.usedPercent),
+      announcedResetAt: announced,
+      reportedResetAtAfter: reported,
+      resetTimeKept: typeof e.resetTimeKept === "boolean" ? e.resetTimeKept : announced !== null && reported !== null && Math.abs(announced - reported) <= RESET_TOLERANCE_MS
+    });
+  }
+  return out;
+}
+function mergeLimits(current, incoming) {
+  if (!current) return incoming;
+  const providers = [...current.providers];
+  for (const entry of incoming.providers) {
+    const at = providers.findIndex((old2) => old2.provider === entry.provider);
+    if (at < 0) {
+      if (providers.length < MAX_LIMIT_PROVIDERS) providers.push(entry);
+      continue;
+    }
+    const old = providers[at];
+    if (entry.fetchedAt === null || old.fetchedAt === null || entry.fetchedAt >= old.fetchedAt || entry.state === "available" && old.state !== "available" && entry.fetchedAt >= old.fetchedAt) providers[at] = entry;
+  }
+  return { receivedAt: incoming.receivedAt, ...incoming.source ? { source: incoming.source } : {}, providers };
+}
+var MONTHS = ["jan", "feb", "mar", "apr", "may", "jun", "jul", "aug", "sep", "oct", "nov", "dec"];
+function clockOf(text6) {
+  const match = /^(\d{1,2})(?::(\d{2}))?\s*([ap]\.?m\.?)?$/iu.exec(text6.trim());
+  if (!match) return null;
+  let h = Number(match[1]);
+  const m = Number(match[2] ?? 0);
+  const half = match[3]?.toLowerCase().replace(/\./gu, "");
+  if (half) {
+    if (h < 1 || h > 12) return null;
+    h = h % 12 + (half === "pm" ? 12 : 0);
+  } else if (!match[2]) return null;
+  return h <= 23 && m <= 59 ? { h, m } : null;
+}
+function localAt(now, clock, day) {
+  const base = new Date(now);
+  const at = new Date(day?.year ?? base.getFullYear(), day ? day.month : base.getMonth(), day ? day.day : base.getDate(), clock.h, clock.m, 0, 0);
+  if (!day && at.getTime() < now - 6e4) at.setDate(at.getDate() + 1);
+  if (day && !day.year && at.getTime() < now - 864e5) at.setFullYear(at.getFullYear() + 1);
+  return at.getTime();
+}
+function resetFromText(lines, now) {
+  const text6 = lines.join("\n").slice(-8e3);
+  const epoch = /usage limit reached\|(\d{10,13})/iu.exec(text6);
+  if (epoch) {
+    const value = Number(epoch[1]);
+    return value < 1e12 ? value * 1e3 : value;
+  }
+  const iso = /(?:reset at|resets at|reset on)\s*(\d{4})-(\d{2})-(\d{2})[ T](\d{2}):(\d{2})(?::(\d{2}))?\s*(Z|[+-]\d{2}:?\d{2})?/iu.exec(text6);
+  if (iso) {
+    const [, y, mo, d, h, mi, sec, zone] = iso;
+    const utc = Date.UTC(Number(y), Number(mo) - 1, Number(d), Number(h), Number(mi), Number(sec ?? 0));
+    if (zone) return utc - (zone === "Z" ? 0 : (zone.startsWith("-") ? -1 : 1) * (Number(zone.slice(1, 3)) * 60 + Number(zone.slice(-2))) * 6e4);
+    const fits = [utc - 8 * 36e5, utc].filter((at) => at > now - 6e4 && at <= now + 7 * 864e5).sort((a, b) => a - b);
+    return fits[0] ?? null;
+  }
+  const dated = /(?:resets|try again at|reset at)\s+([A-Z][a-z]{2})[a-z]*\.?\s+(\d{1,2})(?:st|nd|rd|th)?,?\s*(?:(\d{4})\s+)?(?:at\s+)?(\d{1,2}(?::\d{2})?\s*[ap]\.?m\.?|\d{1,2}:\d{2})/iu.exec(text6);
+  if (dated) {
+    const month = MONTHS.indexOf(dated[1].toLowerCase());
+    const clock = clockOf(dated[4]);
+    if (month >= 0 && clock) return localAt(now, clock, { month, day: Number(dated[2]), ...dated[3] ? { year: Number(dated[3]) } : {} });
+  }
+  const timed = /(?:resets|try again at|reset at|available again at)\s+(\d{1,2}(?::\d{2})?\s*[ap]\.?m\.?|\d{1,2}:\d{2})/iu.exec(text6);
+  if (timed) {
+    const clock = clockOf(timed[1]);
+    if (clock) return localAt(now, clock);
+  }
+  return null;
 }
 
 // src/route/settings.ts
@@ -14423,7 +14565,7 @@ function decide(ctx) {
     let availability = { state: "ready", reason: entry?.signIn === "ok" ? "signed in" : "not checked" };
     if (raw.kind === "subscription" || raw.kind === "cli-default") {
       const limits = ctx.limits?.providers.find((provider) => provider.provider === raw.cli);
-      quota = quotaOf(limits, raw.plan?.reserve ?? DEFAULT_RESERVE, ctx.now);
+      quota = quotaOf(limits, raw.plan?.reserve ?? DEFAULT_RESERVE, ctx.now, ctx.launchesSinceRead?.(raw.cli) ?? 0);
       const price3 = shadowPrice(quota, share, ref);
       cost = price3.usd;
       costBasis = price3.basis;
@@ -14444,6 +14586,8 @@ function decide(ctx) {
         availability = { state: "exhausted", reason: `${used} of ${plan3.allowance} launches used in this ${hours} h window` };
         cost = null;
       } else estimate2 = { kind: "launches", used, allowance: plan3.allowance, windowHours: hours };
+    } else if (raw.kind === "account" && raw.row?.quota?.state === "exhausted" && (raw.row.quota.resetsAt === null || raw.row.quota.resetsAt > ctx.now)) {
+      availability = { state: "exhausted", reason: `the account's quota is used up${raw.row.quota.note ? ` (${raw.row.quota.note})` : ""}` };
     } else if (raw.kind === "account" && raw.endpoint && isLocalHost(raw.endpoint)) {
       cost = 0;
       costBasis = "local";
@@ -14460,6 +14604,7 @@ function decide(ctx) {
         estimate2 = { kind: "flat" };
       }
     }
+    if (raw.kind === "account" && availability.state === "ready" && raw.row?.quota?.state === "presumed-reset") availability = { state: "presumed-reset", reason: raw.row.quota.note || "its quota has probably reset" };
     const cooling = ctx.cooldown(raw.signIn);
     if (cooling && cooling.until > ctx.now) availability = { state: "cooldown", reason: cooling.reason };
     const maxParallel = raw.plan?.maxParallel ?? (raw.kind === "cli-default" ? DEFAULT_MAX_PARALLEL : Infinity);
@@ -14929,6 +15074,8 @@ var MATCH_MS = 3 * 6e4;
 var QUOTA_COOLDOWN_MS = 3e5;
 var MAX_COOLDOWN_MS = 24 * 36e5;
 var WRITE_DELAY_MS2 = 150;
+var MAX_QUOTA_EVENTS = 20;
+var RECOVERED_PERCENT = 20;
 var KEEP_MS = 30 * 6e4;
 function digestOf(providers, rows) {
   const clis = providers.list.filter((entry) => entry.available !== false && entry.installed !== false).map((entry) => `${entry.id}${entry.signIn && entry.signIn !== "unknown" ? `:${entry.signIn}` : ""}`);
@@ -14987,18 +15134,37 @@ function accountRowsFrom(input) {
     if (typeof model !== "string" || !model || model.length > 200 || typeof endpoint !== "string" || !/^[A-Za-z0-9.:[\]-]{1,120}$/u.test(endpoint) || typeof state !== "string" || state.length > 40) continue;
     const options = isRecord10(candidate.launchOptions) && isRecord10(candidate.launchOptions["canvastty-accounts"]) ? candidate.launchOptions["canvastty-accounts"] : null;
     const launch = options && options.account === accountId ? { "canvastty-accounts": { account: accountId, effort: typeof options.effort === "string" && /^[a-z]{1,12}$/u.test(options.effort) ? options.effort : "default", trustFolder: false } } : void 0;
+    const quota = accountQuotaFrom(candidate.quota);
     rows.push({
       provider,
       accountId,
       model,
       endpoint,
       state,
+      ...quota ? { quota } : {},
       ...typeof candidate.account === "string" ? { account: clean3(candidate.account, 60) } : {},
       ...typeof candidate.reason === "string" ? { reason: clean3(candidate.reason, 160) } : {},
       ...launch ? { launchOptions: launch } : {}
     });
   }
   return rows;
+}
+function accountQuotaFrom(value) {
+  if (!isRecord10(value)) return void 0;
+  const states = ["ok", "low", "exhausted", "presumed-reset", "unknown", "stale"];
+  const state = states.find((entry) => entry === value.state);
+  if (!state) return void 0;
+  const time2 = (raw) => typeof raw === "string" && raw.length <= 40 && Number.isFinite(Date.parse(raw)) ? Date.parse(raw) : null;
+  const percent2 = typeof value.remainingPercent === "number" && Number.isFinite(value.remainingPercent) ? Math.max(0, Math.min(100, value.remainingPercent)) : null;
+  return {
+    state,
+    remainingPercent: percent2,
+    resetsAt: time2(value.resetsAt),
+    observedAt: time2(value.observedAt),
+    source: clean3(value.source, 40) || null,
+    confidence: value.confidence === "exact" || value.confidence === "estimated" ? value.confidence : "none",
+    note: clean3(value.note, 160)
+  };
 }
 var optionRecord = (c, decision, now) => ({
   key: c.key,
@@ -15030,6 +15196,9 @@ var RouteService = class {
   now;
   random;
   cooldowns = /* @__PURE__ */ new Map();
+  /** Exhaustions, resets (early ones too) and recoveries seen in reads and outcomes (for the page and the log). */
+  quotaEvents = [];
+  limitsTimer = null;
   /** Routed children running now, by sign-in key; and each child's sign-in. */
   live = /* @__PURE__ */ new Map();
   childSignIn = /* @__PURE__ */ new Map();
@@ -15056,6 +15225,15 @@ var RouteService = class {
       saved = null;
     }
     this.records = new RouteRecords(saved, (list) => this.write(list));
+    try {
+      const kept = JSON.parse(readFileSync8(join15(this.dir, "limits.json"), "utf8"));
+      const parsed = typeof kept.receivedAt === "number" ? parseLimits(kept.snapshot, kept.receivedAt) : null;
+      if (parsed) this.limits = { ...parsed, source: "saved" };
+      if (Array.isArray(kept.events)) for (const event of kept.events.slice(-MAX_QUOTA_EVENTS)) {
+        if (isRecord10(event) && typeof event.at === "number" && typeof event.provider === "string" && typeof event.kind === "string" && typeof event.note === "string" && ["early-reset", "reset", "exhausted", "recovered", "limit-exit"].includes(event.kind)) this.quotaEvents.push({ at: event.at, provider: clean3(event.provider, 40), kind: event.kind, note: clean3(event.note, 400) });
+      }
+    } catch {
+    }
   }
   loaded(saved) {
     this.settings = normalizeRouteSettings(saved);
@@ -15114,6 +15292,19 @@ var RouteService = class {
   busy(signIn) {
     return this.live.get(signIn)?.size ?? 0;
   }
+  /** When a route was last decided (for the limits feed: read more often while routing is used). */
+  lastRouteAt() {
+    return this.records.all().at(-1)?.at ?? null;
+  }
+  /** Routed launches on `cli`'s own sign-in (subscription or default) since its limit windows were read. */
+  launchesSinceRead(cli) {
+    const read2 = this.limits?.providers.find((entry) => entry.provider === cli)?.fetchedAt;
+    if (!read2) return 0;
+    return this.records.all().filter((record4) => {
+      const option = record4.spawned ? record4.options[record4.spawned.option] : void 0;
+      return !!option && record4.spawned.at >= read2 && option.cli === cli && (option.kind === "subscription" || option.kind === "cli-default");
+    }).length;
+  }
   launches(planId, windowMs) {
     const since = this.now() - windowMs;
     return this.records.all().filter((record4) => record4.spawned && record4.spawned.at >= since && record4.options[record4.spawned.option]?.signIn === `plan:${planId}`).length;
@@ -15138,6 +15329,7 @@ var RouteService = class {
     const source = decision ? "jev" : "rules";
     const view = turnView(decision ?? { difficulty: ruleDifficulty(task), strong: false }, source, task, { role: "subagent" });
     const { providers, accountRows } = this.inputsFor(caller.id, input);
+    this.accountQuotaSeen(accountRows);
     if (accountRows.length) this.accountsSeen = { at: this.now(), rows: accountRows.map(({ launchOptions: _drop, ...row }) => row) };
     const cardClass = this.options.cardClass(caller.id);
     const { catalog, index } = this.options.catalog();
@@ -15172,6 +15364,7 @@ var RouteService = class {
         return c && c.until > now ? c : null;
       },
       stats,
+      launchesSinceRead: (cli) => this.launchesSinceRead(cli),
       tokenFactor: (identity) => this.records.tokenFactor(identity, (level) => TASK_TOKENS[level].input + TASK_TOKENS[level].output),
       prefer: clean3(input.prefer, 200) || null,
       orchestrate: input.orchestrate === true,
@@ -15208,6 +15401,7 @@ var RouteService = class {
         const c = this.cooldowns.get(key);
         return c && c.until > now ? c : null;
       },
+      launchesSinceRead: (id) => this.launchesSinceRead(id),
       stats: this.records.routeStats(),
       prefer: cli,
       orchestrate,
@@ -15344,28 +15538,133 @@ ${JSON.stringify({
     const result = classifyOutcome(status === "timeout" ? "failed" : status, strings2(input.exitLines, 40, 400));
     const ok = typeof input.ok === "boolean" ? input.ok && result === "done" : void 0;
     const tokens3 = typeof input.tokens === "number" && Number.isInteger(input.tokens) && input.tokens > 0 && input.tokens <= 1e8 ? input.tokens : void 0;
-    this.records.setOutcome(record4, result, "orchestrator", this.now(), ok, tokens3);
+    const now = this.now();
+    this.records.setOutcome(record4, result, "orchestrator", now, ok, tokens3);
     const option = record4.options[record4.spawned?.option ?? 0];
-    if (result === "limit" && option) this.cool(option);
-    return { content: `Recorded ${result}${result === "limit" ? `: ${option?.label ?? "that route"} rests for a while and route picks another one` : ""}.` };
+    if (result === "limit" && option) this.cool(option, resetFromText(strings2(input.exitLines, 40, 400), now));
+    const resting = option ? this.cooldowns.get(option.signIn) : void 0;
+    if (result === "done" && option && resting && resting.until > now && record4.spawned && record4.spawned.at >= (resting.at ?? 0)) {
+      this.cooldowns.delete(option.signIn);
+      this.event({ at: now, provider: option.cli, kind: "recovered", note: `${option.label} finished a task while resting after a limit (until ${new Date(resting.until).toISOString().slice(11, 16)} UTC): early reset` });
+    }
+    return { content: `Recorded ${result}${result === "limit" ? `: ${option?.label ?? "that route"} rests ${this.cooldowns.get(option?.signIn ?? "")?.reason.replace(/^it hit a usage limit; resting /u, "") ?? "for a while"} and route picks another one` : ""}.` };
   }
-  /** A quota exit: the route rests until its window resets (when known, ≤ 24 h) or for 5 min. */
-  cool(option) {
+  /**
+   * A quota exit: the route rests until the reset its exit message names, else its window's reset (when known), else
+   * 5 min; at most 24 h. A read showing room, or a task finished on it, ends the rest early.
+   */
+  cool(option, stated = null) {
     const now = this.now();
     const quota = option.kind === "subscription" || option.kind === "cli-default" ? this.limits?.providers.find((entry) => entry.provider === option.cli) : void 0;
-    const reset = quota?.windows.map((window) => window.resetsAt).filter((at) => at !== null && at > now).sort((a, b) => a - b)[0];
+    const windowReset = quota?.windows.map((window) => window.resetsAt).filter((at) => at !== null && at > now).sort((a, b) => a - b)[0];
+    const reset = stated !== null && stated > now ? stated : windowReset;
     const until = reset !== void 0 && reset - now <= MAX_COOLDOWN_MS ? reset : now + QUOTA_COOLDOWN_MS;
-    this.cooldowns.set(option.signIn, { until, reason: `it hit a usage limit; resting until ${new Date(until).toISOString().slice(11, 16)} UTC` });
+    this.cooldowns.set(option.signIn, { until, at: now, reason: `it hit a usage limit; resting until ${new Date(until).toISOString().slice(11, 16)} UTC` });
+    this.event({ at: now, provider: option.cli, kind: "limit-exit", note: `${option.label}: a child stopped at a usage limit; resting until ${new Date(until).toISOString().slice(11, 16)} UTC${stated !== null ? " (time from its message)" : ""}` });
+  }
+  /** Ends the rests of a CLI's own sign-in routes (its subscription plans and its default) after a reset. */
+  endRests(cli, why) {
+    const now = this.now();
+    const keys = /* @__PURE__ */ new Set([`cli:${cli}`, ...this.settings.plans.filter((plan3) => plan3.cli === cli && plan3.kind === "subscription").map((plan3) => `plan:${plan3.id}`)]);
+    for (const [key, value] of this.cooldowns) {
+      if (!keys.has(key) || value.until <= now) continue;
+      this.cooldowns.delete(key);
+      this.options.host.log("info", `route: ${key} rests no more (${why})`);
+    }
+  }
+  /** Accounts' quota on list_routes rows: a rested account that Accounts read with room since the rest began is free. */
+  accountQuotaSeen(rows) {
+    const now = this.now();
+    for (const row of rows) {
+      const rest = this.cooldowns.get(`account:${row.accountId}`);
+      if (!rest || rest.until <= now || !row.quota || row.quota.observedAt === null || row.quota.observedAt <= (rest.at ?? now)) continue;
+      if (row.quota.state !== "ok" && row.quota.state !== "low") continue;
+      this.cooldowns.delete(`account:${row.accountId}`);
+      this.event({ at: now, provider: row.provider, kind: "early-reset", note: `account ${row.accountId}: Accounts read room again before ${new Date(rest.until).toISOString().slice(11, 16)} UTC` });
+    }
+  }
+  event(event) {
+    this.quotaEvents.push(event);
+    if (this.quotaEvents.length > MAX_QUOTA_EVENTS) this.quotaEvents.splice(0, this.quotaEvents.length - MAX_QUOTA_EVENTS);
+    this.options.host.log(event.kind === "exhausted" || event.kind === "limit-exit" ? "warn" : "info", `quota ${event.provider}: ${event.kind === "early-reset" ? "early reset" : event.kind} (${event.note})`);
+    this.saveLimits();
   }
   // -------------------------------------------------------------------------------------------------------------
   // The settings page
   // -------------------------------------------------------------------------------------------------------------
-  /** The page forwards CanvasTTY's `limits.get` answer; only the window fields are kept. */
-  receiveLimits(value) {
-    const parsed = parseLimits(value, this.now());
-    if (!parsed) return { ok: false, providers: 0 };
-    this.limits = parsed;
-    return { ok: true, providers: parsed.providers.length };
+  /**
+   * CanvasTTY's `limits.get` answer, read by this service (`core`), pushed by the core (`core-push`, with its own
+   * early-reset flag for some providers), or forwarded by the page (`page`); only the window fields are kept, the newer
+   * read per provider wins, and what changed (an early reset, a reset, an exhaustion) is acted on at once.
+   */
+  receiveLimits(value, source = "page", hint = {}) {
+    const now = this.now();
+    const parsed = parseLimits(value, now);
+    if (!parsed) return { ok: false, providers: 0, changes: [] };
+    const previous = this.limits;
+    this.limits = mergeLimits(previous, { ...parsed, source });
+    const changes = limitChanges(previous, this.limits, now);
+    for (const detail of hint.earlyReset ?? []) {
+      let change = changes.find((entry) => entry.provider === detail.provider && entry.kind === "early-reset");
+      if (!change) {
+        const index = changes.findIndex((entry) => entry.provider === detail.provider && (entry.kind === "reset" || entry.kind === "recovered"));
+        if (index >= 0) changes.splice(index, 1);
+        change = { provider: detail.provider, kind: "early-reset", note: "", early: [] };
+        changes.push(change);
+      }
+      if (!change.early.some((entry) => entry.window === detail.window)) {
+        change.early.push(detail);
+        change.note = [change.note, `${earlyNote(detail)} (CanvasTTY)`].filter(Boolean).join("; ");
+      }
+    }
+    for (const change of changes) {
+      if (change.kind === "early-reset" || change.kind === "reset") this.endRests(change.provider, change.kind === "early-reset" ? `early reset: ${change.note}` : change.note);
+      this.event({ at: now, provider: change.provider, kind: change.kind, note: change.note, ...change.early?.length ? { early: change.early } : {} });
+    }
+    for (const entry of parsed.providers) {
+      if (entry.state !== "available" || !entry.fetchedAt) continue;
+      const quota = quotaOf(entry, 0, now);
+      if (quota.state !== "known" || (quota.headroom ?? 0) < RECOVERED_PERCENT) continue;
+      const rested = [...this.cooldowns].filter(([key, rest]) => rest.until > now && (rest.at ?? now) < entry.fetchedAt && (key === `cli:${entry.provider}` || this.settings.plans.some((plan3) => plan3.cli === entry.provider && `plan:${plan3.id}` === key)));
+      if (rested.length) {
+        for (const [key] of rested) this.cooldowns.delete(key);
+        this.event({ at: now, provider: entry.provider, kind: "recovered", note: `a read shows ${Math.round(quota.headroom)}% left before the rest ended (${rested.map(([key]) => key).join(", ")}): early reset` });
+      }
+    }
+    this.saveLimits();
+    return { ok: true, providers: parsed.providers.length, changes };
+  }
+  /** The next time the service's own reader should read: soon after a predicted reset or while a route rests. */
+  limitsDueIn(now = this.now()) {
+    const resets = (this.limits?.providers ?? []).flatMap((entry) => entry.windows.map((window) => window.resetsAt)).filter((at) => at !== null && at > now);
+    const presumed = (this.limits?.providers ?? []).some((entry) => entry.windows.some((window) => window.resetsAt !== null && window.resetsAt <= now && entry.fetchedAt !== null && entry.fetchedAt < window.resetsAt));
+    return { resetSoon: resets.length ? Math.min(...resets) : null, resting: [...this.cooldowns.values()].some((rest) => rest.until > now), presumed };
+  }
+  saveLimits() {
+    this.limitsTimer ??= setTimeout(() => {
+      this.limitsTimer = null;
+      void this.flushLimits();
+    }, WRITE_DELAY_MS2);
+    this.limitsTimer.unref?.();
+  }
+  flushLimits() {
+    if (this.limitsTimer) {
+      clearTimeout(this.limitsTimer);
+      this.limitsTimer = null;
+    }
+    const limits = this.limits;
+    const json = JSON.stringify({ receivedAt: limits?.receivedAt ?? this.now(), snapshot: { providers: limits?.providers ?? [] }, events: this.quotaEvents });
+    this.writing = this.writing.then(async () => {
+      try {
+        await mkdir5(this.dir, { recursive: true, mode: 448 });
+        const path = join15(this.dir, "limits.json");
+        await writeFile5(`${path}.tmp`, json, { mode: 384 });
+        await rename3(`${path}.tmp`, path);
+      } catch (error) {
+        this.options.host.log("warn", `route: could not save limits (${error instanceof Error ? error.message.slice(0, 120) : "error"})`);
+      }
+    });
+    return this.writing;
   }
   feedback(id, ok) {
     const record4 = this.records.get(id);
@@ -15399,11 +15698,12 @@ ${JSON.stringify({
       plans: this.settings.plans.map((plan3) => ({
         id: plan3.id,
         models: plan3.models.map((model) => ({ model, ...resolveModel(plan3.cli, model, this.settings.aliases, known) })),
-        quota: plan3.kind === "subscription" ? quotaOf(this.limits?.providers.find((entry) => entry.provider === plan3.cli), plan3.reserve, now) : null,
+        quota: plan3.kind === "subscription" ? quotaOf(this.limits?.providers.find((entry) => entry.provider === plan3.cli), plan3.reserve, now, this.launchesSinceRead(plan3.cli)) : null,
         running: this.busy(`plan:${plan3.id}`),
         launches: plan3.kind === "coding-plan" ? this.launches(plan3.id, (plan3.windowHours ?? 5) * 36e5) : null
       })),
-      limits: this.limits ? { receivedAt: this.limits.receivedAt, providers: this.limits.providers } : null,
+      limits: this.limits ? { receivedAt: this.limits.receivedAt, source: this.limits.source ?? "page", providers: this.limits.providers } : null,
+      quotaEvents: this.quotaEvents.slice(-10),
       accounts: this.accountsSeen,
       cooldowns: [...this.cooldowns].filter(([, value]) => value.until > now).map(([signIn, value]) => ({ signIn, ...value })),
       recent: this.records.recent(30),
@@ -15421,6 +15721,7 @@ ${JSON.stringify({
     this.writeTimer.unref?.();
   }
   flush() {
+    if (this.limitsTimer) void this.flushLimits();
     if (this.writeTimer) {
       clearTimeout(this.writeTimer);
       this.writeTimer = null;
@@ -15440,6 +15741,169 @@ ${JSON.stringify({
       }
     });
     return this.writing;
+  }
+};
+
+// src/route/limitsFeed.ts
+var FEED = Object.freeze({
+  minMs: 3e4,
+  activeMs: 5 * 6e4,
+  idleMs: 15 * 6e4,
+  restingMs: 2 * 6e4,
+  presumedMs: 3e4,
+  afterResetMs: 2e4,
+  nearResetMs: 15 * 6e4,
+  activeWindowMs: 30 * 6e4,
+  failureBaseMs: 6e4,
+  failureMaxMs: 30 * 6e4,
+  /** How often an older core is asked again whether services may read limits. */
+  reprobeMs: 30 * 6e4,
+  jitter: 0.15
+});
+var isRecord11 = (value) => !!value && typeof value === "object" && !Array.isArray(value);
+var errorText = (error) => error instanceof Error ? error.message : String(error);
+var LimitsFeed = class {
+  mode = "probing";
+  /** When the service's own read last succeeded, and the last failure (for the page). */
+  lastReadAt = null;
+  lastError = null;
+  /** `limits.subscribe` succeeded since this service started (the core forgets it on every restart). */
+  subscribed = false;
+  failures = 0;
+  timer = null;
+  reading = null;
+  stopped = false;
+  options;
+  now;
+  random;
+  setTimer;
+  clearTimer;
+  constructor(options) {
+    this.options = options;
+    this.now = options.now ?? Date.now;
+    this.random = options.random ?? Math.random;
+    this.setTimer = options.setTimer ?? ((run, ms) => {
+      const handle = setTimeout(run, ms);
+      handle.unref?.();
+      return handle;
+    });
+    this.clearTimer = options.clearTimer ?? ((handle) => clearTimeout(handle));
+  }
+  /** Asks the core once; from then on reads on the schedule (or re-asks later on an older core). */
+  async start() {
+    await this.read();
+    return this.mode;
+  }
+  stop() {
+    this.stopped = true;
+    if (this.timer !== null) {
+      this.clearTimer(this.timer);
+      this.timer = null;
+    }
+  }
+  /** One read through the core now (shared while one runs); true when it brought windows. */
+  read() {
+    this.reading ??= this.readOnce().finally(() => {
+      this.reading = null;
+      this.schedule();
+    });
+    return this.reading;
+  }
+  /** An older core (no such host method for services) or no permission: the page path stays the only one. */
+  unsupported(error) {
+    if (!/unknown host method|not allowed|does not have the limits:read|permission/iu.test(errorText(error))) return false;
+    if (this.mode !== "page-only") this.options.host.log("info", "limits: this CanvasTTY does not let services read limits; the settings page forwards them while it is open");
+    this.mode = "page-only";
+    this.subscribed = false;
+    this.lastError = null;
+    return true;
+  }
+  async readOnce() {
+    if (!this.subscribed) {
+      let last;
+      try {
+        last = await this.options.host.callHost("limits.subscribe", {});
+      } catch (error) {
+        if (this.unsupported(error)) return false;
+        this.failures++;
+        this.lastError = errorText(error).slice(0, 160);
+        return false;
+      }
+      this.subscribed = true;
+      this.mode = "core";
+      if (isRecord11(last) && last.state === "ready" && last.snapshot) this.options.sink.receiveLimits(last, "core");
+    }
+    let answer;
+    try {
+      answer = await this.options.host.callHost("limits.get", {});
+    } catch (error) {
+      if (this.unsupported(error)) return false;
+      this.failures++;
+      this.lastError = errorText(error).slice(0, 160);
+      return false;
+    }
+    const outer = isRecord11(answer) ? answer : null;
+    if (outer && outer.state !== void 0 && outer.state !== "ready" && !("snapshot" in outer)) {
+      this.mode = "core";
+      this.failures++;
+      this.lastError = `limits not ready (${String(outer.state).slice(0, 30)})`;
+      return false;
+    }
+    const result = this.options.sink.receiveLimits(answer, "core");
+    this.mode = "core";
+    if (!result.ok) {
+      this.failures++;
+      this.lastError = "the core answered limits in an unknown shape";
+      return false;
+    }
+    this.failures = 0;
+    this.lastError = null;
+    this.lastReadAt = this.now();
+    return true;
+  }
+  /**
+   * `canvastty.limits.changed`: `{ state, snapshot, earlyReset, earlyResets: [{ provider, windowId, … }], provider?,
+   * home? }`. A snapshot is taken at once (the providers with an early reset end their rests); without one, the
+   * windows are read now. A change of an account home is not the default login's and is left alone.
+   */
+  changed(params) {
+    if (this.stopped) return;
+    const value = isRecord11(params) ? params : {};
+    if (value.home !== void 0) return;
+    this.mode = "core";
+    this.subscribed = true;
+    const early = coreEarlyResets(value.earlyResets);
+    if (value.snapshot !== void 0) {
+      const result = this.options.sink.receiveLimits(value.snapshot, "core-push", early.length ? { earlyReset: early } : {});
+      if (result.ok) {
+        this.failures = 0;
+        this.lastReadAt = this.now();
+        this.schedule();
+        return;
+      }
+    }
+    void this.read();
+  }
+  /** The delay before the next read, from what is known now. */
+  nextDelay() {
+    const now = this.now();
+    const jitter = (ms) => Math.round(ms * (1 + FEED.jitter * (this.random() * 2 - 1)));
+    if (this.mode === "page-only") return jitter(FEED.reprobeMs);
+    if (this.failures > 0) return jitter(Math.min(FEED.failureMaxMs, FEED.failureBaseMs * 2 ** Math.min(this.failures - 1, 10)));
+    const due = this.options.sink.limitsDueIn(now);
+    const last = this.options.sink.lastRouteAt();
+    let delay = due.presumed ? FEED.presumedMs : due.resting ? FEED.restingMs : last !== null && now - last <= FEED.activeWindowMs ? FEED.activeMs : FEED.idleMs;
+    delay = jitter(delay);
+    if (due.resetSoon !== null && due.resetSoon - now <= FEED.nearResetMs) delay = Math.min(delay, due.resetSoon - now + FEED.afterResetMs + Math.round(this.random() * 1e4));
+    return Math.max(FEED.minMs, delay);
+  }
+  schedule() {
+    if (this.stopped) return;
+    if (this.timer !== null) this.clearTimer(this.timer);
+    this.timer = this.setTimer(() => {
+      this.timer = null;
+      void this.read();
+    }, this.nextDelay());
   }
 };
 
@@ -15635,6 +16099,8 @@ var Assistant = class {
   auto;
   /** Route v2: where a subagent runs (subscriptions, coding plans, model accounts, Auto). */
   routing;
+  /** Limit windows read by this service where the core allows it (else the page forwards them). */
+  limitsFeed;
   /** Each card's effective data class, so a subagent's can be clamped to its parent's. */
   classes = /* @__PURE__ */ new Map();
   /** Each card's triage advice, so its badge can be written again in another language. */
@@ -15733,6 +16199,7 @@ var Assistant = class {
       dataClassMode: () => this.settings.dataClassMode,
       ...options.now ? { now: options.now } : {}
     });
+    this.limitsFeed = new LimitsFeed({ host: options.host, sink: this.routing, ...options.now ? { now: options.now } : {} });
     this.review = new ReviewService({
       engine: this.engine,
       settings: () => this.settings,
@@ -16306,6 +16773,7 @@ serve({
   exit: (code) => {
     const done = () => process.exit(code);
     setTimeout(done, 500).unref();
+    assistant?.limitsFeed.stop();
     void Promise.allSettled([assistant?.harness.flushWrites(), assistant?.routing.flush(), assistant?.auto.stop()]).finally(done);
   },
   onInitialize: async (params, host) => {
@@ -16327,6 +16795,7 @@ serve({
     });
     await assistant.auto.resume();
     resolveReady(assistant);
+    void assistant.limitsFeed.start().catch((error) => host.log("warn", `limits: ${error instanceof Error ? error.message : String(error)}`));
     if (failed.length) retryStored(host, failed, (stored) => assistant?.storageRecovered(stored));
     try {
       const answer = await host.callHost("sessions.subscribe", {});
@@ -16338,6 +16807,10 @@ serve({
   notifications: {
     "canvastty.sessions.event": (params) => {
       assistant?.sessionEvent(params);
+    },
+    // A newer core pushes changed limit windows (and early resets) to services that may read them.
+    "canvastty.limits.changed": (params) => {
+      assistant?.limitsFeed.changed(params);
     }
   },
   methods: {
@@ -16370,12 +16843,19 @@ serve({
     "auto.test": async (params) => (await ready).auto.test(str2(params.upstreamId)),
     "auto.refreshCatalog": async () => (await ready).auto.refreshCatalog(),
     // "Where agents run" on the decision models page (route v2).
-    "route.state": async () => (await ready).routing.state(),
+    "route.state": async () => {
+      const a = await ready;
+      return { ...a.routing.state(), feed: { mode: a.limitsFeed.mode, lastReadAt: a.limitsFeed.lastReadAt, lastError: a.limitsFeed.lastError } };
+    },
     "route.save": async (params) => {
       const a = await ready;
       return a.routing.save(params.settings, a.pageLocale);
     },
-    "route.limits": async (params) => (await ready).routing.receiveLimits(params.snapshot),
+    "route.limits": async (params) => {
+      const a = await ready;
+      const answer = a.routing.receiveLimits(params.snapshot, "page");
+      return { ok: answer.ok, providers: answer.providers, feed: a.limitsFeed.mode };
+    },
     "route.feedback": async (params) => (await ready).routing.feedback(str2(params.id), params.ok === true),
     // The Flow preview and Task board cards.
     "harness.view": async () => (await ready).harness.view(),

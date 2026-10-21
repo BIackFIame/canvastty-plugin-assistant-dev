@@ -1,0 +1,9 @@
+{
+  "claude-statusline": ["5-hour limit reached ∙ resets 3pm"],
+  "claude-weekly": ["Weekly limit reached ∙ resets Oct 20, 11am"],
+  "claude-epoch": ["Claude AI usage limit reached|1792344600"],
+  "codex-today": ["■ You’ve hit your usage limit. Upgrade to Pro (https://chatgpt.com/explore/pro), visit https://chatgpt.com/settings/usage to purchase more credits or try again at 3:05 PM."],
+  "codex-dated": ["■ You’ve hit your usage limit. To get more access now, send a request to your admin or try again at Oct 22nd, 2026 3:05 PM."],
+  "zai-1308": ["API Error: 429 {\"error\":{\"code\":\"1308\",\"message\":\"Usage limit reached for 5 hour. Your limit will reset at 2026-10-18 22:30:00\"}}"],
+  "no-time": ["You’ve hit your usage limit. Try again later."]
+}
