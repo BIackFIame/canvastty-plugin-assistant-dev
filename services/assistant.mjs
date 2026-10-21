@@ -13944,24 +13944,29 @@ function shadowPrice(quota, share, ref) {
   return { usd: round3(base * (quota.pace - 1)), basis: "burning" };
 }
 var RESET_TOLERANCE_MS = 2 * 6e4;
+var EARLY_RESET_MIN_DROP = 5;
+var EARLY_RESET_NEAR_ZERO = 5;
+var EARLY_RESET_NOISE = 2;
+var EARLY_RESET_GRACE_MS = 5 * 6e4;
+var SAME_RESET_TIME_MS = 6e4;
 var windowKey = (window, index) => window.id ?? `${window.label ?? "?"}#${window.windowMinutes ?? index}`;
 var hhmm = (at) => new Date(at).toISOString().slice(11, 16);
 function earlyResetOf(provider, key, previous, next, now) {
-  if (previous.resetsAt === null || now >= previous.resetsAt - RESET_TOLERANCE_MS) return null;
+  if (previous.resetsAt === null || now >= previous.resetsAt - EARLY_RESET_GRACE_MS) return null;
   const drop = previous.usedPercent - next.usedPercent;
-  if (drop <= 0) return null;
-  if (drop < Math.max(5, previous.usedPercent / 2) && !(next.usedPercent <= 5 && previous.usedPercent > 5)) return null;
+  if (!(drop >= Math.max(EARLY_RESET_MIN_DROP, previous.usedPercent / 2) || next.usedPercent <= EARLY_RESET_NEAR_ZERO && drop > EARLY_RESET_NOISE)) return null;
   return {
     provider,
     window: key,
+    label: next.label ?? null,
     usedBefore: previous.usedPercent,
     usedAfter: next.usedPercent,
     announcedResetAt: previous.resetsAt,
     reportedResetAtAfter: next.resetsAt,
-    resetTimeKept: next.resetsAt !== null && Math.abs(next.resetsAt - previous.resetsAt) <= RESET_TOLERANCE_MS
+    resetTimeKept: next.resetsAt !== null && Math.abs(next.resetsAt - previous.resetsAt) <= SAME_RESET_TIME_MS
   };
 }
-var earlyNote = (detail, label2) => `${label2 ?? detail.window} ${detail.usedBefore === null ? "?" : Math.round(detail.usedBefore)}% \u2192 ${detail.usedAfter === null ? "?" : Math.round(detail.usedAfter)}%${detail.announcedResetAt !== null ? ` before ${hhmm(detail.announcedResetAt)} UTC` : ""}${detail.resetTimeKept ? " (old reset time still shown)" : ""}`;
+var earlyNote = (detail, label2) => `${label2 ?? detail.label ?? detail.window} ${detail.usedBefore === null ? "?" : Math.round(detail.usedBefore)}% \u2192 ${detail.usedAfter === null ? "?" : Math.round(detail.usedAfter)}%${detail.announcedResetAt !== null ? ` before ${hhmm(detail.announcedResetAt)} UTC` : ""}${detail.resetTimeKept ? " (old reset time still shown)" : ""}`;
 function limitChanges(previous, next, now) {
   if (!previous) return [];
   const changes = [];
@@ -14003,18 +14008,18 @@ function coreEarlyResets(value) {
     const e = entry;
     if (e.home !== void 0 && e.home !== null) continue;
     const provider = short(e.provider, 40);
-    const window = short(e.window, 80) ?? short(e.windowId, 80);
     if (!provider || !/^[a-z0-9-]{1,40}$/u.test(provider)) continue;
     const announced = number(e.announcedResetAt) ?? number(e.previousResetsAt);
-    const reported = number(e.reportedResetAtAfter) ?? number(e.resetsAt);
+    const reported = "reportedResetAtAfter" in e ? number(e.reportedResetAtAfter) : number(e.resetsAt);
     out.push({
       provider,
-      window: window ?? "window",
+      window: short(e.windowId, 80) ?? short(e.window, 80) ?? "window",
+      label: short(e.windowLabel, 40),
       usedBefore: number(e.usedBefore) ?? number(e.previousUsedPercent),
       usedAfter: number(e.usedAfter) ?? number(e.usedPercent),
       announcedResetAt: announced,
       reportedResetAtAfter: reported,
-      resetTimeKept: typeof e.resetTimeKept === "boolean" ? e.resetTimeKept : announced !== null && reported !== null && Math.abs(announced - reported) <= RESET_TOLERANCE_MS
+      resetTimeKept: typeof e.resetTimeKept === "boolean" ? e.resetTimeKept : announced !== null && reported !== null && Math.abs(announced - reported) <= SAME_RESET_TIME_MS
     });
   }
   return out;
