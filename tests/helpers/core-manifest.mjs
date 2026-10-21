@@ -25,13 +25,13 @@ export function withoutPolicy(manifest) {
 }
 
 /**
- * The core-all keys (shared reads `uses`, the `providers:read` and `usage:read` permissions): an older core refuses
+ * The core-all keys (shared reads `uses`, the `providers:read`, `usage:read` and `accounts:broker` permissions): an older core refuses
  * them. Every read behind them is feature-detected at run time, so the tests use the manifest without them there,
  * which is exactly how the service then runs (orchestrators' rows, ~2 % per launch).
  */
 export function withoutCoreAllKeys(manifest) {
   const { uses: _uses, ...rest } = manifest;
-  return { ...rest, permissions: manifest.permissions.filter(permission => permission !== 'providers:read' && permission !== 'usage:read') };
+  return { ...rest, permissions: manifest.permissions.filter(permission => permission !== 'providers:read' && permission !== 'usage:read' && permission !== 'accounts:broker') };
 }
 
 const declaresPolicy = manifest => manifest.services.some(service => service.launch?.policy !== undefined);
@@ -51,7 +51,7 @@ export function manifestForCore(validatePluginManifest, manifest) {
       const message = String(error?.message);
       if (localized && /unknown field: [A-Za-z]+\.(?:ru|en|zh-CN)\b/u.test(message)) { current = withoutLocalizedKeys(current); localized = false; continue; }
       if (policy && /launch policy/iu.test(message)) { current = withoutPolicy(current); policy = false; continue; }
-      if (coreAll && /unknown field: uses\b|permission[^.]*(providers:read|usage:read)|(providers:read|usage:read)/iu.test(message)) { current = withoutCoreAllKeys(current); coreAll = false; continue; }
+      if (coreAll && /unknown field: uses\b|permission[^.]*(providers:read|usage:read|accounts:broker)|(providers:read|usage:read|accounts:broker)/iu.test(message)) { current = withoutCoreAllKeys(current); coreAll = false; continue; }
       throw error;
     }
   }

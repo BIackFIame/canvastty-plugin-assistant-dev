@@ -168,6 +168,13 @@ model account (an account and Auto on one launch are refused: both configure Ope
   one decision per turn, not per model call. Each decision is logged with type, difficulty, model, effort, score and
   its source, price, a reason code and the trade-off (the best-scored model, its score and price, the points allowed)
   — no text.
+- **Your plan accounts from Accounts** (CanvasTTY with brokered requests; feature-detected, an older CanvasTTY lists
+  none): on the Decision models page, *Accounts from other extensions* lists the accounts CanvasTTY lets Auto use. Mark
+  an account in Accounts, allow Assistant on it under Settings → Agents → Extension native code → CanvasTTY Accounts,
+  then **Use in Auto** and choose its trust. Each turn on it goes through CanvasTTY, which adds the account's key: Auto
+  never sees it. A flat-rate plan costs nothing per token in Auto's caps; a plan used up (Accounts refuses), a 429 or
+  a missing grant fails over and cools down like any upstream. OpenRouter is never one of them. Only
+  OpenAI-compatible accounts (Chat Completions) are used; an Anthropic-API account is listed but not used.
 - **Catalog**: models.dev (models, prices, limits), Artificial Analysis and LiveBench (measured scores per exact model
   and effort) and OpenRouter's model list, read from fixed HTTPS addresses (no task text, no key), cached on disk and
   refreshed in the background (weekly; OpenRouter's list daily) while an upstream is on, or with **Refresh now**. A
