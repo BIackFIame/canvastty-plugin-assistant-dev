@@ -18,6 +18,7 @@ import { Bindings, expectedOf, isBoundValue, isTopValue, launchAsk, mismatchOf }
 import { AUTOPILOT_STRINGS } from '../src/autopilot/i18n.ts';
 import { DEFAULT_ROUTE_SETTINGS } from '../src/route/settings.ts';
 import { limitsAnswer } from './helpers/route-fixtures.mjs';
+import { manifestForCore } from './helpers/core-manifest.mjs';
 
 const base = realpathSync(mkdtempSync(join(tmpdir(), 'canvastty-autopilot2-')));
 process.on('exit', () => rmSync(base, { recursive: true, force: true }));
@@ -179,18 +180,24 @@ const accountsContributor = {
 
 async function coreFixture(t, { routing } = {}) {
   const { LaunchPipeline } = await import(join(core, 'src/main/services/LaunchPipeline.ts'));
+  const { validatePluginManifest } = await import(join(core, 'src/main/services/PluginManager.ts'));
+  // The manifest as this core accepts it: the scoped policy, or none at all on a core without the scoped form.
+  const accepted = manifestForCore(validatePluginManifest, manifest);
+  const launch = validatePluginManifest(accepted.manifest).services[0].launch;
   const { TerminalManager } = await import(join(core, 'src/main/services/TerminalManager.ts'));
   const { PluginSessions } = await import(join(core, 'src/main/services/PluginSessions.ts'));
   const consent = { allowed: false };
+  const down = { value: false };
   let sessions = null;
   const { assistant, host } = assistantWith({ routing, sessions: async (method, params) => sessions.handle(ASSISTANT, 'assistant', method, params, manifest.permissions) });
   const seen = [];
   const spawned = [];
   const runsRoot = mkdtempSync(join(base, 'runs-'));
   const pipeline = new LaunchPipeline({
-    contributors: () => [{ pluginId: ASSISTANT, pluginName: 'CanvasTTY Assistant', serviceId: 'assistant', launch: manifest.services[0].launch, secrets: true }, accountsContributor],
+    contributors: () => [{ pluginId: ASSISTANT, pluginName: 'CanvasTTY Assistant', serviceId: 'assistant', launch, secrets: true }, accountsContributor],
     call: async (pluginId, _serviceId, method, params) => {
       seen.push({ pluginId, method, params: structuredClone(params) });
+      if (pluginId === ASSISTANT && down.value) throw new Error('The service is not running.');
       return pluginId === ASSISTANT ? assistant.launch(params) : null;
     },
     secret: async () => null, runsRoot, timeoutMs: 2_000
@@ -208,7 +215,9 @@ async function coreFixture(t, { routing } = {}) {
     return c.status === 'failed' ? { refused: c.failureDetails ?? '' } : { started: spawned.at(-1) };
   };
   const b7 = () => seen.some(entry => entry.params.requested !== undefined);
-  return { assistant, host, terminals, pipeline, spawned, seen, consent, card, settled, outcome, b7, sessions };
+  /** Policy answers reached the Assistant (chosen: false): only with the scoped policy, on a core that has it. */
+  const policed = () => seen.some(entry => entry.pluginId === ASSISTANT && entry.params.chosen === false);
+  return { assistant, host, terminals, pipeline, spawned, seen, consent, card, settled, outcome, b7, sessions, scoped: accepted.policy, policed, down };
 }
 
 const at = { x: 0, y: 0 };
@@ -265,8 +274,9 @@ test('core: an Auto orchestrator\'s subagents match their decision (CLI, model, 
 
   // Phase 1's gap: a child on another CLI that does not name the Assistant (only Accounts) never reached it.
   const unnamed = await child({ provider: 'codex', launchOptions: { [ACCOUNTS]: { account: 'none' } } });
-  if (b7) assert.ok((unnamed.refused ?? '').includes(EN.unrouted), unnamed.refused);
-  else assert.ok(!(unnamed.refused ?? '').includes(EN.unrouted), 'older core: not asked (phase 1)');
+  // Only the scoped policy reaches it; without it (a core without the scoped form) phase 1: not asked.
+  if (b7 && f.scoped) assert.ok((unnamed.refused ?? '').includes(EN.unrouted), unnamed.refused);
+  else assert.ok(!(unnamed.refused ?? '').includes(EN.unrouted), 'no policy: not asked (phase 1)');
 
   // A deep child (orchestrate: true) on Claude; its grandchild on Codex without a route is refused, with one it starts.
   const deepSpawn = await route({ prefer: 'claude', orchestrate: true });
@@ -275,14 +285,21 @@ test('core: an Auto orchestrator\'s subagents match their decision (CLI, model, 
   assert.ok(deep.started, deep.refused);
   assert.equal(f.assistant.bindings.isAuto(deep.id), true);
   const grand = await child({ provider: 'codex', launchOptions: { [ACCOUNTS]: { account: 'none' } } }, { parent: deep.id });
-  if (b7) assert.ok((grand.refused ?? '').includes(EN.unrouted), grand.refused);
+  if (b7 && f.scoped) assert.ok((grand.refused ?? '').includes(EN.unrouted), grand.refused);
   const deepCaller = { ...caller, id: deep.id };
   const grandRoute = lastJson(await f.assistant.tool('pick_route', deepCaller, { task: 'Write the tests', providers, accountRoutes, prefer: 'codex' })).spawn;
   const routedGrand = await child(grandRoute, { parent: deep.id });
   assert.ok(routedGrand.started, routedGrand.refused);
   // A leaf child (no orchestrate): its own subagent on another CLI is refused where the core shows every launch.
   const leafGrand = await child({ provider: 'codex', launchOptions: { [ACCOUNTS]: { account: 'none' } } }, { parent: ok.id });
-  if (b7) assert.ok((leafGrand.refused ?? '').includes(EN.leaf), leafGrand.refused);
+  if (b7 && f.scoped) assert.ok((leafGrand.refused ?? '').includes(EN.leaf), leafGrand.refused);
+  // The depth rule on the leaf's own CLI: its subagent inherits the Assistant's options (as spawn_agent passes them),
+  // so it is checked without a policy.
+  const inherited = f.terminals.launchOptionsOf?.(ok.id);
+  if (inherited) {
+    const leafSame = await child({ provider: 'codex', launchOptions: inherited }, { parent: ok.id });
+    if (b7) assert.ok((leafSame.refused ?? '').includes(EN.leaf), leafSame.refused);
+  }
 
   // The person's own launches are never refused, on any CLI, with or without options.
   for (const provider of ['claude', 'codex']) {
@@ -290,6 +307,7 @@ test('core: an Auto orchestrator\'s subagents match their decision (CLI, model, 
     const mine = f.terminals.create({ provider, cwd, profile: 'normal', position: at, role: 'agent' });
     const result = await f.outcome(mine.id, before);
     assert.ok(result.started, result.refused);
+    assert.deepEqual(f.seen.filter(entry => entry.params.sessionId === mine.id).map(entry => [entry.pluginId, entry.params.chosen]), [], 'a launch the person starts never reaches the Assistant\'s policy');
   }
 });
 
@@ -302,8 +320,8 @@ test('core: a Claude Auto orchestrator without a declared plan (no --model): its
   const before = f.spawned.length;
   const child = f.terminals.create({ provider: 'codex', cwd, profile: 'normal', position: at, role: 'subagent', parentSessionId: orch.id });
   const result = await f.outcome(child.id, before);
-  if (f.b7()) assert.ok((result.refused ?? '').includes(EN.unrouted), result.refused);
-  else assert.ok(result.started, 'older core: phase 1, not asked');
+  if (f.b7() && f.scoped) assert.ok((result.refused ?? '').includes(EN.unrouted), result.refused);
+  else assert.ok(result.started, 'no scoped policy on this core: phase 1, not asked');
 });
 
 test('core: "Start with Auto (Jev)" is refused without the person\'s consent and starts a marked orchestrator with a plan with it', { skip: !core && 'set CANVASTTY_REPO to a CanvasTTY checkout' }, async t => {
@@ -348,4 +366,28 @@ test('core: "Start with Auto (Jev)" is refused without the person\'s consent and
   // Turning the consent off: the next start is refused at once.
   f.consent.allowed = false;
   assert.equal((await f.assistant.startAuto({ task, cwd })).code, 'consent');
+});
+
+test('core: with the Assistant\'s service down, a launch the person starts is never held by it; an Auto tree\'s subagent is', { skip: !core && 'set CANVASTTY_REPO to a CanvasTTY checkout' }, async t => {
+  const f = await coreFixture(t);
+  const cwd = project('core-down');
+  const orch = f.terminals.create({ provider: 'claude', cwd, profile: 'normal', position: at, role: 'orchestrator', launchOptions: { [ASSISTANT]: { model: 'auto' } } });
+  await waitFor(() => f.spawned.length === 1);
+  f.down.value = true;
+  for (const provider of ['claude', 'codex']) {
+    const before = f.spawned.length;
+    const mine = f.terminals.create({ provider, cwd, profile: 'normal', position: at, role: 'agent' });
+    const result = await f.outcome(mine.id, before);
+    assert.ok(result.started, `the person's ${provider} launch: ${result.refused}`);
+    const beforeOrch = f.spawned.length;
+    const minesOrch = f.terminals.create({ provider, cwd, profile: 'normal', position: at, role: 'orchestrator' });
+    const orchestrated = await f.outcome(minesOrch.id, beforeOrch);
+    assert.ok(orchestrated.started, `the person's ${provider} orchestrator: ${orchestrated.refused}`);
+  }
+  // A subagent in the Auto tree on another CLI: with the scoped policy the core asks the (down) service and refuses.
+  const before = f.spawned.length;
+  const kid = f.terminals.create({ provider: 'codex', cwd, profile: 'normal', position: at, role: 'subagent', parentSessionId: orch.id });
+  const result = await f.outcome(kid.id, before);
+  if (f.scoped) assert.ok(result.refused, 'held while the service is down');
+  else assert.ok(result.started, 'no policy: phase 1');
 });

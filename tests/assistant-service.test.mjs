@@ -456,7 +456,7 @@ function hostFake(storage = {}, secrets = {}) {
   return host;
 }
 
-test('launch: the Assistant never refuses a launch (YOLO and isolation are CanvasTTY\'s own rules); its launch policy lets everything outside an Auto tree through', async () => {
+test('launch: the Assistant never refuses a launch (YOLO and isolation are CanvasTTY\'s own rules); its scoped launch policy lets everything outside an Auto tree through', async () => {
   const host = hostFake();
   const dataDir = mkdtempSync(join(base, 'data-'));
   // A saved value of the removed option changes nothing, a worktree included (it was counted as isolated).
@@ -474,7 +474,7 @@ test('launch: the Assistant never refuses a launch (YOLO and isolation are Canva
   assert.equal(host.calls.length, 0, 'nothing is called without a task');
   const { readFileSync } = await import('node:fs');
   const manifest = JSON.parse(readFileSync(new URL('../canvastty.plugin.json', import.meta.url), 'utf8'));
-  assert.equal(manifest.services[0].launch.policy, true, 'asked before every launch: the Auto (Jev) tree checks (autopilot.test.mjs)');
+  assert.deepEqual(manifest.services[0].launch.policy, { scope: 'own-trees' }, 'asked only for subagent launches in its own trees, never for a launch the person starts (autopilot-b7b8.test.mjs)');
 });
 
 test('launch triage: the person\'s task feeds review and, when a model answers, a badge and the card\'s strictness', async t => {
