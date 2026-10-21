@@ -19,7 +19,7 @@ import { ruleDifficulty } from '../harness/router.ts';
 import type { DataClass, DataClassMode } from '../shared/settings.ts';
 import { ALIAS_TABLE_AS_OF, BUNDLED_ALIASES, resolveModel } from './aliases.ts';
 import { decide, estimateText, modelText, TASK_TOKENS, whyLine, type AccountRow, type AutoExpectation, type Candidate, type ProviderInfo, type RouteDecision } from './engine.ts';
-import { parseLimits, quotaOf, STALE_MS, type LimitsCache } from './limits.ts';
+import { earlyNote, limitChanges, mergeLimits, parseLimits, quotaOf, resetFromText, STALE_MS, type EarlyResetDetail, type LimitChange, type LimitsCache, type LimitsSource } from './limits.ts';
 import { classifyOutcome, RouteRecords, type OptionRecord, type OutcomeResult, type RouteRecord } from './records.ts';
 import { normalizeRouteSettings, validateRouteSettings, type RouteSettings } from './settings.ts';
 import type { Spawn } from './engine.ts';
@@ -32,6 +32,12 @@ const MATCH_MS = 3 * 60_000;
 const QUOTA_COOLDOWN_MS = 300_000;
 const MAX_COOLDOWN_MS = 24 * 3_600_000;
 const WRITE_DELAY_MS = 150;
+/** Quota events kept for the page (memory and the limits file). */
+const MAX_QUOTA_EVENTS = 20;
+/** A read with at least this much left in every window ends a limit rest before its time. */
+const RECOVERED_PERCENT = 20;
+
+export interface QuotaEvent { at: number; provider: string; kind: LimitChange['kind'] | 'limit-exit'; note: string; early?: EarlyResetDetail[] }
 /** How long an orchestrator's full provider and account lists are kept for later compact calls. */
 const KEEP_MS = 30 * 60_000;
 
@@ -135,14 +141,31 @@ export function accountRowsFrom(input: unknown): AccountRow[] {
     const launch = options && options.account === accountId
       ? { 'canvastty-accounts': { account: accountId, effort: typeof options.effort === 'string' && /^[a-z]{1,12}$/u.test(options.effort) ? options.effort : 'default', trustFolder: false } }
       : undefined;
+    const quota = accountQuotaFrom(candidate.quota);
     rows.push({
       provider, accountId, model, endpoint, state,
+      ...(quota ? { quota } : {}),
       ...(typeof candidate.account === 'string' ? { account: clean(candidate.account, 60) } : {}),
       ...(typeof candidate.reason === 'string' ? { reason: clean(candidate.reason, 160) } : {}),
       ...(launch ? { launchOptions: launch } : {})
     });
   }
   return rows;
+}
+
+/** Accounts' per-route `quota` (canvastty-accounts ≥ the quota reader), only well-typed fields. */
+export function accountQuotaFrom(value: unknown): AccountRow['quota'] | undefined {
+  if (!isRecord(value)) return undefined;
+  const states = ['ok', 'low', 'exhausted', 'presumed-reset', 'unknown', 'stale'] as const;
+  const state = states.find(entry => entry === value.state);
+  if (!state) return undefined;
+  const time = (raw: unknown): number | null => typeof raw === 'string' && raw.length <= 40 && Number.isFinite(Date.parse(raw)) ? Date.parse(raw) : null;
+  const percent = typeof value.remainingPercent === 'number' && Number.isFinite(value.remainingPercent) ? Math.max(0, Math.min(100, value.remainingPercent)) : null;
+  return {
+    state, remainingPercent: percent, resetsAt: time(value.resetsAt), observedAt: time(value.observedAt),
+    source: clean(value.source, 40) || null, confidence: value.confidence === 'exact' || value.confidence === 'estimated' ? value.confidence : 'none',
+    note: clean(value.note, 160)
+  };
 }
 
 const optionRecord = (c: Candidate, decision: RouteDecision, now: number): OptionRecord => ({
@@ -163,7 +186,10 @@ export class RouteService {
   private readonly options: RouteServiceOptions;
   private readonly now: () => number;
   private readonly random: () => number;
-  private readonly cooldowns = new Map<string, { until: number; reason: string }>();
+  private readonly cooldowns = new Map<string, { until: number; reason: string; at?: number }>();
+  /** Exhaustions, resets (early ones too) and recoveries seen in reads and outcomes (for the page and the log). */
+  readonly quotaEvents: QuotaEvent[] = [];
+  private limitsTimer: ReturnType<typeof setTimeout> | null = null;
   /** Routed children running now, by sign-in key; and each child's sign-in. */
   private readonly live = new Map<string, Set<string>>();
   private readonly childSignIn = new Map<string, string>();
@@ -187,6 +213,16 @@ export class RouteService {
     let saved: unknown = null;
     try { saved = JSON.parse(readFileSync(join(this.dir, 'decisions.json'), 'utf8')); } catch { saved = null; }
     this.records = new RouteRecords(saved, list => this.write(list));
+    // The last limit windows, with their read times: after a restart they are as old as they are (STALE_MS applies).
+    try {
+      const kept = JSON.parse(readFileSync(join(this.dir, 'limits.json'), 'utf8')) as { receivedAt?: unknown; snapshot?: unknown; events?: unknown };
+      const parsed = typeof kept.receivedAt === 'number' ? parseLimits(kept.snapshot, kept.receivedAt) : null;
+      if (parsed) this.limits = { ...parsed, source: 'saved' };
+      if (Array.isArray(kept.events)) for (const event of kept.events.slice(-MAX_QUOTA_EVENTS)) {
+        if (isRecord(event) && typeof event.at === 'number' && typeof event.provider === 'string' && typeof event.kind === 'string' && typeof event.note === 'string'
+          && ['early-reset', 'reset', 'exhausted', 'recovered', 'limit-exit'].includes(event.kind)) this.quotaEvents.push({ at: event.at, provider: clean(event.provider, 40), kind: event.kind as QuotaEvent['kind'], note: clean(event.note, 400) });
+      }
+    } catch { /* nothing kept */ }
   }
 
   loaded(saved: unknown): void { this.settings = normalizeRouteSettings(saved); this.readable = true; }
@@ -233,6 +269,19 @@ export class RouteService {
 
   busy(signIn: string): number { return this.live.get(signIn)?.size ?? 0; }
 
+  /** When a route was last decided (for the limits feed: read more often while routing is used). */
+  lastRouteAt(): number | null { return this.records.all().at(-1)?.at ?? null; }
+
+  /** Routed launches on `cli`'s own sign-in (subscription or default) since its limit windows were read. */
+  launchesSinceRead(cli: string): number {
+    const read = this.limits?.providers.find(entry => entry.provider === cli)?.fetchedAt;
+    if (!read) return 0;
+    return this.records.all().filter(record => {
+      const option = record.spawned ? record.options[record.spawned.option] : undefined;
+      return !!option && record.spawned!.at >= read && option.cli === cli && (option.kind === 'subscription' || option.kind === 'cli-default');
+    }).length;
+  }
+
   private launches(planId: string, windowMs: number): number {
     const since = this.now() - windowMs;
     return this.records.all().filter(record => record.spawned && record.spawned.at >= since && record.options[record.spawned.option]?.signIn === `plan:${planId}`).length;
@@ -257,6 +306,7 @@ export class RouteService {
     // The task is a subagent's: the caller being an orchestrator does not make it medium.
     const view = turnView(decision ?? { difficulty: ruleDifficulty(task), strong: false }, source, task, { role: 'subagent' });
     const { providers, accountRows } = this.inputsFor(caller.id, input);
+    this.accountQuotaSeen(accountRows);
     if (accountRows.length) this.accountsSeen = { at: this.now(), rows: accountRows.map(({ launchOptions: _drop, ...row }) => row) };
     const cardClass = this.options.cardClass(caller.id);
     const { catalog, index } = this.options.catalog();
@@ -269,7 +319,7 @@ export class RouteService {
       view, preference: this.options.preference(), settings: this.settings, providers: providers.list, providersGiven: providers.given, accountRows,
       callerProvider: typeof caller.provider === 'string' ? caller.provider : null, cardClass, mode: this.options.dataClassMode(), limits: this.limits,
       catalog, index, auto, now, busy: key => this.busy(key), launches: (id, ms) => this.launches(id, ms),
-      cooldown: key => { const c = this.cooldowns.get(key); return c && c.until > now ? c : null; }, stats,
+      cooldown: key => { const c = this.cooldowns.get(key); return c && c.until > now ? c : null; }, stats, launchesSinceRead: cli => this.launchesSinceRead(cli),
       tokenFactor: identity => this.records.tokenFactor(identity, level => TASK_TOKENS[level].input + TASK_TOKENS[level].output),
       prefer: clean(input.prefer, 200) || null, orchestrate: input.orchestrate === true,
       explore: { roll: this.random(), retired, highRisk: ruleDifficulty(task) === 'hard' }
@@ -290,7 +340,7 @@ export class RouteService {
       providers: [{ id: cli, installed: true, available: true, subagent: true, orchestrator: true }], providersGiven: true, accountRows: [],
       callerProvider: cli, cardClass, mode: this.options.dataClassMode(), limits: this.limits, catalog, index, auto: null, now,
       busy: () => 0, launches: (id, ms) => this.launches(id, ms), cooldown: key => { const c = this.cooldowns.get(key); return c && c.until > now ? c : null; },
-      stats: this.records.routeStats(), prefer: cli, orchestrate, explore: { roll: 1, retired: new Set(), highRisk: false }
+      launchesSinceRead: id => this.launchesSinceRead(id), stats: this.records.routeStats(), prefer: cli, orchestrate, explore: { roll: 1, retired: new Set(), highRisk: false }
     });
     const own = [result.top, ...result.groups.flat()].filter((c): c is NonNullable<typeof c> => !!c && c.cli === cli && (c.kind === 'subscription' || c.kind === 'cli-default'));
     const best = own.find(c => c.kind === 'subscription') ?? own[0];
@@ -407,31 +457,143 @@ export class RouteService {
     const result: OutcomeResult = classifyOutcome(status === 'timeout' ? 'failed' : status, strings(input.exitLines, 40, 400));
     const ok = typeof input.ok === 'boolean' ? input.ok && result === 'done' : undefined;
     const tokens = typeof input.tokens === 'number' && Number.isInteger(input.tokens) && input.tokens > 0 && input.tokens <= 100_000_000 ? input.tokens : undefined;
-    this.records.setOutcome(record, result, 'orchestrator', this.now(), ok, tokens);
+    const now = this.now();
+    this.records.setOutcome(record, result, 'orchestrator', now, ok, tokens);
     const option = record.options[record.spawned?.option ?? 0];
-    if (result === 'limit' && option) this.cool(option);
-    return { content: `Recorded ${result}${result === 'limit' ? `: ${option?.label ?? 'that route'} rests for a while and route picks another one` : ''}.` };
+    if (result === 'limit' && option) this.cool(option, resetFromText(strings(input.exitLines, 40, 400), now));
+    // A route resting after a limit that just finished a task: its limit reset (perhaps early). Only a child that
+    // started after the rest began proves it.
+    const resting = option ? this.cooldowns.get(option.signIn) : undefined;
+    if (result === 'done' && option && resting && resting.until > now && record.spawned && record.spawned.at >= (resting.at ?? 0)) {
+      this.cooldowns.delete(option.signIn);
+      this.event({ at: now, provider: option.cli, kind: 'recovered', note: `${option.label} finished a task while resting after a limit (until ${new Date(resting.until).toISOString().slice(11, 16)} UTC): early reset` });
+    }
+    return { content: `Recorded ${result}${result === 'limit' ? `: ${option?.label ?? 'that route'} rests ${this.cooldowns.get(option?.signIn ?? '')?.reason.replace(/^it hit a usage limit; resting /u, '') ?? 'for a while'} and route picks another one` : ''}.` };
   }
 
-  /** A quota exit: the route rests until its window resets (when known, ≤ 24 h) or for 5 min. */
-  private cool(option: OptionRecord): void {
+  /**
+   * A quota exit: the route rests until the reset its exit message names, else its window's reset (when known), else
+   * 5 min; at most 24 h. A read showing room, or a task finished on it, ends the rest early.
+   */
+  private cool(option: OptionRecord, stated: number | null = null): void {
     const now = this.now();
     const quota = option.kind === 'subscription' || option.kind === 'cli-default' ? this.limits?.providers.find(entry => entry.provider === option.cli) : undefined;
-    const reset = quota?.windows.map(window => window.resetsAt).filter((at): at is number => at !== null && at > now).sort((a, b) => a - b)[0];
+    const windowReset = quota?.windows.map(window => window.resetsAt).filter((at): at is number => at !== null && at > now).sort((a, b) => a - b)[0];
+    const reset = stated !== null && stated > now ? stated : windowReset;
     const until = reset !== undefined && reset - now <= MAX_COOLDOWN_MS ? reset : now + QUOTA_COOLDOWN_MS;
-    this.cooldowns.set(option.signIn, { until, reason: `it hit a usage limit; resting until ${new Date(until).toISOString().slice(11, 16)} UTC` });
+    this.cooldowns.set(option.signIn, { until, at: now, reason: `it hit a usage limit; resting until ${new Date(until).toISOString().slice(11, 16)} UTC` });
+    this.event({ at: now, provider: option.cli, kind: 'limit-exit', note: `${option.label}: a child stopped at a usage limit; resting until ${new Date(until).toISOString().slice(11, 16)} UTC${stated !== null ? ' (time from its message)' : ''}` });
+  }
+
+  /** Ends the rests of a CLI's own sign-in routes (its subscription plans and its default) after a reset. */
+  private endRests(cli: string, why: string): void {
+    const now = this.now();
+    const keys = new Set([`cli:${cli}`, ...this.settings.plans.filter(plan => plan.cli === cli && plan.kind === 'subscription').map(plan => `plan:${plan.id}`)]);
+    for (const [key, value] of this.cooldowns) {
+      if (!keys.has(key) || value.until <= now) continue;
+      this.cooldowns.delete(key);
+      this.options.host.log('info', `route: ${key} rests no more (${why})`);
+    }
+  }
+
+  /** Accounts' quota on list_routes rows: a rested account that Accounts read with room since the rest began is free. */
+  private accountQuotaSeen(rows: readonly AccountRow[]): void {
+    const now = this.now();
+    for (const row of rows) {
+      const rest = this.cooldowns.get(`account:${row.accountId}`);
+      if (!rest || rest.until <= now || !row.quota || row.quota.observedAt === null || row.quota.observedAt <= (rest.at ?? now)) continue;
+      if (row.quota.state !== 'ok' && row.quota.state !== 'low') continue;
+      this.cooldowns.delete(`account:${row.accountId}`);
+      this.event({ at: now, provider: row.provider, kind: 'early-reset', note: `account ${row.accountId}: Accounts read room again before ${new Date(rest.until).toISOString().slice(11, 16)} UTC` });
+    }
+  }
+
+  private event(event: QuotaEvent): void {
+    this.quotaEvents.push(event);
+    if (this.quotaEvents.length > MAX_QUOTA_EVENTS) this.quotaEvents.splice(0, this.quotaEvents.length - MAX_QUOTA_EVENTS);
+    this.options.host.log(event.kind === 'exhausted' || event.kind === 'limit-exit' ? 'warn' : 'info', `quota ${event.provider}: ${event.kind === 'early-reset' ? 'early reset' : event.kind} (${event.note})`);
+    this.saveLimits();
   }
 
   // -------------------------------------------------------------------------------------------------------------
   // The settings page
   // -------------------------------------------------------------------------------------------------------------
 
-  /** The page forwards CanvasTTY's `limits.get` answer; only the window fields are kept. */
-  receiveLimits(value: unknown): { ok: boolean; providers: number } {
-    const parsed = parseLimits(value, this.now());
-    if (!parsed) return { ok: false, providers: 0 };
-    this.limits = parsed;
-    return { ok: true, providers: parsed.providers.length };
+  /**
+   * CanvasTTY's `limits.get` answer, read by this service (`core`), pushed by the core (`core-push`, with its own
+   * early-reset flag for some providers), or forwarded by the page (`page`); only the window fields are kept, the newer
+   * read per provider wins, and what changed (an early reset, a reset, an exhaustion) is acted on at once.
+   */
+  receiveLimits(value: unknown, source: LimitsSource = 'page', hint: { earlyReset?: EarlyResetDetail[] } = {}): { ok: boolean; providers: number; changes: LimitChange[] } {
+    const now = this.now();
+    const parsed = parseLimits(value, now);
+    if (!parsed) return { ok: false, providers: 0, changes: [] };
+    const previous = this.limits;
+    this.limits = mergeLimits(previous, { ...parsed, source });
+    // Computed here for every read (older cores, the page); CanvasTTY's own entries are taken as well (it compares
+    // reads this service never saw), one event per provider with every window's detail.
+    const changes = limitChanges(previous, this.limits, now);
+    for (const detail of hint.earlyReset ?? []) {
+      let change = changes.find(entry => entry.provider === detail.provider && entry.kind === 'early-reset');
+      if (!change) {
+        const index = changes.findIndex(entry => entry.provider === detail.provider && (entry.kind === 'reset' || entry.kind === 'recovered'));
+        if (index >= 0) changes.splice(index, 1);
+        change = { provider: detail.provider, kind: 'early-reset', note: '', early: [] };
+        changes.push(change);
+      }
+      if (!change.early!.some(entry => entry.window === detail.window)) {
+        change.early!.push(detail);
+        change.note = [change.note, `${earlyNote(detail)} (CanvasTTY)`].filter(Boolean).join('; ');
+      }
+    }
+    for (const change of changes) {
+      // An early reset or a reset: the route has its quota back; rests from limit exits end and it is planned again.
+      if (change.kind === 'early-reset' || change.kind === 'reset') this.endRests(change.provider, change.kind === 'early-reset' ? `early reset: ${change.note}` : change.note);
+      this.event({ at: now, provider: change.provider, kind: change.kind, note: change.note, ...(change.early?.length ? { early: change.early } : {}) });
+    }
+    // A rest from a limit exit ends too when a fresh read of that CLI shows room before the rest ends.
+    for (const entry of parsed.providers) {
+      if (entry.state !== 'available' || !entry.fetchedAt) continue;
+      const quota = quotaOf(entry, 0, now);
+      // Clear room only: a window just under 100 % right after a limit exit is not a reset.
+      if (quota.state !== 'known' || (quota.headroom ?? 0) < RECOVERED_PERCENT) continue;
+      const rested = [...this.cooldowns].filter(([key, rest]) => rest.until > now && (rest.at ?? now) < entry.fetchedAt! && (key === `cli:${entry.provider}` || this.settings.plans.some(plan => plan.cli === entry.provider && `plan:${plan.id}` === key)));
+      if (rested.length) {
+        for (const [key] of rested) this.cooldowns.delete(key);
+        this.event({ at: now, provider: entry.provider, kind: 'recovered', note: `a read shows ${Math.round(quota.headroom!)}% left before the rest ended (${rested.map(([key]) => key).join(', ')}): early reset` });
+      }
+    }
+    this.saveLimits();
+    return { ok: true, providers: parsed.providers.length, changes };
+  }
+
+  /** The next time the service's own reader should read: soon after a predicted reset or while a route rests. */
+  limitsDueIn(now = this.now()): { resetSoon: number | null; resting: boolean; presumed: boolean } {
+    const resets = (this.limits?.providers ?? []).flatMap(entry => entry.windows.map(window => window.resetsAt)).filter((at): at is number => at !== null && at > now);
+    const presumed = (this.limits?.providers ?? []).some(entry => entry.windows.some(window => window.resetsAt !== null && window.resetsAt <= now && entry.fetchedAt !== null && entry.fetchedAt < window.resetsAt));
+    return { resetSoon: resets.length ? Math.min(...resets) : null, resting: [...this.cooldowns.values()].some(rest => rest.until > now), presumed };
+  }
+
+  private saveLimits(): void {
+    this.limitsTimer ??= setTimeout(() => { this.limitsTimer = null; void this.flushLimits(); }, WRITE_DELAY_MS);
+    this.limitsTimer.unref?.();
+  }
+
+  private flushLimits(): Promise<void> {
+    if (this.limitsTimer) { clearTimeout(this.limitsTimer); this.limitsTimer = null; }
+    const limits = this.limits;
+    const json = JSON.stringify({ receivedAt: limits?.receivedAt ?? this.now(), snapshot: { providers: limits?.providers ?? [] }, events: this.quotaEvents });
+    this.writing = this.writing.then(async () => {
+      try {
+        await mkdir(this.dir, { recursive: true, mode: 0o700 });
+        const path = join(this.dir, 'limits.json');
+        await writeFile(`${path}.tmp`, json, { mode: 0o600 });
+        await rename(`${path}.tmp`, path);
+      } catch (error) {
+        this.options.host.log('warn', `route: could not save limits (${error instanceof Error ? error.message.slice(0, 120) : 'error'})`);
+      }
+    });
+    return this.writing;
   }
 
   feedback(id: string, ok: boolean): { ok: true } {
@@ -461,11 +623,12 @@ export class RouteService {
       plans: this.settings.plans.map(plan => ({
         id: plan.id,
         models: plan.models.map(model => ({ model, ...resolveModel(plan.cli, model, this.settings.aliases, known) })),
-        quota: plan.kind === 'subscription' ? quotaOf(this.limits?.providers.find(entry => entry.provider === plan.cli), plan.reserve, now) : null,
+        quota: plan.kind === 'subscription' ? quotaOf(this.limits?.providers.find(entry => entry.provider === plan.cli), plan.reserve, now, this.launchesSinceRead(plan.cli)) : null,
         running: this.busy(`plan:${plan.id}`),
         launches: plan.kind === 'coding-plan' ? this.launches(plan.id, (plan.windowHours ?? 5) * 3_600_000) : null
       })),
-      limits: this.limits ? { receivedAt: this.limits.receivedAt, providers: this.limits.providers } : null,
+      limits: this.limits ? { receivedAt: this.limits.receivedAt, source: this.limits.source ?? 'page', providers: this.limits.providers } : null,
+      quotaEvents: this.quotaEvents.slice(-10),
       accounts: this.accountsSeen,
       cooldowns: [...this.cooldowns].filter(([, value]) => value.until > now).map(([signIn, value]) => ({ signIn, ...value })),
       recent: this.records.recent(30),
@@ -484,6 +647,7 @@ export class RouteService {
   }
 
   flush(): Promise<void> {
+    if (this.limitsTimer) void this.flushLimits();
     if (this.writeTimer) { clearTimeout(this.writeTimer); this.writeTimer = null; }
     const list = this.pending;
     this.pending = null;

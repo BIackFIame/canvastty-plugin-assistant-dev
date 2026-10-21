@@ -17,6 +17,7 @@ serve({
     const done = (): never => process.exit(code);
     setTimeout(done, 500).unref();
     // The router stops listening and aborts calls in flight; the OS frees the port in any case.
+    assistant?.limitsFeed.stop();
     void Promise.allSettled([assistant?.harness.flushWrites(), assistant?.routing.flush(), assistant?.auto.stop()]).finally(done);
   },
   onInitialize: async (params, host: Host) => {
@@ -32,6 +33,8 @@ serve({
     // Cards that run on Auto (Jev) keep working after a service restart: same port, same keys (hashes on disk).
     await assistant.auto.resume();
     resolveReady(assistant);
+    // Limit windows without the page where the core lets services read them (feature-detected; the page path stays).
+    void assistant.limitsFeed.start().catch(error => host.log('warn', `limits: ${error instanceof Error ? error.message : String(error)}`));
     if (failed.length) retryStored(host, failed, stored => assistant?.storageRecovered(stored));
     try {
       const answer = await host.callHost('sessions.subscribe', {}) as { sessions?: SessionSummary[] } | null;
@@ -41,7 +44,9 @@ serve({
     }
   },
   notifications: {
-    'canvastty.sessions.event': params => { assistant?.sessionEvent(params); }
+    'canvastty.sessions.event': params => { assistant?.sessionEvent(params); },
+    // A newer core pushes changed limit windows (and early resets) to services that may read them.
+    'canvastty.limits.changed': params => { assistant?.limitsFeed.changed(params); }
   },
   methods: {
     // Host-only requests.
@@ -70,9 +75,9 @@ serve({
     'auto.test': async params => (await ready).auto.test(str(params.upstreamId)),
     'auto.refreshCatalog': async () => (await ready).auto.refreshCatalog(),
     // "Where agents run" on the decision models page (route v2).
-    'route.state': async () => (await ready).routing.state(),
+    'route.state': async () => { const a = await ready; return { ...(a.routing.state() as Record<string, unknown>), feed: { mode: a.limitsFeed.mode, lastReadAt: a.limitsFeed.lastReadAt, lastError: a.limitsFeed.lastError } }; },
     'route.save': async params => { const a = await ready; return a.routing.save(params.settings, a.pageLocale); },
-    'route.limits': async params => (await ready).routing.receiveLimits(params.snapshot),
+    'route.limits': async params => { const a = await ready; const answer = a.routing.receiveLimits(params.snapshot, 'page'); return { ok: answer.ok, providers: answer.providers, feed: a.limitsFeed.mode }; },
     'route.feedback': async params => (await ready).routing.feedback(str(params.id), params.ok === true),
     // The Flow preview and Task board cards.
     'harness.view': async () => (await ready).harness.view(),

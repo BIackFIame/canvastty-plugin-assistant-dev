@@ -1,0 +1,1 @@
+{"ordinaryUsageAllowed":true,"rateLimits":{"limitId":"codex","primary":{"usedPercent":0,"windowDurationMins":300,"resetsAt":1792346400},"secondary":{"usedPercent":0,"windowDurationMins":10080,"resetsAt":1792944600},"planType":"pro","rateLimitReachedType":null},"rateLimitsByLimitId":null,"rateLimitResetCredits":{"availableCount":0,"credits":[]}}

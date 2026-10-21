@@ -16,7 +16,10 @@ export interface RouteState {
   staleAfterMs: number;
   aliases: { asOf: string; bundled: Record<string, Record<string, string>> };
   plans: Array<{ id: string; models: Array<{ model: string; identity: string | null; from: string }>; quota: SubscriptionQuota | null; running: number; launches: number | null }>;
-  limits: { receivedAt: number; providers: Array<{ provider: string; state: string; fetchedAt: number | null }> } | null;
+  limits: { receivedAt: number; source?: string; providers: Array<{ provider: string; state: string; fetchedAt: number | null }> } | null;
+  /** How the service gets limit windows: `core` (it reads them itself), `page-only` (this page forwards them). */
+  feed?: { mode: 'probing' | 'core' | 'page-only'; lastReadAt: number | null; lastError: string | null };
+  quotaEvents?: Array<{ at: number; provider: string; kind: string; note: string }>;
   accounts: { at: number; rows: Array<{ provider: string; accountId: string; account?: string; model: string; endpoint: string; state: string }> } | null;
   cooldowns: Array<{ signIn: string; until: number; reason: string }>;
   recent: RouteRecord[];
@@ -39,6 +42,8 @@ export const ROUTE_PAGE_STRINGS = {
     title: 'Where agents run',
     lead: 'Where an orchestrator\'s subagents run: your subscriptions and plans first when they have room, then model accounts and Auto. Nothing starts here.',
     limits: (age: string | null) => age === null ? 'Limit windows: not read yet.' : `Limit windows: read ${age}. They are read while this page is open; after 30 minutes without it they count as unknown, never as used up.`,
+    limitsCore: (age: string | null) => age === null ? 'Limit windows: not read yet; the Assistant reads them itself.' : `Limit windows: read ${age}. The Assistant reads them itself, every few minutes and just after a predicted reset; a read older than 30 minutes counts as unknown, never as used up.`,
+    events: 'Recent quota events:', eventKind: { 'early-reset': 'early reset', reset: 'reset', exhausted: 'used up', recovered: 'room again', 'limit-exit': 'limit hit' } as Record<string, string>,
     readNow: 'Read now',
     plans: 'Subscriptions and coding plans', noPlans: 'None declared: subagents run on each CLI\'s own default model, after any scored option.',
     kind: { subscription: 'subscription', 'coding-plan': 'coding plan' } as Record<string, string>,
@@ -88,6 +93,8 @@ export const ROUTE_PAGE_STRINGS = {
     title: 'Где работают агенты',
     lead: 'Где работают субагенты оркестратора: сначала ваши подписки и планы, пока в них есть запас, затем аккаунты моделей и «Авто». Здесь ничего не запускается.',
     limits: (age: string | null) => age === null ? 'Окна лимитов: ещё не прочитаны.' : `Окна лимитов: прочитаны ${age}. Они читаются, пока эта страница открыта; через 30 минут без неё считаются неизвестными, но не исчерпанными.`,
+    limitsCore: (age: string | null) => age === null ? 'Окна лимитов: ещё не прочитаны; Помощник читает их сам.' : `Окна лимитов: прочитаны ${age}. Помощник читает их сам — раз в несколько минут и сразу после ожидаемого сброса; чтение старше 30 минут считается неизвестным, но не исчерпанным.`,
+    events: 'Последние события квот:', eventKind: { 'early-reset': 'досрочный сброс', reset: 'сброс', exhausted: 'исчерпано', recovered: 'снова есть запас', 'limit-exit': 'упёрлись в лимит' } as Record<string, string>,
     readNow: 'Прочитать сейчас',
     plans: 'Подписки и планы для кода', noPlans: 'Ничего не объявлено: субагенты работают на модели по умолчанию своего CLI, после вариантов с оценкой.',
     kind: { subscription: 'подписка', 'coding-plan': 'план для кода' } as Record<string, string>,
@@ -164,7 +171,13 @@ export function renderRouting(state: RouteState, t: Strings, page: RoutePageHost
   if (!state.readable) section.append(el('p', { className: 'muted', textContent: t.unreadable }));
   const readNow = el('button', { type: 'button', textContent: t.readNow, name: 'route-limits-read' });
   readNow.addEventListener('click', () => { void page.forwardLimits().then(() => page.reload(), error => page.say(error instanceof Error ? error.message : String(error))); });
-  section.append(el('div', { className: 'row', dataset: { route: 'limits' } }, el('span', { className: 'muted', textContent: t.limits(state.limits ? ago(state.limits.receivedAt) : null) }), readNow));
+  const limitsText = state.feed?.mode === 'core' ? t.limitsCore : t.limits;
+  section.append(el('div', { className: 'row', dataset: { route: 'limits' } }, el('span', { className: 'muted', textContent: limitsText(state.limits ? ago(state.limits.receivedAt) : null) }), readNow));
+  const events = (state.quotaEvents ?? []).slice(-5).reverse();
+  if (events.length) {
+    const when = (at: number): string => new Date(at).toLocaleTimeString(document.documentElement.lang || 'en', { hour: '2-digit', minute: '2-digit', hourCycle: 'h23' });
+    section.append(el('p', { className: 'muted', dataset: { route: 'quota-events' }, textContent: `${t.events} ${events.map(event => `${when(event.at)} ${cliName(event.provider)}: ${t.eventKind[event.kind] ?? event.kind} (${event.note})`).join('; ')}` }));
+  }
   const until = (at: number): string => new Date(at).toLocaleTimeString(document.documentElement.lang || 'en', { hour: '2-digit', minute: '2-digit', hourCycle: 'h23' });
   if (state.cooldowns.length) section.append(el('p', { className: 'muted', textContent: `${t.cooling} ${state.cooldowns.map(c => `${c.signIn.replace(/^(?:plan|account|cli):/u, '')} → ${until(c.until)}`).join('; ')}` }));
 

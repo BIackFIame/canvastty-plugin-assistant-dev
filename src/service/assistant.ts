@@ -20,6 +20,7 @@ import { clampClass } from '../auto/launch.ts';
 import type { RouterDeps } from '../auto/router.ts';
 import { decisionFromTriage, type TurnDecision } from '../auto/select.ts';
 import { RouteService } from '../route/service.ts';
+import { LimitsFeed } from '../route/limitsFeed.ts';
 import { ASSISTANT_ID, type Spawn } from '../route/engine.ts';
 import { Bindings, isBoundValue, type BindTarget } from '../autopilot/binding.ts';
 import { isOwnSignInCli, openCodePlanContribution, ownSignInArgs } from '../autopilot/topLevel.ts';
@@ -84,6 +85,8 @@ export class Assistant {
   readonly auto: AutoService;
   /** Route v2: where a subagent runs (subscriptions, coding plans, model accounts, Auto). */
   readonly routing: RouteService;
+  /** Limit windows read by this service where the core allows it (else the page forwards them). */
+  readonly limitsFeed: LimitsFeed;
   /** Each card's effective data class, so a subagent's can be clamped to its parent's. */
   private readonly classes = new Map<string, DataClass>();
   /** Each card's triage advice, so its badge can be written again in another language. */
@@ -165,6 +168,7 @@ export class Assistant {
       dataClassMode: () => this.settings.dataClassMode,
       ...(options.now ? { now: options.now } : {})
     });
+    this.limitsFeed = new LimitsFeed({ host: options.host, sink: this.routing, ...(options.now ? { now: options.now } : {}) });
     this.review = new ReviewService({
       engine: this.engine, settings: () => this.settings, locale, trustChain: () => this.harness.settings.trustChain,
       ...(options.git === null ? { git: null } : {}),

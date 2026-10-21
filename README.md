@@ -237,6 +237,26 @@ The settings pages keep one plain sentence per control; the numbers live here.
 - Between the service and CanvasTTY a frame is at most 1 MiB, a host call fails after 30 s or past 64 in flight, and
   while CanvasTTY is not reading, waiting events and logs are capped at 8 MiB (answers are never dropped).
 
+### Subscription quotas
+
+- Routing reads your Claude, Codex, Kimi, OpenCode Go and Grok windows from CanvasTTY's `limits.get`. Where CanvasTTY
+  lets a service read them (`limits.subscribe` answers), the Assistant subscribes at start, reads them itself — every
+  5 minutes while routing is used, every 15 when idle, every 2 while a route rests after a limit, and just after a
+  predicted reset — and takes CanvasTTY's `canvastty.limits.changed` push at once; no page needs to be open. On an older
+  CanvasTTY the settings page forwards them while it is open, as before. The last windows are kept with their read time
+  across restarts (`route/limits.json`); a read older than 30 minutes counts as unknown, never as used up.
+- An **early reset** (a provider's bonus or promotional reset): a window whose used share drops by at least
+  max(5 points, half of what was used), or to 5 % or less, before the reset time the previous read announced — whether
+  the provider then shows a new reset time or still the old one. A reset time that moves without such a drop is not a
+  reset. On an early reset (seen in a read, or reported by CanvasTTY) the rests of that CLI's sign-in routes end at once
+  and routing plans with the restored quota; each event keeps the used share before and after, the announced and newly
+  reported reset time and whether the old time was kept (the page shows the last ones).
+- A child that stops at a usage limit rests its route until the time its message names (Claude Code, Codex and Z.AI
+  messages), else its window's reset, else 5 minutes; a later read with 20 % or more left, or a task finished on that
+  route, ends the rest early. Routed launches since the last read count as ~2 % of the window each until the next read.
+- Model accounts carry the quota the Accounts plugin reads for them (Z.AI / BigModel GLM Coding Plan): an account whose
+  quota is used up is not offered, and an account rest ends when Accounts shows a newer read with room.
+
 ## Needs
 
 CanvasTTY with plugin services and the Assistant extension points (`secrets.get` for services, `decide.timeoutMs`,
