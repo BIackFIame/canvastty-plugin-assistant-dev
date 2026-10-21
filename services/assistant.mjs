@@ -10132,19 +10132,20 @@ function costOf(route) {
     case "usd":
       return route.costBasis === "plan" || route.costBasis === "flat" ? { kind: "flat", label: route.label } : { kind: "usd", low: estimate2.low, high: estimate2.high };
     case "window":
-      return { kind: "plan", label: route.label, share: Number.isFinite(estimate2.share) ? estimate2.share : null, window: estimate2.window };
+      return { kind: "plan", label: route.label, share: Number.isFinite(estimate2.share) ? estimate2.share : null, window: estimate2.window, subscription: route.kind !== "coding-plan" };
     case "launches":
       return { kind: "launch", label: route.label, used: estimate2.used, allowance: estimate2.allowance, windowHours: estimate2.windowHours };
     case "flat":
       return { kind: "flat", label: route.label };
     default:
-      return route.kind === "subscription" || route.kind === "coding-plan" || route.kind === "cli-default" ? { kind: "plan", label: route.label, share: null, window: null } : null;
+      return route.kind === "subscription" || route.kind === "coding-plan" || route.kind === "cli-default" ? { kind: "plan", label: route.label, share: null, window: null, subscription: route.kind !== "coding-plan" } : null;
   }
 }
 function measuredCost(cost, usage) {
   if (!cost || !usage) return cost;
   if (cost.kind === "usd" && usage.usd !== null) return { kind: "usd", low: usage.usd, high: usage.usd, measured: true };
   if (cost.kind === "plan") return { ...cost, share: usage.share, measured: true };
+  if (cost.kind === "flat") return { kind: "plan", label: cost.label, share: usage.share, window: null, measured: true, subscription: true };
   return cost;
 }
 function modelLabel2(model) {
@@ -10219,13 +10220,16 @@ function buildTree(input, options = {}) {
     for (const child of refused) placed.add(child.id);
     const children = depth >= TREE_LIMITS.depth ? [] : below.filter((child) => !refused.includes(child)).sort((a, b) => (a.startedAt ?? 0) - (b.startedAt ?? 0) || a.id.localeCompare(b.id)).map((child) => node(child, depth + 1));
     const usage = input.usage?.(card.id) ?? null;
-    const cost = measuredCost(costOf(route) ?? (top ? { kind: "plan", label: top.label, share: null, window: null } : null), usage);
+    const auto = !route && !top ? input.auto?.(card.id) ?? null : null;
+    const autoCost = !auto ? null : auto.plan ? { kind: "plan", label: auto.plan, share: auto.share, window: null, subscription: true, ...auto.share !== null ? { measured: true } : {} } : auto.usd !== null ? { kind: "usd", low: auto.usd, high: auto.usd, measured: true } : null;
+    const cost = measuredCost(costOf(route) ?? (top ? { kind: "plan", label: top.label, share: null, window: null, subscription: true } : autoCost), usage);
     return {
       id: card.id,
       title: oneLine(card.title, TREE_LIMITS.title) ?? card.id.slice(0, 8),
       role: card.role,
       provider: card.provider,
       model: modelLabel2(card.model ?? route?.model ?? top?.model ?? null),
+      auto: auto && auto.models.length ? auto.models.slice(0, 3).map((entry) => ({ model: modelLabel2(entry.model) ?? entry.model, calls: entry.calls })) : null,
       status: statusOf(card),
       task: oneLine(input.task(card.id), TREE_LIMITS.task),
       cost,
@@ -13132,6 +13136,7 @@ var AutoRouter = class {
   /** Each card's first conversation (keyed hash): the one its new user turns are reported from. */
   mainConversation = /* @__PURE__ */ new Map();
   recentRecords = [];
+  turnsBySession = /* @__PURE__ */ new Map();
   hosts = /* @__PURE__ */ new Set();
   /** Conversations (keyed hashes) where a fan-out met a tool call: their turns stay single. */
   agentic = /* @__PURE__ */ new Set();
@@ -13319,6 +13324,30 @@ var AutoRouter = class {
     this.mainConversation.delete(sessionId);
     this.spend.forget(sessionId);
     this.outputs.delete(sessionId);
+    this.turnsBySession.delete(sessionId);
+  }
+  /**
+   * The models a card's answered calls used through this router, by full session id (for the agent tree): calls,
+   * the upstream, tokens and dollars where known. Memory only, until the card closes.
+   */
+  sessionTurns(sessionId) {
+    return [...this.turnsBySession.get(sessionId)?.values() ?? []].map((entry) => ({ ...entry }));
+  }
+  tally(sessionId, record4) {
+    if (record4.status !== 200 || !record4.model || !record4.upstream) return;
+    let byModel = this.turnsBySession.get(sessionId);
+    if (!byModel) {
+      byModel = /* @__PURE__ */ new Map();
+      this.turnsBySession.set(sessionId, byModel);
+      while (this.turnsBySession.size > ROUTER_LIMITS.conversations) this.turnsBySession.delete(this.turnsBySession.keys().next().value);
+    }
+    const key = `${record4.upstream}|${record4.model}`;
+    const entry = byModel.get(key) ?? { upstream: record4.upstream, model: record4.model, turns: 0, tokensIn: 0, tokensOut: 0, usd: null };
+    entry.turns++;
+    entry.tokensIn += record4.tokensIn ?? 0;
+    entry.tokensOut += record4.tokensOut ?? 0;
+    if (record4.costUsd !== null) entry.usd = Math.round(((entry.usd ?? 0) + record4.costUsd) * 1e6) / 1e6;
+    byModel.set(key, entry);
   }
   /** Cards CanvasTTY no longer lists lose their keys (after a restart of the service). */
   retainSessions(known) {
@@ -13621,6 +13650,7 @@ var AutoRouter = class {
       if (!sessionSet.size) this.active.delete(grant.sessionId);
       record4.totalMs = this.now() - started;
       this.remember(record4);
+      this.tally(grant.sessionId, record4);
       this.idle();
     }
   }
@@ -14350,6 +14380,33 @@ var AutoService = class {
   /** For `route`: the launch options that give a subagent Auto too, when the caller itself runs on it. */
   launchOptionsFor(sessionId) {
     return this.router.tokens.forSession(sessionId) ? { [PLUGIN_ID]: { model: "auto" } } : null;
+  }
+  /**
+   * A card on Model: Auto (Jev), for the agent tree: the models its answered calls used through the router (most
+   * used first) and what they cost. A flat-rate upstream (a brokered plan account) is a plan, never dollars; a paid
+   * one sums the router's own cost per call. Null: the router answered nothing for this card.
+   */
+  treeAuto(sessionId) {
+    const turns = this.router.sessionTurns(sessionId);
+    if (!turns.length) return null;
+    const models = /* @__PURE__ */ new Map();
+    for (const turn of turns) models.set(turn.model, (models.get(turn.model) ?? 0) + turn.turns);
+    const upstreams = new Map(this.settings.upstreams.map((upstream) => [upstream.id, upstream]));
+    const flat = turns.filter((turn) => {
+      const upstream = upstreams.get(turn.upstream);
+      return !!upstream && upstream.preset === "account" && upstream.flatRate === true;
+    });
+    const top = [...flat].sort((a, b) => b.turns - a.turns)[0];
+    const account = top ? upstreams.get(top.upstream)?.account ?? null : null;
+    const label2 = account ? this.broker.known(account)?.label : void 0;
+    const plan3 = top ? label2 ?? top.upstream : null;
+    const paid = turns.filter((turn) => !flat.includes(turn) && turn.usd !== null);
+    return {
+      models: [...models].sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0])).map(([model, calls]) => ({ model, calls })),
+      plan: plan3,
+      usd: paid.length ? Math.round(paid.reduce((sum, turn) => sum + (turn.usd ?? 0), 0) * 1e6) / 1e6 : null,
+      tokens: turns.reduce((sum, turn) => sum + turn.tokensIn + turn.tokensOut, 0)
+    };
   }
   sessionClosed(sessionId) {
     this.router.closeSession(sessionId);
@@ -18265,6 +18322,13 @@ ${JSON.stringify({ ...a, model: answer.model })}` };
       },
       route: (id) => this.routing.routeOf(id) ?? this.started.get(id)?.route ?? null,
       refused: (id) => this.refused.has(id),
+      // Model: Auto (Jev): the models its calls used through the router, and what they cost there.
+      auto: (id) => {
+        const used = this.auto.treeAuto(id);
+        if (!used) return null;
+        const share = used.plan ? Math.round(used.tokens * this.routing.settings.expectedShare.medium / perTask * 100) / 100 : null;
+        return { models: used.models, plan: used.plan, usd: used.usd, share };
+      },
       task: (id) => this.review.taskOf(id),
       planChildren: (id) => this.bindings.planOf(id),
       endedAt: (id) => this.harness.finished(id),

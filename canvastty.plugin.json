@@ -36,8 +36,8 @@
     },
     {
       "path": "services/assistant.mjs",
-      "bytes": 1079365,
-      "sha256": "05c52da237cbdb4c4eae88411391fbd3cd5de186332a74771f46930fbebcf5d6"
+      "bytes": 1083503,
+      "sha256": "1fe3028d7d2f26d7e2d40fc419928d1ed19bfd30af2a23e32df177f9dee28183"
     },
     {
       "path": "settings/assistant.html",
@@ -66,8 +66,8 @@
     },
     {
       "path": "apps/harness.css",
-      "bytes": 10013,
-      "sha256": "b474c22b2de1c1beda7aa7c8cc9ae379210ab2cb4f8338e7df64af3eaae0b686"
+      "bytes": 10101,
+      "sha256": "e23f2cf69d1fc6b8987019c3e23071f3ca4206e18214073cb141a52850e86261"
     },
     {
       "path": "apps/flows.html",
@@ -96,8 +96,8 @@
     },
     {
       "path": "apps/tree.js",
-      "bytes": 21208,
-      "sha256": "c93a62d54c6af87a9198908f9dac6321454b61383dd8dffab05161fba7c0b125"
+      "bytes": 22963,
+      "sha256": "0c76664649ca56a83bfcd399151ce3c8f5eb5a1bb596891c6aeed1b175cf3dee"
     }
   ],
   "services": [

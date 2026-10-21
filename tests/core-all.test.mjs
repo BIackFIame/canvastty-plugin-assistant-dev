@@ -201,7 +201,9 @@ test('agent tree: measured tokens price a paid route at the catalog price, a pla
   const usage = { tokens: 650, input: 1000, output: 100, cached: 500, usd: 0.012, share: 0.5, providerEstimate: 0.02 };
   assert.deepEqual(measuredCost({ kind: 'usd', low: 0.1, high: 0.4 }, usage), { kind: 'usd', low: 0.012, high: 0.012, measured: true });
   assert.deepEqual(measuredCost({ kind: 'plan', label: 'Max', share: 8, window: '5 h' }, usage), { kind: 'plan', label: 'Max', share: 0.5, window: '5 h', measured: true });
-  assert.deepEqual(measuredCost({ kind: 'flat', label: 'GLM' }, usage), { kind: 'flat', label: 'GLM' });
+  // A flat-rate plan account (run 18): its measured tokens as a share of the plan, still never dollars.
+  assert.deepEqual(measuredCost({ kind: 'flat', label: 'GLM' }, usage), { kind: 'plan', label: 'GLM', share: 0.5, window: null, measured: true, subscription: true });
+  assert.deepEqual(measuredCost({ kind: 'flat', label: 'GLM' }, null), { kind: 'flat', label: 'GLM' });
   const view = buildTree({
     cards: [{ id: 'o', provider: 'claude', role: 'orchestrator', title: 'Lead', status: 'working', startedAt: NOW }, { id: 'k', provider: 'opencode', role: 'subagent', parentSessionId: 'o', title: 'Kid', status: 'working', startedAt: NOW }],
     route: id => id === 'k' ? { model: 'glm-5.3', identity: 'glm-5-3', kind: 'account', label: 'Z.AI', costBasis: 'api', estimate: { kind: 'usd', low: 0.1, high: 0.4 } } : null,

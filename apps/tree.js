@@ -62,19 +62,23 @@
       none: "No agent tree yet. It appears when an orchestrator starts subagents, or when you mark an orchestrator in the card menu \u2192 Agent tree.",
       agents: (n) => `${n} ${n === 1 ? "agent" : "agents"}`,
       running: (n) => `${n} running`,
-      plan: "plan",
-      planShare: (plan) => plan.share !== null ? `${plan.label}: \u2248${share(plan.share)}% of ${plan.window ?? "the window"}` : plan.launches ? `${plan.label}: ${plan.launches} ${plan.launches === 1 ? "launch" : "launches"}` : `${plan.label}: plan`,
+      plan: "subscription",
+      planShare: (plan) => plan.share !== null ? `${plan.label}: ~${share(plan.share)}% of ${plan.window ? `${plan.window} window` : "its window"}` : plan.launches ? `${plan.label}: ${plan.launches} ${plan.launches === 1 ? "launch" : "launches"}` : `${plan.label}: subscription`,
       status: { running: "Running", waiting: "Waiting", approval: "Needs approval", done: "Done", failed: "Failed" },
       roles: { orchestrator: "orchestrator", subagent: "subagent", agent: "agent" },
       defaultModel: (provider) => `${provider}, default model`,
       cost: (cost) => {
         if (!cost) return "cost unknown";
         if (cost.kind === "usd") return usdText(cost);
-        if (cost.kind === "plan") return cost.share === null ? "plan" : `plan \xB7 \u2248${share(cost.share)}% of ${cost.window ?? "window"}`;
-        if (cost.kind === "launch") return `plan \xB7 1 launch (${cost.used}/${cost.allowance} in ${cost.windowHours} h)`;
-        return "plan \xB7 flat rate";
+        const name = cost.kind === "plan" && cost.subscription === false ? "coding plan" : "subscription";
+        if (cost.kind === "plan") return cost.share === null ? name : `${name} \xB7 ~${share(cost.share)}% of ${cost.window ? `${cost.window} window` : "its window"}`;
+        if (cost.kind === "launch") return `coding plan \xB7 1 launch (${cost.used}/${cost.allowance} in ${cost.windowHours} h)`;
+        return "subscription";
       },
-      costTip: (cost) => !cost ? "The Assistant did not route this card, so it has no estimate." : cost.kind === "usd" ? cost.measured ? "Measured tokens of this card at the model's listed price (cache reads at a tenth)." : "Estimated price of one task on this model." : cost.kind === "plan" && cost.measured ? `Runs on ${cost.label}: its measured tokens as a share of the plan, not money.` : `Runs on ${cost.label}: a share of the plan, not money.`,
+      costTip: (cost) => !cost ? "The Assistant did not route this card, so it has no estimate." : cost.kind === "usd" ? cost.measured ? "Measured tokens of this card at the model's listed price (cache reads at a tenth)." : "Estimated price of one task on this model." : cost.kind === "plan" && cost.measured ? `Runs on ${cost.label}: its measured tokens as a share of the subscription's window, not money.` : `Runs on ${cost.label}, already paid for: a share of its window, not money.`,
+      auto: "Auto (Jev)",
+      autoCalls: (model, calls) => `${model} \xD7${calls} ${calls === 1 ? "call" : "calls"}`,
+      autoTip: "Model: Auto (Jev): the models its answered calls used, as the Assistant's router counted them.",
       tokens: (n) => `${tokensText(n)} tokens`,
       tokensTip: "Measured by CanvasTTY from the agent's own usage log.",
       providerEstimate: (usd) => `\u2248$${money(usd)} (agent's estimate)`,
@@ -99,19 +103,23 @@
       none: "\u0414\u0435\u0440\u0435\u0432\u0430 \u0430\u0433\u0435\u043D\u0442\u043E\u0432 \u043F\u043E\u043A\u0430 \u043D\u0435\u0442. \u041E\u043D\u043E \u043F\u043E\u044F\u0432\u0438\u0442\u0441\u044F, \u043A\u043E\u0433\u0434\u0430 \u043E\u0440\u043A\u0435\u0441\u0442\u0440\u0430\u0442\u043E\u0440 \u0437\u0430\u043F\u0443\u0441\u0442\u0438\u0442 \u0441\u0443\u0431\u0430\u0433\u0435\u043D\u0442\u043E\u0432, \u0438\u043B\u0438 \u043A\u043E\u0433\u0434\u0430 \u0432\u044B \u0432\u044B\u0431\u0435\u0440\u0435\u0442\u0435 \u0432 \u043C\u0435\u043D\u044E \u043E\u043A\u043D\u0430 \u043E\u0440\u043A\u0435\u0441\u0442\u0440\u0430\u0442\u043E\u0440\u0430 \xAB\u0414\u0435\u0440\u0435\u0432\u043E \u0430\u0433\u0435\u043D\u0442\u043E\u0432\xBB.",
       agents: (n) => `${n} ${ruPlural(n, "\u0430\u0433\u0435\u043D\u0442", "\u0430\u0433\u0435\u043D\u0442\u0430", "\u0430\u0433\u0435\u043D\u0442\u043E\u0432")}`,
       running: (n) => `${n} ${ruPlural(n, "\u0440\u0430\u0431\u043E\u0442\u0430\u0435\u0442", "\u0440\u0430\u0431\u043E\u0442\u0430\u044E\u0442", "\u0440\u0430\u0431\u043E\u0442\u0430\u044E\u0442")}`,
-      plan: "\u043F\u043B\u0430\u043D",
-      planShare: (plan) => plan.share !== null ? `${plan.label}: \u2248${share(plan.share)}% \u043E\u043A\u043D\u0430 ${ruWindow(plan.window)}`.trimEnd() : plan.launches ? `${plan.label}: ${plan.launches} ${ruPlural(plan.launches, "\u0437\u0430\u043F\u0443\u0441\u043A", "\u0437\u0430\u043F\u0443\u0441\u043A\u0430", "\u0437\u0430\u043F\u0443\u0441\u043A\u043E\u0432")}` : `${plan.label}: \u043F\u043B\u0430\u043D`,
+      plan: "\u043F\u043E\u0434\u043F\u0438\u0441\u043A\u0430",
+      planShare: (plan) => plan.share !== null ? `${plan.label}: ~${share(plan.share)}% \u043E\u043A\u043D\u0430 ${ruWindow(plan.window)}`.trimEnd() : plan.launches ? `${plan.label}: ${plan.launches} ${ruPlural(plan.launches, "\u0437\u0430\u043F\u0443\u0441\u043A", "\u0437\u0430\u043F\u0443\u0441\u043A\u0430", "\u0437\u0430\u043F\u0443\u0441\u043A\u043E\u0432")}` : `${plan.label}: \u043F\u043E\u0434\u043F\u0438\u0441\u043A\u0430`,
       status: { running: "\u0420\u0430\u0431\u043E\u0442\u0430\u0435\u0442", waiting: "\u0416\u0434\u0451\u0442", approval: "\u041D\u0443\u0436\u043D\u043E \u043E\u0434\u043E\u0431\u0440\u0435\u043D\u0438\u0435", done: "\u0413\u043E\u0442\u043E\u0432\u043E", failed: "\u041E\u0448\u0438\u0431\u043A\u0430" },
       roles: { orchestrator: "\u043E\u0440\u043A\u0435\u0441\u0442\u0440\u0430\u0442\u043E\u0440", subagent: "\u0441\u0443\u0431\u0430\u0433\u0435\u043D\u0442", agent: "\u0430\u0433\u0435\u043D\u0442" },
       defaultModel: (provider) => `${provider}, \u043C\u043E\u0434\u0435\u043B\u044C \u043F\u043E \u0443\u043C\u043E\u043B\u0447\u0430\u043D\u0438\u044E`,
       cost: (cost) => {
         if (!cost) return "\u0446\u0435\u043D\u0430 \u043D\u0435\u0438\u0437\u0432\u0435\u0441\u0442\u043D\u0430";
         if (cost.kind === "usd") return usdText(cost);
-        if (cost.kind === "plan") return cost.share === null ? "\u043F\u043B\u0430\u043D" : `\u043F\u043B\u0430\u043D \xB7 \u2248${share(cost.share)}% \u043E\u043A\u043D\u0430 ${ruWindow(cost.window)}`.trimEnd();
-        if (cost.kind === "launch") return `\u043F\u043B\u0430\u043D \xB7 1 \u0437\u0430\u043F\u0443\u0441\u043A (${cost.used}/${cost.allowance} \u0437\u0430 ${cost.windowHours} \u0447)`;
-        return "\u043F\u043B\u0430\u043D \xB7 \u0431\u0435\u0437 \u043B\u0438\u043C\u0438\u0442\u0430 \u043F\u043E \u0446\u0435\u043D\u0435";
+        const name = cost.kind === "plan" && cost.subscription === false ? "\u043F\u043B\u0430\u043D \u0434\u043B\u044F \u043A\u043E\u0434\u0430" : "\u043F\u043E\u0434\u043F\u0438\u0441\u043A\u0430";
+        if (cost.kind === "plan") return cost.share === null ? name : `${name} \xB7 ~${share(cost.share)}% \u043E\u043A\u043D\u0430 ${ruWindow(cost.window)}`.trimEnd();
+        if (cost.kind === "launch") return `\u043F\u043B\u0430\u043D \u0434\u043B\u044F \u043A\u043E\u0434\u0430 \xB7 1 \u0437\u0430\u043F\u0443\u0441\u043A (${cost.used}/${cost.allowance} \u0437\u0430 ${cost.windowHours} \u0447)`;
+        return "\u043F\u043E\u0434\u043F\u0438\u0441\u043A\u0430";
       },
-      costTip: (cost) => !cost ? "\u041F\u043E\u043C\u043E\u0449\u043D\u0438\u043A \u043D\u0435 \u0432\u044B\u0431\u0438\u0440\u0430\u043B \u043C\u0430\u0440\u0448\u0440\u0443\u0442 \u0434\u043B\u044F \u044D\u0442\u043E\u0433\u043E \u043E\u043A\u043D\u0430, \u043E\u0446\u0435\u043D\u043A\u0438 \u043D\u0435\u0442." : cost.kind === "usd" ? cost.measured ? "\u0418\u0437\u043C\u0435\u0440\u0435\u043D\u043D\u044B\u0435 \u0442\u043E\u043A\u0435\u043D\u044B \u044D\u0442\u043E\u0433\u043E \u043E\u043A\u043D\u0430 \u043F\u043E \u0446\u0435\u043D\u0435 \u043C\u043E\u0434\u0435\u043B\u0438 \u0438\u0437 \u043A\u0430\u0442\u0430\u043B\u043E\u0433\u0430 (\u0447\u0442\u0435\u043D\u0438\u0435 \u043A\u044D\u0448\u0430 \u2014 \u0434\u0435\u0441\u044F\u0442\u0430\u044F \u0447\u0430\u0441\u0442\u044C)." : "\u041E\u0446\u0435\u043D\u043A\u0430 \u0446\u0435\u043D\u044B \u043E\u0434\u043D\u043E\u0439 \u0437\u0430\u0434\u0430\u0447\u0438 \u043D\u0430 \u044D\u0442\u043E\u0439 \u043C\u043E\u0434\u0435\u043B\u0438." : cost.kind === "plan" && cost.measured ? `\u0420\u0430\u0431\u043E\u0442\u0430\u0435\u0442 \u043D\u0430 \xAB${cost.label}\xBB: \u0438\u0437\u043C\u0435\u0440\u0435\u043D\u043D\u044B\u0435 \u0442\u043E\u043A\u0435\u043D\u044B \u043A\u0430\u043A \u0434\u043E\u043B\u044F \u043F\u043B\u0430\u043D\u0430, \u0430 \u043D\u0435 \u0434\u0435\u043D\u044C\u0433\u0438.` : `\u0420\u0430\u0431\u043E\u0442\u0430\u0435\u0442 \u043D\u0430 \xAB${cost.label}\xBB: \u0434\u043E\u043B\u044F \u043F\u043B\u0430\u043D\u0430, \u0430 \u043D\u0435 \u0434\u0435\u043D\u044C\u0433\u0438.`,
+      costTip: (cost) => !cost ? "\u041F\u043E\u043C\u043E\u0449\u043D\u0438\u043A \u043D\u0435 \u0432\u044B\u0431\u0438\u0440\u0430\u043B \u043C\u0430\u0440\u0448\u0440\u0443\u0442 \u0434\u043B\u044F \u044D\u0442\u043E\u0433\u043E \u043E\u043A\u043D\u0430, \u043E\u0446\u0435\u043D\u043A\u0438 \u043D\u0435\u0442." : cost.kind === "usd" ? cost.measured ? "\u0418\u0437\u043C\u0435\u0440\u0435\u043D\u043D\u044B\u0435 \u0442\u043E\u043A\u0435\u043D\u044B \u044D\u0442\u043E\u0433\u043E \u043E\u043A\u043D\u0430 \u043F\u043E \u0446\u0435\u043D\u0435 \u043C\u043E\u0434\u0435\u043B\u0438 \u0438\u0437 \u043A\u0430\u0442\u0430\u043B\u043E\u0433\u0430 (\u0447\u0442\u0435\u043D\u0438\u0435 \u043A\u044D\u0448\u0430 \u2014 \u0434\u0435\u0441\u044F\u0442\u0430\u044F \u0447\u0430\u0441\u0442\u044C)." : "\u041E\u0446\u0435\u043D\u043A\u0430 \u0446\u0435\u043D\u044B \u043E\u0434\u043D\u043E\u0439 \u0437\u0430\u0434\u0430\u0447\u0438 \u043D\u0430 \u044D\u0442\u043E\u0439 \u043C\u043E\u0434\u0435\u043B\u0438." : cost.kind === "plan" && cost.measured ? `\u0420\u0430\u0431\u043E\u0442\u0430\u0435\u0442 \u043D\u0430 \xAB${cost.label}\xBB: \u0438\u0437\u043C\u0435\u0440\u0435\u043D\u043D\u044B\u0435 \u0442\u043E\u043A\u0435\u043D\u044B \u043A\u0430\u043A \u0434\u043E\u043B\u044F \u043E\u043A\u043D\u0430 \u043F\u043E\u0434\u043F\u0438\u0441\u043A\u0438, \u0430 \u043D\u0435 \u0434\u0435\u043D\u044C\u0433\u0438.` : `\u0420\u0430\u0431\u043E\u0442\u0430\u0435\u0442 \u043D\u0430 \xAB${cost.label}\xBB, \u0443\u0436\u0435 \u043E\u043F\u043B\u0430\u0447\u0435\u043D\u043D\u043E\u0439: \u0434\u043E\u043B\u044F \u0435\u0451 \u043E\u043A\u043D\u0430, \u0430 \u043D\u0435 \u0434\u0435\u043D\u044C\u0433\u0438.`,
+      auto: "\u0410\u0432\u0442\u043E (Jev)",
+      autoCalls: (model, calls) => `${model} \xD7${calls} ${ruPlural(calls, "\u0432\u044B\u0437\u043E\u0432", "\u0432\u044B\u0437\u043E\u0432\u0430", "\u0432\u044B\u0437\u043E\u0432\u043E\u0432")}`,
+      autoTip: "\u041C\u043E\u0434\u0435\u043B\u044C \xAB\u0410\u0432\u0442\u043E (Jev)\xBB: \u043C\u043E\u0434\u0435\u043B\u0438, \u043D\u0430 \u043A\u043E\u0442\u043E\u0440\u044B\u0445 \u043E\u0442\u0432\u0435\u0442\u0438\u043B\u0438 \u0435\u0451 \u0432\u044B\u0437\u043E\u0432\u044B, \u043F\u043E \u0441\u0447\u0451\u0442\u0443 \u043C\u0430\u0440\u0448\u0440\u0443\u0442\u0438\u0437\u0430\u0442\u043E\u0440\u0430 \u0410\u0441\u0441\u0438\u0441\u0442\u0435\u043D\u0442\u0430.",
       tokens: (n) => `${tokensText(n)} \u0442\u043E\u043A\u0435\u043D\u043E\u0432`,
       tokensTip: "\u0418\u0437\u043C\u0435\u0440\u0435\u043D\u043E CanvasTTY \u043F\u043E \u0436\u0443\u0440\u043D\u0430\u043B\u0443 \u0440\u0430\u0441\u0445\u043E\u0434\u0430 \u0441\u0430\u043C\u043E\u0433\u043E \u0430\u0433\u0435\u043D\u0442\u0430.",
       providerEstimate: (usd) => `\u2248$${money(usd)} (\u043E\u0446\u0435\u043D\u043A\u0430 \u0430\u0433\u0435\u043D\u0442\u0430)`,
@@ -215,8 +223,7 @@
       el(
         "div",
         { className: "tree-node__model" },
-        el("strong", { textContent: node.model ?? t.defaultModel(provider) }),
-        node.model ? ` \xB7 ${provider}` : "",
+        ...node.auto && !node.model ? [el("strong", { textContent: t.auto, title: t.autoTip }), ` \xB7 ${node.auto.map((entry) => t.autoCalls(entry.model, entry.calls)).join(", ")} \xB7 ${provider}`] : [el("strong", { textContent: node.model ?? t.defaultModel(provider) }), node.model ? ` \xB7 ${provider}` : ""],
         ` \xB7 ${t.roles[node.role] ?? node.role}`
       ),
       ...node.task ? [el("div", { className: "tree-node__task", textContent: node.task, title: node.task })] : [],
@@ -239,8 +246,9 @@
   }
   function render() {
     if (!view) return;
+    const heading = el("h1", { className: "tree-title", textContent: t.title });
     if (!view.trees.length) {
-      root.replaceChildren(el("div", { className: "empty", textContent: t.none }));
+      root.replaceChildren(heading, el("div", { className: "empty", textContent: t.none }));
       return;
     }
     const tree = view.trees.find((item) => item.root.id === chosen) ?? view.trees[0];
@@ -255,6 +263,7 @@
       head.push(el("label", { className: "field tree-pick" }, el("span", { className: "field__label", textContent: t.tree }), select));
     }
     root.replaceChildren(
+      heading,
       el(
         "div",
         { className: "tree-header" },
