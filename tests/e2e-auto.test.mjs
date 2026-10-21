@@ -183,18 +183,23 @@ test('Model: Auto (Jev) through CanvasTTY: install, launch an OpenCode card, rou
 
   // route hands out Auto for an OpenCode subagent of this orchestrator; the subagent launched with it inherits the class.
   const routed = await tools.call(card.id, 'orchestrator', pluginToolName('canvastty-assistant', 'route'), { task: 'Rename a helper', providers: [{ id: 'opencode', available: true, subagent: true, model: { supported: true, known: ['a/b'] } }] });
-  assert.match(routed.content, /"launchOptions":\{"canvastty-assistant":\{"model":"auto"\}\}/u);
-  const child = terminals.create({ provider: 'opencode', cwd: project, profile: 'normal', position: { x: 0, y: 0 }, role: 'subagent', parentSessionId: card.id, title: 'Worker', launchOptions: { 'canvastty-assistant': { model: 'auto' } } });
+  assert.match(routed.content, /"launchOptions":\{"canvastty-assistant":\{"model":"r:[a-z0-9]{12}:auto"\}\}/u);
+  // Auto (Jev) routes every subagent: a plain "auto" (or nothing) is refused with what to do; the routed value starts it.
+  const unrouted = terminals.create({ provider: 'opencode', cwd: project, profile: 'normal', position: { x: 0, y: 0 }, role: 'subagent', parentSessionId: card.id, title: 'Unrouted', launchOptions: { 'canvastty-assistant': { model: 'auto' } } });
+  const unroutedState = await waitFor(() => { const s = terminals.list().find(entry => entry.id === unrouted.id); return s?.failureDetails || s?.status === 'failed' ? s : null; });
+  assert.match(JSON.stringify(unroutedState), /call canvastty-assistant__pick_route/u);
+  const routedSpawn = JSON.parse(routed.content.split('\n').at(-1)).spawn;
+  const child = terminals.create({ provider: 'opencode', cwd: project, profile: 'normal', position: { x: 0, y: 0 }, role: 'subagent', parentSessionId: card.id, title: 'Worker', launchOptions: routedSpawn.launchOptions });
   const childStarted = await waitFor(() => spawned.find(entry => entry.options?.env?.CTTY_JEV_ROUTER_KEY && entry.options.env.CTTY_JEV_ROUTER_KEY !== token));
   assert.notEqual(childStarted.options.env.CTTY_JEV_ROUTER_KEY, token, 'each card has its own key');
 
-  // Refusals reach the card: a project whose OpenCode config picks a model, and Codex.
+  // Refusals reach the card: a project whose OpenCode config picks a model, and a CLI Auto does not run on.
   const refused = terminals.create({ provider: 'opencode', cwd: zenProject, profile: 'normal', position: { x: 0, y: 0 }, role: 'agent', title: 'Zen', launchOptions: { 'canvastty-assistant': { model: 'auto' } } });
   const refusedState = await waitFor(() => { const s = terminals.list().find(entry => entry.id === refused.id); return s?.failureDetails || s?.status === 'failed' ? s : null; });
   assert.match(JSON.stringify(refusedState), /This project's OpenCode config chooses its own model/u);
-  const codex = terminals.create({ provider: 'codex', cwd: project, profile: 'normal', position: { x: 0, y: 0 }, role: 'agent', title: 'Codex', launchOptions: { 'canvastty-assistant': { model: 'auto' } } });
+  const codex = terminals.create({ provider: 'kimi', cwd: project, profile: 'normal', position: { x: 0, y: 0 }, role: 'agent', title: 'Codex', launchOptions: { 'canvastty-assistant': { model: 'auto' } } });
   const codexState = await waitFor(() => { const s = terminals.list().find(entry => entry.id === codex.id); return s?.failureDetails || s?.status === 'failed' ? s : null; });
-  assert.match(JSON.stringify(codexState), /works with OpenCode for now/u);
+  assert.match(JSON.stringify(codexState), /works on Claude Code and Codex/u);
 
   // A card closes: its key dies at once; the other card's still works. The last one closes the port.
   const childKey = childStarted.options.env.CTTY_JEV_ROUTER_KEY;

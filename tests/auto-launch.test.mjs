@@ -8,6 +8,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { Assistant } from '../src/service/assistant.ts';
 import { AUTO_STRINGS } from '../src/auto/i18n.ts';
+import { AUTOPILOT_STRINGS } from '../src/autopilot/i18n.ts';
 import { modelChoiceIn, parseJsonc, projectModelConfig } from '../src/auto/launch.ts';
 import { startFakeUpstream } from './helpers/fake-upstream.mjs';
 import { startFakeOllama } from './helpers/fake-ollama.mjs';
@@ -101,7 +102,7 @@ test('prepare: an OpenCode config in the run folder points a random canvastty pr
 test('refusals: other CLIs, containers and remote hosts, a project config that picks models, no upstream, data class, unknown value', async t => {
   const { assistant } = await assistantWith(t);
   const reason = async (extra, locale = 'en') => (await assistant.launch(launch(extra)))?.refuse?.reason;
-  assert.equal(await reason({ provider: 'codex' }), AUTO_STRINGS.en.provider);
+  assert.equal(await reason({ provider: 'kimi' }), AUTOPILOT_STRINGS.en.provider, 'Claude Code and Codex run Auto on their own sign-in; others not yet');
   assert.equal(await reason({ environment: { pluginId: 'canvastty-environments', kind: 'container' } }), AUTO_STRINGS.en.environment);
   assert.equal(await reason({ environment: { pluginId: 'canvastty-environments', kind: 'ssh' } }), AUTO_STRINGS.en.environment);
   assert.equal(await reason({ environment: { pluginId: 'canvastty-environments', kind: 'worktree' } }), undefined, 'a worktree runs on this computer');
@@ -128,8 +129,8 @@ test('refusals: other CLIs, containers and remote hosts, a project config that p
   assert.equal(await reason({}), AUTO_STRINGS.en.noUpstream);
   // Russian.
   const ru = new Assistant({ host: fakeHost(), dataDir: mkdtempSync(join(base, 'data-')), git: null, locale: 'ru' });
-  assert.equal((await ru.launch(launch({ provider: 'claude' }))).refuse.reason, AUTO_STRINGS.ru.provider);
-  assert.match(AUTO_STRINGS.ru.provider, /OpenCode/u);
+  assert.equal((await ru.launch(launch({ provider: 'grok' }))).refuse.reason, AUTOPILOT_STRINGS.ru.provider);
+  assert.match(AUTOPILOT_STRINGS.ru.provider, /Claude Code и Codex/u);
 });
 
 test('project config reading (JSONC, keys, the git root)', () => {
@@ -218,7 +219,9 @@ test('route: Model: Auto (Jev) is a route for an OpenCode subagent: Auto launch 
   await assistant.launch(launch({ sessionId: 'orch-on-auto', role: 'orchestrator' }));
   const answer = await assistant.tool('route', caller, { task: 'Rename a variable', providers });
   const json = JSON.parse(answer.content.split('\n').at(-1));
-  assert.deepEqual(json.spawn, { provider: 'opencode', launchOptions: { 'canvastty-assistant': { model: 'auto' } } });
+  // The caller is an Auto card: the route value is bound to this decision (single-use, for this orchestrator).
+  assert.equal(json.spawn.provider, 'opencode');
+  assert.match(json.spawn.launchOptions['canvastty-assistant'].model, /^r:[a-z0-9]{12}:auto$/u);
   assert.match(answer.content, /Model: Auto \(Jev\)/u);
   assert.equal(json.alternatives.length, 0, 'zai/glm-* were not declared, and OpenCode Zen is never used silently');
   // Auto turned off: nothing usable on OpenCode, and route says so instead of falling back to OpenCode's default.
@@ -276,8 +279,12 @@ test('through CanvasTTY\'s own launch pipeline: the contribution passes its chec
   const refused = await pipeline.prepare({ ...context, sessionId: 'card-pipe-2', options: both });
   assert.equal(refused.ok, false);
   assert.match(refused.reason, /CanvasTTY Accounts and CanvasTTY Assistant both set OPENCODE_CONFIG/u);
-  // A refusal reaches the card with the plugin's name.
+  // Codex on Auto: its own sign-in, the vendor endpoint pinned; the core accepts the arguments.
   const codex = await pipeline.prepare({ ...context, provider: 'codex', sessionId: 'card-pipe-3', options: pipeline.normalizeOptions('codex', { 'canvastty-assistant': { model: 'auto' } }) });
-  assert.equal(codex.ok, false);
-  assert.equal(codex.reason, `CanvasTTY Assistant: ${AUTO_STRINGS.en.provider}`);
+  assert.equal(codex.ok, true, codex.reason);
+  assert.ok(codex.args.join(' ').includes('model_provider="openai"'));
+  // A refusal reaches the card with the plugin's name.
+  const kimi = await pipeline.prepare({ ...context, provider: 'kimi', sessionId: 'card-pipe-4', options: pipeline.normalizeOptions('kimi', { 'canvastty-assistant': { model: 'auto' } }) });
+  assert.equal(kimi.ok, false);
+  assert.equal(kimi.reason, `CanvasTTY Assistant: ${AUTOPILOT_STRINGS.en.provider}`);
 });

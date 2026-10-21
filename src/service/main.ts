@@ -47,6 +47,8 @@ serve({
     // Host-only requests.
     'canvastty.decide': async params => (await ready).decide(params),
     'canvastty.launch.prepare': async params => (await ready).launch(params as unknown as LaunchContext),
+    // The model field lists only its own choices; route values come from pick_route, not from the launcher.
+    'canvastty.launch.options': async () => ({ model: [] }),
     'canvastty.tools.call': async params => (await ready).tool(String(params.tool), params.caller as SessionSummary | undefined, (params.input ?? {}) as Record<string, unknown>),
     'canvastty.cards.invoke': async params => (await ready).harness.cardAction(str(params.actionId), str(params.sessionId), params.session as SessionSummary | undefined),
     // Any page: CanvasTTY's language as its context says (a service hears it only at start).

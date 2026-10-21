@@ -22,6 +22,7 @@ import { decide, estimateText, modelText, TASK_TOKENS, whyLine, type AccountRow,
 import { parseLimits, quotaOf, STALE_MS, type LimitsCache } from './limits.ts';
 import { classifyOutcome, RouteRecords, type OptionRecord, type OutcomeResult, type RouteRecord } from './records.ts';
 import { normalizeRouteSettings, validateRouteSettings, type RouteSettings } from './settings.ts';
+import type { Spawn } from './engine.ts';
 
 export const ROUTE_STORAGE_KEY = 'routing';
 export const ROUTE_TOOLS = ['route', 'pick_route', 'route_outcome'] as const;
@@ -78,6 +79,11 @@ export interface RouteServiceOptions {
    */
   delegatedTask?(childId: string, text: string, parentId: string): void;
   dataClassMode(): DataClassMode;
+  /**
+   * Auto (Jev) autopilot: for a caller in an Auto tree, the spawn values with the Assistant's bound decision value
+   * (autopilot/binding.ts); null leaves the spawn as it is.
+   */
+  bindSpawn?(callerId: string, spawn: Spawn, decisionId: string, orchestrate: boolean): Spawn | null;
   now?: () => number;
   random?: () => number;
 }
@@ -272,6 +278,31 @@ export class RouteService {
   }
 
   /**
+   * Auto (Jev) on a card's own sign-in (autopilot D2): the model and effort for `cli` on its declared subscription,
+   * by the same engine as `route`, among that CLI's own sign-in routes only (never a paid route). A declared plan
+   * with no room left gives `exhausted` with the reason; no declared plan gives the CLI's own default model.
+   */
+  topLevelChoice(cli: string, view: TurnView, cardClass: DataClass, orchestrate: boolean): { model: string | null; effort: string | null; why: string } | { exhausted: string } {
+    const { catalog, index } = this.options.catalog();
+    const now = this.now();
+    const result = decide({
+      view, preference: this.options.preference(), settings: this.settings,
+      providers: [{ id: cli, installed: true, available: true, subagent: true, orchestrator: true }], providersGiven: true, accountRows: [],
+      callerProvider: cli, cardClass, mode: this.options.dataClassMode(), limits: this.limits, catalog, index, auto: null, now,
+      busy: () => 0, launches: (id, ms) => this.launches(id, ms), cooldown: key => { const c = this.cooldowns.get(key); return c && c.until > now ? c : null; },
+      stats: this.records.routeStats(), prefer: cli, orchestrate, explore: { roll: 1, retired: new Set(), highRisk: false }
+    });
+    const own = [result.top, ...result.groups.flat()].filter((c): c is NonNullable<typeof c> => !!c && c.cli === cli && (c.kind === 'subscription' || c.kind === 'cli-default'));
+    const best = own.find(c => c.kind === 'subscription') ?? own[0];
+    if (!best || best.kind === 'cli-default' && this.settings.plans.some(plan => plan.cli === cli)) {
+      const why = result.dropped.find(entry => entry.cli === cli && /exhausted|reserve|cooldown|limit|busy/iu.test(entry.reason))?.reason;
+      if (why) return { exhausted: why };
+    }
+    if (!best) return { model: null, effort: null, why: 'no declared plan: the CLI\'s own default model' };
+    return { model: best.spawn.model ?? null, effort: best.spawn.effort ?? null, why: best.kind === 'subscription' ? `${best.label}: ${best.model ?? 'default'}${best.effort ? `@${best.effort}` : ''}` : 'the CLI\'s own default model' };
+  }
+
+  /**
    * What the orchestrator passed, or what it passed earlier: the full list_providers and list_routes are large, so a
    * card's last full lists are kept (memory, 30 min) and a later call may send only the task, or a `digest` such as
    * "claude:ok codex:signed_out opencode @glm-53" (CLIs with their sign-in, `@` a ready account id from list_routes).
@@ -322,6 +353,13 @@ export class RouteService {
       explored: decision.explored, preferred: decision.preferred, options: options.map(option => optionRecord(option, decision, now))
     };
     this.records.add(record);
+    // An Auto (Jev) tree: every option's spawn carries a single-use value bound to this decision.
+    if (this.options.bindSpawn) {
+      for (const option of options) {
+        const bound = this.options.bindSpawn(caller.id, option.spawn, record.id, input.orchestrate === true);
+        if (bound) option.spawn = bound;
+      }
+    }
     const now2 = this.now();
     for (const [id, kept] of this.tasks) if (now2 - kept.at > MATCH_MS) this.tasks.delete(id);
     const cwd = clean(input.cwd, 4_096);
