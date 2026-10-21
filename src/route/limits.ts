@@ -153,12 +153,20 @@ export function shadowPrice(quota: SubscriptionQuota, share: number, ref: number
 
 /** Clock skew and reporting jitter tolerated around a reset time. */
 export const RESET_TOLERANCE_MS = 2 * 60_000;
+/** The early-reset thresholds CanvasTTY's core uses (LimitsService.detectEarlyResets). */
+export const EARLY_RESET_MIN_DROP = 5;
+export const EARLY_RESET_NEAR_ZERO = 5;
+export const EARLY_RESET_NOISE = 2;
+export const EARLY_RESET_GRACE_MS = 5 * 60_000;
+export const SAME_RESET_TIME_MS = 60_000;
 
 /** One window that reset before its announced time (same fields as CanvasTTY's own `earlyResets` entries). */
 export interface EarlyResetDetail {
   provider: string;
-  /** The window kind, for example `claude:five_hour`, `codex:secondary`. */
+  /** The window id, for example `claude:five_hour`, `codex:secondary` (CanvasTTY's `windowId`). */
   window: string;
+  /** CanvasTTY's `windowLabel` ("5h", "7d"), when known. */
+  label?: string | null;
   usedBefore: number | null;
   usedAfter: number | null;
   announcedResetAt: number | null;
@@ -183,23 +191,23 @@ const hhmm = (at: number): string => new Date(at).toISOString().slice(11, 16);
 
 /**
  * The owner's rule for an early reset: the used share dropped by at least max(5 points, half of what was used), or to
- * 5 % or less, while the reset time the previous read announced was still ahead — whatever the provider reports as
+ * 5 % or less by more than 2 points, while the reset time the previous read announced was more than 5 minutes ahead — whatever the provider reports as
  * the next reset afterwards (a fresh window, or still the old time). A reset time that moves without a drop is not a
  * reset; a small dip is not one either. Per provider and per window kind.
  */
 export function earlyResetOf(provider: string, key: string, previous: WindowView, next: WindowView, now: number): EarlyResetDetail | null {
-  if (previous.resetsAt === null || now >= previous.resetsAt - RESET_TOLERANCE_MS) return null;
+  // Same thresholds as CanvasTTY's own detector (LimitsService.detectEarlyResets).
+  if (previous.resetsAt === null || now >= previous.resetsAt - EARLY_RESET_GRACE_MS) return null;
   const drop = previous.usedPercent - next.usedPercent;
-  if (drop <= 0) return null;
-  if (drop < Math.max(5, previous.usedPercent / 2) && !(next.usedPercent <= 5 && previous.usedPercent > 5)) return null;
+  if (!(drop >= Math.max(EARLY_RESET_MIN_DROP, previous.usedPercent / 2) || (next.usedPercent <= EARLY_RESET_NEAR_ZERO && drop > EARLY_RESET_NOISE))) return null;
   return {
-    provider, window: key, usedBefore: previous.usedPercent, usedAfter: next.usedPercent, announcedResetAt: previous.resetsAt,
-    reportedResetAtAfter: next.resetsAt, resetTimeKept: next.resetsAt !== null && Math.abs(next.resetsAt - previous.resetsAt) <= RESET_TOLERANCE_MS
+    provider, window: key, label: next.label ?? null, usedBefore: previous.usedPercent, usedAfter: next.usedPercent, announcedResetAt: previous.resetsAt,
+    reportedResetAtAfter: next.resetsAt, resetTimeKept: next.resetsAt !== null && Math.abs(next.resetsAt - previous.resetsAt) <= SAME_RESET_TIME_MS
   };
 }
 
 export const earlyNote = (detail: EarlyResetDetail, label?: string | null): string =>
-  `${label ?? detail.window} ${detail.usedBefore === null ? '?' : Math.round(detail.usedBefore)}% → ${detail.usedAfter === null ? '?' : Math.round(detail.usedAfter)}%${detail.announcedResetAt !== null ? ` before ${hhmm(detail.announcedResetAt)} UTC` : ''}${detail.resetTimeKept ? ' (old reset time still shown)' : ''}`;
+  `${label ?? detail.label ?? detail.window} ${detail.usedBefore === null ? '?' : Math.round(detail.usedBefore)}% → ${detail.usedAfter === null ? '?' : Math.round(detail.usedAfter)}%${detail.announcedResetAt !== null ? ` before ${hhmm(detail.announcedResetAt)} UTC` : ''}${detail.resetTimeKept ? ' (old reset time still shown)' : ''}`;
 
 /** Compares a provider's new read with the previous one, window kind by window kind. */
 export function limitChanges(previous: LimitsCache | null, next: LimitsCache, now: number): LimitChange[] {
@@ -231,7 +239,11 @@ export function limitChanges(previous: LimitsCache | null, next: LimitsCache, no
   return changes;
 }
 
-/** CanvasTTY's `earlyResets` entries, older ({windowId, previousUsedPercent, …}) or newer ({window, usedBefore, …}). */
+/**
+ * CanvasTTY's `earlyResets` entries (`{provider, home?, windowId, slot, windowLabel, windowMinutes, usedBefore,
+ * usedAfter, announcedResetAt, reportedResetAtAfter, resetTimeKept}`); the first build's names (`previousUsedPercent`,
+ * `usedPercent`, `previousResetsAt`, `resetsAt`) are still read. Account-home entries are another login's and left out.
+ */
 export function coreEarlyResets(value: unknown): EarlyResetDetail[] {
   if (!Array.isArray(value)) return [];
   const number = (raw: unknown): number | null => typeof raw === 'number' && Number.isFinite(raw) ? raw : null;
@@ -239,17 +251,16 @@ export function coreEarlyResets(value: unknown): EarlyResetDetail[] {
   for (const entry of value.slice(0, 32)) {
     if (!entry || typeof entry !== 'object') continue;
     const e = entry as Record<string, unknown>;
-    // An account home is another plugin's (or another login's) window, not the default login's.
     if (e.home !== undefined && e.home !== null) continue;
     const provider = short(e.provider, 40);
-    const window = short(e.window, 80) ?? short(e.windowId, 80);
     if (!provider || !/^[a-z0-9-]{1,40}$/u.test(provider)) continue;
     const announced = number(e.announcedResetAt) ?? number(e.previousResetsAt);
-    const reported = number(e.reportedResetAtAfter) ?? number(e.resetsAt);
+    const reported = 'reportedResetAtAfter' in e ? number(e.reportedResetAtAfter) : number(e.resetsAt);
     out.push({
-      provider, window: window ?? 'window', usedBefore: number(e.usedBefore) ?? number(e.previousUsedPercent), usedAfter: number(e.usedAfter) ?? number(e.usedPercent),
+      provider, window: short(e.windowId, 80) ?? short(e.window, 80) ?? 'window', label: short(e.windowLabel, 40),
+      usedBefore: number(e.usedBefore) ?? number(e.previousUsedPercent), usedAfter: number(e.usedAfter) ?? number(e.usedPercent),
       announcedResetAt: announced, reportedResetAtAfter: reported,
-      resetTimeKept: typeof e.resetTimeKept === 'boolean' ? e.resetTimeKept : announced !== null && reported !== null && Math.abs(announced - reported) <= RESET_TOLERANCE_MS
+      resetTimeKept: typeof e.resetTimeKept === 'boolean' ? e.resetTimeKept : announced !== null && reported !== null && Math.abs(announced - reported) <= SAME_RESET_TIME_MS
     });
   }
   return out;

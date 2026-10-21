@@ -10,7 +10,7 @@ import { mkdtempSync, readFileSync, realpathSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { RouteService, accountRowsFrom } from '../src/route/service.ts';
-import { coreEarlyResets, limitChanges, mergeLimits, parseLimits, quotaOf, resetFromText, PER_LAUNCH_PERCENT } from '../src/route/limits.ts';
+import { coreEarlyResets, earlyResetOf, limitChanges, mergeLimits, parseLimits, quotaOf, resetFromText, PER_LAUNCH_PERCENT } from '../src/route/limits.ts';
 import { LimitsFeed, FEED } from '../src/route/limitsFeed.ts';
 import { accountRows, catalog, declared, index, NOW, providers } from './helpers/route-fixtures.mjs';
 
@@ -76,7 +76,7 @@ test('the owner\'s rule: a clear drop before the announced time is an early rese
   const at = NOW + 30 * MIN;
   const kept = limitChanges(before, parseLimits(snapshot({ claude: 'claude-oauth-usage-early-kept.json', codex: null, at }), at), at);
   assert.deepEqual(kept.map(c => c.kind), ['early-reset']);
-  assert.deepEqual(kept[0].early, [{ provider: 'claude', window: 'claude:five_hour', usedBefore: 100, usedAfter: 2, announcedResetAt: Date.parse('2026-10-18T14:30:00Z'), reportedResetAtAfter: Date.parse('2026-10-18T14:30:00Z'), resetTimeKept: true }]);
+  assert.deepEqual(kept[0].early, [{ provider: 'claude', window: 'claude:five_hour', label: '5h', usedBefore: 100, usedAfter: 2, announcedResetAt: Date.parse('2026-10-18T14:30:00Z'), reportedResetAtAfter: Date.parse('2026-10-18T14:30:00Z'), resetTimeKept: true }]);
   assert.match(kept[0].note, /old reset time still shown/u);
   // The kept old time then arrives with little use: not another reset.
   const afterKept = parseLimits(snapshot({ claude: 'claude-oauth-usage-early-kept.json', codex: null, at }), at);
@@ -93,16 +93,29 @@ test('the owner\'s rule: a clear drop before the announced time is an early rese
   assert.deepEqual(limitChanges(before, nearly, at).map(c => c.kind), ['recovered']);
 });
 
-test('CanvasTTY\'s earlyResets entries, older and newer fields; account homes are left out', () => {
+test('CanvasTTY\'s earlyResets entries (final fields; the first build\'s names still read); account homes are left out', () => {
   assert.deepEqual(coreEarlyResets([
-    { provider: 'claude', windowId: 'claude:five_hour', previousResetsAt: 2, resetsAt: 2, previousUsedPercent: 90, usedPercent: 3 },
-    { provider: 'codex', window: 'codex:secondary', usedBefore: 60, usedAfter: 0, announcedResetAt: 5, reportedResetAtAfter: 900_000, resetTimeKept: false },
-    { provider: 'claude', home: '/data/homes/claude-a', window: 'claude:five_hour', usedBefore: 90, usedAfter: 0 },
+    { provider: 'claude', windowId: 'claude:five_hour', slot: 'primary', windowLabel: '5h', windowMinutes: 300, usedBefore: 90, usedAfter: 3, announcedResetAt: 2_000, reportedResetAtAfter: 2_000, resetTimeKept: true },
+    { provider: 'codex', windowId: 'codex:secondary', slot: 'secondary', windowLabel: null, windowMinutes: 10_080, usedBefore: 60, usedAfter: 0, announcedResetAt: 5, reportedResetAtAfter: null, resetTimeKept: false },
+    { provider: 'kimi', windowId: 'kimi:weekly', previousResetsAt: 7, resetsAt: 7, previousUsedPercent: 50, usedPercent: 1 },
+    { provider: 'claude', home: '/data/homes/claude-a', windowId: 'claude:five_hour', usedBefore: 90, usedAfter: 0 },
     { provider: 'Bad Name' }, 'x'
   ]), [
-    { provider: 'claude', window: 'claude:five_hour', usedBefore: 90, usedAfter: 3, announcedResetAt: 2, reportedResetAtAfter: 2, resetTimeKept: true },
-    { provider: 'codex', window: 'codex:secondary', usedBefore: 60, usedAfter: 0, announcedResetAt: 5, reportedResetAtAfter: 900_000, resetTimeKept: false }
+    { provider: 'claude', window: 'claude:five_hour', label: '5h', usedBefore: 90, usedAfter: 3, announcedResetAt: 2_000, reportedResetAtAfter: 2_000, resetTimeKept: true },
+    { provider: 'codex', window: 'codex:secondary', label: null, usedBefore: 60, usedAfter: 0, announcedResetAt: 5, reportedResetAtAfter: null, resetTimeKept: false },
+    { provider: 'kimi', window: 'kimi:weekly', label: null, usedBefore: 50, usedAfter: 1, announcedResetAt: 7, reportedResetAtAfter: 7, resetTimeKept: true }
   ]);
+});
+
+test('thresholds match CanvasTTY\'s detector: >5 min before the announced reset, drop ≥ max(5, half) or to ≤5 % by >2 points, same time within 1 min', () => {
+  const w = (used, resetsAt) => ({ id: 'claude:five_hour', label: '5h', usedPercent: used, windowMinutes: 300, resetsAt });
+  assert.equal(earlyResetOf('claude', 'claude:five_hour', w(80, NOW + 4 * MIN), w(0, null), NOW), null);
+  assert.equal(earlyResetOf('claude', 'claude:five_hour', w(80, NOW + 6 * MIN), w(0, null), NOW).usedAfter, 0);
+  assert.equal(earlyResetOf('claude', 'claude:five_hour', w(4, NOW + H), w(2, NOW + H), NOW), null);
+  assert.equal(earlyResetOf('claude', 'claude:five_hour', w(4, NOW + H), w(1, NOW + H), NOW).usedBefore, 4);
+  assert.equal(earlyResetOf('claude', 'claude:five_hour', w(30, NOW + H), w(26, NOW + 2 * H), NOW), null, 'a moved time with a small drop is not a reset');
+  assert.equal(earlyResetOf('claude', 'claude:five_hour', w(80, NOW + H), w(0, NOW + H + 50_000), NOW).resetTimeKept, true);
+  assert.equal(earlyResetOf('claude', 'claude:five_hour', w(80, NOW + H), w(0, NOW + H + 90_000), NOW).resetTimeKept, false);
 });
 
 test('mergeLimits: an older page forward never replaces a newer read of the same provider', () => {
@@ -341,10 +354,10 @@ test('push: canvastty.limits.changed with a snapshot and the core\'s early-reset
   assert.equal(route.cooldowns.has('plan:claude-max'), true);
   // The same windows as far as this read shows, but the core saw the early reset (it compares every read it makes).
   feed.changed({ state: 'ready', snapshot: snapshot({ claude: 'claude-oauth-usage-exhausted.json', at: NOW + MIN }).snapshot, earlyReset: true,
-    earlyResets: [{ provider: 'claude', window: 'claude:five_hour', usedBefore: 100, usedAfter: 4, announcedResetAt: NOW + 150 * MIN, reportedResetAtAfter: NOW + 150 * MIN, resetTimeKept: true }] });
+    earlyResets: [{ provider: 'claude', windowId: 'claude:five_hour', slot: 'primary', windowLabel: '5h', windowMinutes: 300, usedBefore: 100, usedAfter: 4, announcedResetAt: NOW + 150 * MIN, reportedResetAtAfter: NOW + 150 * MIN, resetTimeKept: true }] });
   assert.equal(route.cooldowns.has('plan:claude-max'), false);
   const event = route.state().quotaEvents.find(e => e.kind === 'early-reset');
-  assert.match(event.note, /claude:five_hour 100% → 4% before 14:30 UTC \(old reset time still shown\) \(CanvasTTY\)/u);
+  assert.match(event.note, /5h 100% → 4% before 14:30 UTC \(old reset time still shown\) \(CanvasTTY\)/u);
   assert.equal(event.early[0].resetTimeKept, true);
   const before = host.calls.filter(c => c.method === 'limits.get').length;
   feed.changed({ state: 'ready' });
@@ -387,10 +400,33 @@ test('through CanvasTTY\'s PluginLimits: subscribe, get, and its changed push wi
   route.cooldowns.set('plan:claude-max', { until: NOW + 2 * H, at: NOW, reason: 'it hit a usage limit' });
   clock.now += 20 * MIN;
   current = snapshot({ claude: 'claude-oauth-usage-early.json', at: clock.now }).snapshot;
-  for (const listener of listeners) listener({ snapshot: current, earlyResets: [{ provider: 'claude', windowId: 'claude:five_hour', previousResetsAt: NOW + 150 * MIN, resetsAt: null, previousUsedPercent: 100, usedPercent: 0 }] });
+  for (const listener of listeners) listener({ snapshot: current, earlyResets: [{ provider: 'claude', windowId: 'claude:five_hour', slot: 'primary', windowLabel: '5h', windowMinutes: 300, usedBefore: 100, usedAfter: 0, announcedResetAt: NOW + 150 * MIN, reportedResetAtAfter: null, resetTimeKept: false }] });
   await new Promise(resolve => setTimeout(resolve, 20));
   assert.equal(route.cooldowns.has('plan:claude-max'), false);
   assert.ok(route.state().quotaEvents.some(event => event.kind === 'early-reset' && event.provider === 'claude'));
   assert.equal(route.state().plans.find(plan => plan.id === 'claude-max').quota.state, 'known');
   plugin.dispose();
+});
+
+test('same verdicts as CanvasTTY\'s own detectEarlyResets on the fixtures (CANVASTTY_REPO with it)', { skip: !core?.detectEarlyResets }, () => {
+  const at = NOW + 30 * MIN;
+  const cases = [
+    ['claude-oauth-usage-exhausted.json', 'claude-oauth-usage-early.json'],
+    ['claude-oauth-usage-exhausted.json', 'claude-oauth-usage-early-kept.json'],
+    ['claude-oauth-usage.json', 'claude-oauth-usage-noise.json'],
+    ['claude-oauth-usage.json', 'claude-oauth-usage.json']
+  ];
+  for (const [first, second] of cases) {
+    const a = snapshot({ claude: first, codex: null }).snapshot;
+    const b = snapshot({ claude: second, codex: null, at }).snapshot;
+    const theirs = core.detectEarlyResets(a, b, at).map(e => [e.windowId, e.usedBefore, e.usedAfter, e.reportedResetAtAfter, e.resetTimeKept]);
+    const ours = (limitChanges(parseLimits({ snapshot: a }, NOW), parseLimits({ snapshot: b }, at), at).find(c => c.kind === 'early-reset')?.early ?? [])
+      .map(e => [e.window, e.usedBefore, e.usedAfter, e.reportedResetAtAfter, e.resetTimeKept]);
+    assert.deepEqual(ours, theirs, `${first} → ${second}`);
+  }
+  const codexA = snapshot({ claude: null, codex: 'codex-rate-limits-exhausted.json' }).snapshot;
+  const codexB = snapshot({ claude: null, codex: 'codex-rate-limits-banked.json', at }).snapshot;
+  assert.deepEqual(
+    (limitChanges(parseLimits({ snapshot: codexA }, NOW), parseLimits({ snapshot: codexB }, at), at)[0]?.early ?? []).map(e => [e.window, e.usedAfter, e.resetTimeKept]),
+    core.detectEarlyResets(codexA, codexB, at).map(e => [e.windowId, e.usedAfter, e.resetTimeKept]));
 });
