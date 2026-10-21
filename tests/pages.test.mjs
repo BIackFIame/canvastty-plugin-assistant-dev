@@ -39,7 +39,7 @@ function page(file, replies, extraSdk = {}) {
     ...extraSdk
   };
   const document = { documentElement: html, activeElement: null, createElement: tag => new Node(tag), querySelector: selector => selector === '#app' ? app : status };
-  vm.runInNewContext(readFileSync(join(root, file), 'utf8'), { window: { CanvasTTYPlugin: sdk }, document, console, setTimeout, clearTimeout, structuredClone });
+  vm.runInNewContext(readFileSync(join(root, file), 'utf8'), { window: { CanvasTTYPlugin: sdk }, document, console, setTimeout, clearTimeout, structuredClone, URL });
   return { app, html, requests, context: (locale, palette, extra = {}) => context({ appearance: { locale, palette, ...extra } }), event: (event, data) => events.forEach(listener => listener({ serviceId: 'assistant', event, data })) };
 }
 
@@ -487,13 +487,14 @@ test('decision models page: several models on hard turns — consensus Off/Auto/
   assert.doesNotMatch(ru, /Several models|Consensus|merged|drafts|best of N|per turn/u, 'no English left in the strategy rows');
 });
 
-test('decision models page: a short default view (Auto, one key, preference, daily limit, today) and everything else under Advanced; the key sets Jev and Auto up; ru/en', async () => {
+test('decision models page: a short default view (Auto, the Jev key, preference, daily limit, today) and everything else under Advanced; the key serves Jev only; ru/en', async () => {
   const { DEFAULT_ASSISTANT_SETTINGS } = await import('../src/shared/settings.ts');
   const at = Date.UTC(2026, 9, 19, 9, 0, 0);
   let main = { settings: structuredClone(DEFAULT_ASSISTANT_SETTINGS), status: { enabled: false, backends: [] }, slots: {}, checks: {}, recent: [] };
   const auto = {
     jevKey: false,
-    settings: { upstreams: [], preference: 'balanced', cheaperFallback: false, decider: 'jev', dailyUsdCap: 1, perCardUsdCap: 0.4, catalog: { autoRefresh: true, refreshHours: 168 } },
+    settings: { upstreams: [{ id: 'zai', preset: 'openai-compatible', baseUrl: 'https://api.z.ai/api/paas/v4', trust: 'D1', key: 'own', models: [{ id: 'glm-5.3' }], allModels: false, excluded: [], enabled: true },
+      { id: 'jev-or', preset: 'openrouter', baseUrl: 'https://openrouter.ai/api/v1', trust: 'D1', key: 'jev', models: [], allModels: true, excluded: [], enabled: false }], preference: 'balanced', cheaperFallback: false, decider: 'jev', dailyUsdCap: 1, perCardUsdCap: 0.4, catalog: { autoRefresh: true, refreshHours: 168 } },
     readable: true, keys: {},
     recent: [{ at, session: 'abcd1234', conversation: 'c', turn: 't', kind: 'turn', source: 'jev', tier: 'large', taskType: 'writing', difficulty: 'large', confidence: 0.05, why: 'best_score', upstream: 'openrouter', model: 'google/gemini-3.1-pro-preview', effort: 'high', score: 82.2, scoreSource: 'x', priceIn: 2, priceOut: 12, attempts: 1, failovers: [], status: 200, reason: 'jev', ttfbMs: 1, totalMs: 2, tokensIn: 1, tokensOut: 1, costUsd: 0.184, tradeoff: null, strategy: 'consensus', fanOut: null }],
     stats: { requests: 14, turns: 3, continuations: 10, small: 1, jevAsked: 3, jevAnswered: 3, rules: 0, leaseReuses: 10, failovers: 0, hosts: [], spentToday: 0.39, listening: false, cards: 0 }
@@ -502,7 +503,7 @@ test('decision models page: a short default view (Auto, one key, preference, dai
   const ui = page('settings/assistant.js', {
     state: () => main,
     save: ({ settings }) => { main = { ...main, settings, slots: Object.fromEntries(settings.backends.map(b => [b.id, b.preset === 'openrouter' ? { secret: 'assistant-openrouter', origin: 'https://openrouter.ai' } : null])) }; return settings; },
-    quickKeySaved: () => { auto.jevKey = true; main.settings.modes['task.route'] = 'auto'; auto.settings.upstreams = [{ id: 'openrouter', preset: 'openrouter', baseUrl: 'https://openrouter.ai/api/v1', trust: 'D1', key: 'jev', models: [], allModels: true, excluded: [], enabled: true }]; return null; },
+    quickKeySaved: () => { auto.jevKey = true; main.settings.modes['task.route'] = 'auto'; return null; },
     'auto.state': () => auto, 'auto.save': ({ settings }) => { auto.settings = settings; return settings; }, 'route.state': null
   }, { secrets: { set: async (key, value) => { secrets.push({ key, value }); }, delete: async () => undefined } });
   await settle();
@@ -513,7 +514,7 @@ test('decision models page: a short default view (Auto, one key, preference, dai
   assert.equal(advanced.open, false, 'Advanced starts closed');
   assert.ok(controls().length <= 9, `a short default view (${controls().length} controls)`);
   const quick = ui.app.all().find(node => node.dataset?.section === 'quick').text();
-  assert.match(quick, /Auto \(Jev\) Auto .* OpenRouter key Not saved\./u);
+  assert.match(quick, /Auto \(Jev\) Auto .* Jev key \(OpenRouter\) Not saved\. Used only for Jev's own decisions, never for model calls/u);
   assert.match(quick, /Cheaper Balanced Better/u);
   assert.match(quick, /Daily limit, \$/u);
   assert.match(quick, /\$0\.39 google\/gemini-3\.1-pro-preview · writing, large · several models · \$0\.1840/u);
@@ -529,18 +530,26 @@ test('decision models page: a short default view (Auto, one key, preference, dai
   assert.ok(ui.requests.some(r => r.method === 'quickKeySaved' && r.params.backendId === main.settings.backends[0].id));
   assert.equal(input.value, '', 'cleared once stored');
   await settle();
-  assert.match(ui.app.all().find(node => node.dataset?.section === 'quick').text(), /OpenRouter key Saved\./u);
-  // Auto off: every upstream off (the person's list stays).
-  const toggle = ui.app.all().find(node => node.name === 'auto-on');
-  assert.equal(toggle.checked, true);
-  toggle.checked = false;
-  for (const listener of toggle.listeners.change) listener();
+  assert.match(ui.app.all().find(node => node.dataset?.section === 'quick').text(), /Jev key \(OpenRouter\) Saved\./u);
+  assert.equal(auto.settings.upstreams.length, 2, 'the key adds no Auto upstream: OpenRouter serves only Jev');
+  // The OpenRouter upstream saved before the rule: shown off, with a note.
+  assert.ok(ui.app.all().some(node => node.dataset?.note === 'jev-only'));
+  // Auto off and on: the person's providers; the OpenRouter one stays off.
+  const toggle = () => ui.app.all().find(node => node.name === 'auto-on');
+  assert.equal(toggle().checked, true);
+  toggle().checked = false;
+  for (const listener of toggle().listeners.change) listener();
   await settle();
   assert.equal(auto.settings.upstreams[0].enabled, false);
+  await settle();
+  toggle().checked = true;
+  for (const listener of toggle().listeners.change) listener();
+  await settle();
+  assert.deepEqual(auto.settings.upstreams.map(u => u.enabled), [true, false], JSON.stringify(ui.requests.filter(r => r.method === 'auto.save').map(r => r.params.settings.upstreams.map(u => u.enabled))) + String(toggle().checked));
   // Russian: the same view, no English.
   ui.context('ru', 'night');
   const ru = ui.app.all().find(node => node.dataset?.section === 'quick').text();
-  assert.match(ru, /Ключ OpenRouter Сохранён\./u);
+  assert.match(ru, /Ключ Jev \(OpenRouter\) Сохранён\./u);
   assert.match(ru, /Дешевле Сбалансированно Лучше/u);
   assert.match(ru, /Предел в день, \$/u);
   assert.match(ru, /исследование|тексты/u);

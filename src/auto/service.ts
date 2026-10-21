@@ -11,11 +11,12 @@ import { upstreamAllowed } from './classify.ts';
 import { plan, type TurnView } from './select.ts';
 import { AUTO_STRINGS, badgeText } from './i18n.ts';
 import type { RouteOutcome } from './consensus.ts';
+import type { JevOnlyHosts } from './jevOnly.ts';
 import { buildInventory, type Inventory, type InventoryEntry } from './inventory.ts';
 import { autoRefusal, limitsFor, openCodeContribution } from './launch.ts';
 import { AutoRouter, type DecisionRecord, type RouterDeps, type RouterStats, type TurnDecision } from './router.ts';
 import {
-  JEV_OPENROUTER_SECRET, normalizeAutoSettings, OPENROUTER_BASE_URL, originOf, upstreamSecret, validateAutoSettings,
+  JEV_OPENROUTER_SECRET, isJevOnlyUpstream, normalizeAutoSettings, OPENROUTER_BASE_URL, originOf, upstreamSecret, validateAutoSettings,
   type AutoRoutingSettings, type AutoUpstream
 } from './settings.ts';
 import type { LaunchGrant } from './tokens.ts';
@@ -43,6 +44,8 @@ export interface AutoServiceOptions {
   /** A new user turn of a card (its latest user text), for the card's command review. */
   turn?(text: string, grant: LaunchGrant): void;
   publishBadge(sessionId: string, badge: Badge | null): void;
+  /** The request-time OpenRouter check (tests pass one with their own lookup). */
+  jevOnly?: JevOnlyHosts;
   /** At most this many calls at once on a subscription-like upstream (the person marked its address flat-rate). */
   parallelCap?(upstream: AutoUpstream): number | null;
   transport?: typeof fetch;
@@ -84,8 +87,6 @@ export type AutoPrepareAnswer = ReturnType<typeof openCodeContribution> | { refu
 export class AutoService {
   settings: AutoRoutingSettings;
   readable: boolean;
-  /** The person (or this service on their key) saved Auto settings at least once. */
-  private everSaved: boolean;
   readonly router: AutoRouter;
   readonly catalog: CatalogStore;
   private readonly options: AutoServiceOptions;
@@ -96,7 +97,6 @@ export class AutoService {
     this.options = options;
     this.readable = options.savedUnavailable !== true;
     this.settings = normalizeAutoSettings(this.readable ? options.saved : null);
-    this.everSaved = this.readable && options.saved !== undefined && options.saved !== null;
     this.catalog = new CatalogStore({
       directory: join(options.dataDir, 'auto'), bundled: bundledCatalog,
       ...(options.catalogTransport ? { transport: options.catalogTransport } : {}),
@@ -116,6 +116,8 @@ export class AutoService {
       badge: (sessionId, model) => options.publishBadge(sessionId, model ? { text: badgeText(model.model), tone: 'neutral', tooltip: AUTO_STRINGS[this.options.locale].badgeTip(model.tier, model.source) } : null),
       log: (level, message) => options.host.log(level, message),
       ...(options.parallelCap ? { parallelCap: options.parallelCap } : {}),
+      noProviderMessage: () => AUTO_STRINGS[this.options.locale].noProvider,
+      ...(options.jevOnly ? { jevOnly: options.jevOnly } : {}),
       ...(options.transport ? { transport: options.transport } : {}),
       ...(options.now ? { now: options.now } : {}),
       ...(options.timeouts ? { timeouts: options.timeouts } : {})
@@ -133,7 +135,7 @@ export class AutoService {
 
   setLocale(locale: Locale): void { this.options.locale = locale; }
 
-  loaded(saved: unknown): void { this.settings = normalizeAutoSettings(saved); this.readable = true; this.everSaved ||= saved !== undefined && saved !== null; this.configureCatalog(); }
+  loaded(saved: unknown): void { this.settings = normalizeAutoSettings(saved); this.readable = true; this.configureCatalog(); }
 
   /** Whether the Jev · OpenRouter key is saved (for OpenRouter's own address). */
   async jevKey(): Promise<boolean> {
@@ -141,18 +143,6 @@ export class AutoService {
     return !!stored && stored.origin === originOf(OPENROUTER_BASE_URL);
   }
 
-  /**
-   * Auto works with just a key: while Auto's settings were never saved and list no upstream, a saved Jev ·
-   * OpenRouter key adds the OpenRouter upstream on that key (every suitable model, trusted with D1 like a new
-   * upstream on the page). Once anything was saved, the person's list stays as they left it.
-   */
-  async adoptJevKey(): Promise<boolean> {
-    if (!this.readable || this.everSaved || this.settings.upstreams.length || !(await this.jevKey())) return false;
-    const next = structuredClone(this.settings);
-    next.upstreams.push({ id: 'openrouter', preset: 'openrouter', baseUrl: OPENROUTER_BASE_URL, trust: 'D1', key: 'jev', models: [], allModels: true, excluded: [], enabled: true });
-    await this.save(next);
-    return true;
-  }
 
   /** Background refresh only while an upstream is on; OpenRouter's list only when an OpenRouter upstream uses it. */
   private configureCatalog(): void {
@@ -263,7 +253,6 @@ export class AutoService {
   // ---------------------------------------------------------------------------------------------------------------
 
   async state(): Promise<{ jevKey: boolean; settings: AutoRoutingSettings; readable: boolean; keys: Record<string, boolean>; recent: DecisionRecord[]; stats: RouterStats & { spentToday: number; callsToday?: number; listening: boolean; cards: number }; catalog: CatalogStatus; models: Record<string, ModelRow[]>; waitingForList: string[]; outcomes: Record<string, RouteOutcome> }> {
-    await this.adoptJevKey().catch(() => false);
     const keys: Record<string, boolean> = {};
     for (const upstream of this.settings.upstreams) keys[upstream.id] = upstream.key === 'none' ? true : !!(await this.keyFor(upstream).catch(() => null));
     return { jevKey: await this.jevKey(), settings: this.settings, readable: this.readable, keys, recent: this.router.recent(), stats: this.router.statsView(), catalog: this.catalog.status(), models: this.modelRows(), waitingForList: this.inventory().waitingForList, outcomes: this.router.routeOutcomes() };
@@ -272,9 +261,10 @@ export class AutoService {
   async save(value: unknown): Promise<AutoRoutingSettings> {
     if (!this.readable) throw new Error(this.options.locale === 'ru' ? 'Сохранённые настройки ещё не прочитаны, поэтому ничего не изменено.' : 'The saved settings could not be read yet, so nothing is changed.');
     const next = validateAutoSettings(value);
+    // OpenRouter is for Jev only: no new upstream there, even switched off (one saved before the rule stays, off).
+    if (next.upstreams.some(upstream => isJevOnlyUpstream(upstream) && !this.settings.upstreams.some(old => old.id === upstream.id && isJevOnlyUpstream(old)))) throw new Error(AUTO_STRINGS[this.options.locale].jevOnly);
     await this.options.host.callHost('storage.set', { key: AUTO_STORAGE_KEY, value: next });
     this.settings = next;
-    this.everSaved = true;
     this.configureCatalog();
     this.options.host.emit('settings', null);
     return next;
@@ -294,6 +284,7 @@ export class AutoService {
   async test(upstreamId: string): Promise<{ ok: boolean; status: number | null; missing: string[]; listed: number | null }> {
     const upstream = this.settings.upstreams.find(entry => entry.id === upstreamId);
     if (!upstream) throw new Error('Unknown upstream.');
+    if (isJevOnlyUpstream(upstream)) throw new Error(AUTO_STRINGS[this.options.locale].jevOnly);
     const key = await this.keyFor(upstream);
     if (upstream.key !== 'none' && !key) return { ok: false, status: null, missing: [], listed: null };
     const controller = new AbortController();

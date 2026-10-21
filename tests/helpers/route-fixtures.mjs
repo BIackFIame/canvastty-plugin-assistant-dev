@@ -53,7 +53,7 @@ export function accountRows() {
   return [
     { provider: 'opencode', agent: 'OpenCode', accountId: 'zai-glm', account: 'Z.AI GLM', kind: 'api-key', model: 'glm-5.3', endpoint: 'api.z.ai', state: 'ready', launchOptions: { 'canvastty-accounts': { account: 'zai-glm', effort: 'default', trustFolder: false } } },
     { provider: 'claude', agent: 'Claude Code', accountId: 'zai-glm', account: 'Z.AI GLM', kind: 'api-key', model: 'glm-5.3', endpoint: 'api.z.ai', state: 'ready', launchOptions: { 'canvastty-accounts': { account: 'zai-glm', effort: 'default', trustFolder: false } } },
-    { provider: 'claude', agent: 'Claude Code', accountId: 'or-opus', account: 'OpenRouter Opus', kind: 'api-key', model: 'anthropic/claude-opus-4.8', endpoint: 'openrouter.ai', state: 'ready', launchOptions: { 'canvastty-accounts': { account: 'or-opus', effort: 'default', trustFolder: false } } },
+    { provider: 'claude', agent: 'Claude Code', accountId: 'or-opus', account: 'Anthropic Opus', kind: 'api-key', model: 'anthropic/claude-opus-4.8', endpoint: 'api.anthropic.com', state: 'ready', launchOptions: { 'canvastty-accounts': { account: 'or-opus', effort: 'default', trustFolder: false } } },
     { provider: 'claude', agent: 'Claude Code', accountId: 'local-qwen', account: 'Qwen local', kind: 'ollama', model: 'qwen3.5:9b', endpoint: '127.0.0.1:11434', state: 'ollama-down', reason: 'Ollama is not running on this computer' },
     { provider: 'codex', agent: 'Codex', accountId: 'mm', account: 'MiniMax', kind: 'api-key', model: 'minimax-m3', endpoint: 'api.minimax.io', state: 'no-key', reason: 'no key is saved for it (Accounts settings)' }
   ];

@@ -711,36 +711,34 @@ test('live run 11: two new files reviewed at once; the 2,026-character test file
   assert.notEqual(big.verdict, 'allow');
 });
 
-test('short view: a saved Jev · OpenRouter key adds Auto\'s OpenRouter upstream only while Auto was never set up; saving it there lets Jev judge tasks; the service follows the page\'s language', async () => {
+test('OpenRouter serves only Jev: the short view\'s key adds no Auto upstream; a saved OpenRouter upstream stays off, cannot be added, enabled or tested; Jev triage turns on with the key; the service follows the page\'s language', async () => {
   const jevKey = JSON.stringify({ origin: 'https://openrouter.ai', value: KEY });
   {
     const host = hostFake({}, { 'assistant-openrouter': jevKey });
     const assistant = new Assistant({ host, dataDir: mkdtempSync(join(base, 'data-')), git: null, settings: { ...structuredClone(DEFAULT_ASSISTANT_SETTINGS), enabled: false, modes: { ...DEFAULT_ASSISTANT_SETTINGS.modes, 'task.route': 'off' }, backends: [{ id: 'openrouter-1', preset: 'openrouter', enabled: true, model: 'typesafe/jev-1.13' }] } });
     const state = await assistant.auto.state();
     assert.equal(state.jevKey, true);
-    assert.deepEqual(state.settings.upstreams.map(u => [u.id, u.preset, u.key, u.allModels, u.trust, u.enabled]), [['openrouter', 'openrouter', 'jev', true, 'D1', true]]);
-    assert.equal(host.storage.autoRouting.upstreams.length, 1, 'saved');
-    assert.ok(!JSON.stringify(state).includes(KEY), 'the page never sees the key');
-    // Triage was Off: the short view's key save lets Jev decide (the person's click); review is untouched.
-    assert.equal(assistant.settings.modes['task.route'], 'off');
+    assert.deepEqual(state.settings.upstreams, [], 'no Auto upstream from the Jev key');
+    assert.equal(host.storage.autoRouting, undefined, 'nothing saved');
     await assistant.quickKeySaved('openrouter-1');
-    assert.equal(assistant.settings.modes['task.route'], 'auto');
-    assert.equal(assistant.settings.modes['command.review'], DEFAULT_ASSISTANT_SETTINGS.modes['command.review']);
+    assert.equal(assistant.settings.modes['task.route'], 'auto', 'Jev judges tasks');
+    assert.deepEqual(assistant.auto.settings.upstreams, []);
+    const orUpstream = { id: 'or', preset: 'openrouter', trust: 'D1', key: 'jev', models: [], allModels: true, excluded: [], enabled: false };
+    await assert.rejects(assistant.auto.save({ ...assistant.auto.settings, upstreams: [orUpstream] }), /only (?:for )?Jev/u, 'not even switched off');
+    await assert.rejects(assistant.auto.save({ ...assistant.auto.settings, upstreams: [{ id: 'sneaky', preset: 'openai-compatible', baseUrl: 'https://api.OpenRouter.ai./api/v1', trust: 'D1', key: 'own', models: [{ id: 'x/y' }], enabled: true }] }), /only (?:for )?Jev/u, 'by host, any spelling');
   }
   {
-    // Auto was set up before (even with no upstream left): the person's list stays as it is.
+    // Saved before the rule: kept, off, with the rest of the settings still saveable; enabling or testing it is refused.
     const host = hostFake({}, { 'assistant-openrouter': jevKey });
-    const saved = { upstreams: [], preference: 'cheap', cheaperFallback: false, decider: 'jev', dailyUsdCap: 1, perCardUsdCap: 0.4 };
+    const saved = { upstreams: [{ id: 'or', preset: 'openrouter', trust: 'D1', key: 'jev', models: [], allModels: true, excluded: [], enabled: true }, { id: 'zai', preset: 'openai-compatible', baseUrl: 'https://api.z.ai/api/paas/v4', trust: 'D1', key: 'own', models: [{ id: 'glm-5.3' }], enabled: true }], preference: 'cheap', cheaperFallback: false, decider: 'jev', dailyUsdCap: 1, perCardUsdCap: 0.4 };
     const assistant = new Assistant({ host, dataDir: mkdtempSync(join(base, 'data-')), git: null, autoRouting: saved });
-    assert.deepEqual((await assistant.auto.state()).settings.upstreams, []);
-  }
-  {
-    // A key saved for another address does not count.
-    const host = hostFake({}, { 'assistant-openrouter': JSON.stringify({ origin: 'https://evil.example', value: KEY }) });
-    const assistant = new Assistant({ host, dataDir: mkdtempSync(join(base, 'data-')), git: null });
-    const state = await assistant.auto.state();
-    assert.equal(state.jevKey, false);
-    assert.deepEqual(state.settings.upstreams, []);
+    assert.deepEqual(assistant.auto.settings.upstreams.map(u => [u.id, u.enabled]), [['or', false], ['zai', true]]);
+    assert.ok(assistant.auto.inventory().entries.every(entry => entry.upstream.id !== 'or'), 'no OpenRouter model is ever a candidate');
+    await assistant.auto.save({ ...assistant.auto.settings, preference: 'best' });
+    const on = structuredClone(assistant.auto.settings);
+    on.upstreams[0].enabled = true;
+    await assert.rejects(assistant.auto.save(on), /only (?:for )?Jev/u);
+    await assert.rejects(assistant.auto.test('or'), /only (?:for )?Jev/u);
   }
   {
     // The language: CanvasTTY tells a service its locale only at start; the pages report changes.

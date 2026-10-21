@@ -11472,6 +11472,21 @@ function chooseCohort(entries) {
 // src/auto/classify.ts
 import { createHmac as createHmac3 } from "node:crypto";
 
+// src/auto/jevOnlyRule.ts
+var JEV_ONLY_DOMAINS = ["openrouter.ai"];
+function hostOf(url) {
+  try {
+    return new URL(url).hostname.toLowerCase().replace(/\.+$/u, "").replace(/^\[|\]$/gu, "");
+  } catch {
+    return null;
+  }
+}
+function modelTrafficForbidden(url) {
+  const host = hostOf(url);
+  if (host === null) return true;
+  return JEV_ONLY_DOMAINS.some((domain) => host === domain || host.endsWith(`.${domain}`));
+}
+
 // src/auto/inventory.ts
 var MAX_INVENTORY = 4e3;
 var OPENROUTER_EFFORTS = ["none", "minimal", "low", "medium", "high", "xhigh"];
@@ -11492,7 +11507,8 @@ function buildInventory(settings, catalog, index = new BenchmarkIndex(catalog)) 
   const byId = new Map((openRouterList ?? []).map((model) => [model.id, model]));
   const scoreMaps2 = /* @__PURE__ */ new Map();
   for (const upstream of settings.upstreams) {
-    const openRouter = upstream.preset === "openrouter";
+    if (upstream.preset === "openrouter" || modelTrafficForbidden(upstream.baseUrl)) continue;
+    const openRouter = false;
     const context = { openRouter, origin: openRouter ? null : originOf2(upstream.baseUrl) };
     const listed = new Map(upstream.models.map((model) => [model.id, model]));
     const ids = [...listed.keys()];
@@ -11651,6 +11667,7 @@ function validateAutoUpstream(value) {
   if (allModels && value.preset !== "openrouter") fail4("Only OpenRouter publishes a model list Auto can use on its own.");
   const excluded = value.excluded ?? [];
   if (!Array.isArray(excluded) || excluded.length > MAX_EXCLUDED || excluded.some((id) => typeof id !== "string" || !MODEL_ID.test(id))) fail4(`At most ${MAX_EXCLUDED} excluded models, by their ids.`);
+  if (value.enabled && (value.preset === "openrouter" || modelTrafficForbidden(baseUrl))) fail4(JEV_ONLY_MESSAGE);
   return { id: value.id, preset: value.preset, baseUrl: baseUrl.replace(/\/+$/u, ""), trust: value.trust, key, models, allModels, excluded: [...new Set(excluded)], enabled: value.enabled };
 }
 function validateAutoSettings(value) {
@@ -11691,7 +11708,7 @@ function normalizeAutoSettings(value) {
   const upstreams = [];
   for (const raw of Array.isArray(source.upstreams) ? source.upstreams.slice(0, MAX_AUTO_UPSTREAMS) : []) {
     try {
-      const entry = validateAutoUpstream(raw);
+      const entry = validateAutoUpstream(jevOnlyOff(raw));
       if (!upstreams.some((other) => other.id === entry.id)) upstreams.push(entry);
     } catch {
     }
@@ -11706,6 +11723,15 @@ function normalizeAutoSettings(value) {
     }
   }
   return validateAutoSettings(candidate);
+}
+var JEV_ONLY_MESSAGE = "OpenRouter is used only for Jev's own decisions: Auto cannot send model calls there. Use another provider.";
+function isJevOnlyUpstream(upstream) {
+  return upstream.preset === "openrouter" || modelTrafficForbidden(upstream.baseUrl ?? OPENROUTER_BASE_URL);
+}
+function jevOnlyOff(raw) {
+  if (!isRecord7(raw)) return raw;
+  const preset = raw.preset, baseUrl = preset === "openrouter" ? OPENROUTER_BASE_URL : raw.baseUrl;
+  return preset === "openrouter" || typeof baseUrl === "string" && modelTrafficForbidden(baseUrl) ? { ...raw, enabled: false } : raw;
 }
 var upstreamSecret = (id) => `auto-upstream-${id}`;
 var JEV_OPENROUTER_SECRET = "assistant-openrouter";
@@ -11895,7 +11921,9 @@ var EN2 = {
   environment: "Auto (Jev) runs on this computer; it cannot reach a container or a remote host yet. Choose Off, or run the card on this computer.",
   project: "This project's OpenCode config chooses its own model or providers, so Auto (Jev) cannot guarantee where prompts go. Remove model/provider settings from it, or choose Off.",
   projectUnreadable: "This project's OpenCode config could not be read, so Auto (Jev) cannot check where prompts go. Choose Off, or fix the file.",
-  noUpstream: "Auto (Jev) has no model to use yet: add an upstream on the Decision models page (Settings \u2192 Plugins \u2192 CanvasTTY Assistant), or raise its caps above 0.",
+  noUpstream: "Auto (Jev) has no model provider (OpenRouter serves only Jev). Add one on the Decision models page, or start this card on its agent's own model.",
+  noProvider: "Auto (Jev): no allowed model provider (OpenRouter serves only Jev). Add one on the Decision models page, or start this card on its agent's own model.",
+  jevOnly: "OpenRouter serves only Jev's own decisions: Auto cannot send model calls there. Use another provider.",
   listLoading: "Auto (Jev) is still loading OpenRouter's model list (prices and limits from openrouter.ai). Try again in a few seconds; the Decision models page shows its state.",
   dataClass: "No Auto (Jev) upstream is trusted with this card's data class. Raise an upstream's trust on the Decision models page, or lower the card's class.",
   router: "Auto (Jev) could not open its local port on 127.0.0.1. Try again; the plugin log has the details.",
@@ -11909,7 +11937,9 @@ var RU2 = {
   environment: "\xAB\u0410\u0432\u0442\u043E (Jev)\xBB \u0440\u0430\u0431\u043E\u0442\u0430\u0435\u0442 \u043D\u0430 \u044D\u0442\u043E\u043C \u043A\u043E\u043C\u043F\u044C\u044E\u0442\u0435\u0440\u0435 \u0438 \u043F\u043E\u043A\u0430 \u043D\u0435 \u0434\u043E\u0441\u0442\u0430\u0451\u0442 \u0434\u043E \u043A\u043E\u043D\u0442\u0435\u0439\u043D\u0435\u0440\u0430 \u0438\u043B\u0438 \u0443\u0434\u0430\u043B\u0451\u043D\u043D\u043E\u0433\u043E \u0445\u043E\u0441\u0442\u0430. \u0412\u044B\u0431\u0435\u0440\u0438\u0442\u0435 \xAB\u0412\u044B\u043A\u043B\xBB \u0438\u043B\u0438 \u0437\u0430\u043F\u0443\u0441\u0442\u0438\u0442\u0435 \u043E\u043A\u043D\u043E \u043D\u0430 \u044D\u0442\u043E\u043C \u043A\u043E\u043C\u043F\u044C\u044E\u0442\u0435\u0440\u0435.",
   project: "\u041A\u043E\u043D\u0444\u0438\u0433 OpenCode \u044D\u0442\u043E\u0433\u043E \u043F\u0440\u043E\u0435\u043A\u0442\u0430 \u0441\u0430\u043C \u0432\u044B\u0431\u0438\u0440\u0430\u0435\u0442 \u043C\u043E\u0434\u0435\u043B\u044C \u0438\u043B\u0438 \u043F\u0440\u043E\u0432\u0430\u0439\u0434\u0435\u0440\u043E\u0432, \u043F\u043E\u044D\u0442\u043E\u043C\u0443 \xAB\u0410\u0432\u0442\u043E (Jev)\xBB \u043D\u0435 \u043C\u043E\u0436\u0435\u0442 \u043E\u0431\u0435\u0449\u0430\u0442\u044C, \u043A\u0443\u0434\u0430 \u0443\u0439\u0434\u0443\u0442 \u0437\u0430\u043F\u0440\u043E\u0441\u044B. \u0423\u0431\u0435\u0440\u0438\u0442\u0435 \u0438\u0437 \u043D\u0435\u0433\u043E model/provider \u0438\u043B\u0438 \u0432\u044B\u0431\u0435\u0440\u0438\u0442\u0435 \xAB\u0412\u044B\u043A\u043B\xBB.",
   projectUnreadable: "\u041A\u043E\u043D\u0444\u0438\u0433 OpenCode \u044D\u0442\u043E\u0433\u043E \u043F\u0440\u043E\u0435\u043A\u0442\u0430 \u043D\u0435 \u0447\u0438\u0442\u0430\u0435\u0442\u0441\u044F, \u043F\u043E\u044D\u0442\u043E\u043C\u0443 \xAB\u0410\u0432\u0442\u043E (Jev)\xBB \u043D\u0435 \u043C\u043E\u0436\u0435\u0442 \u043F\u0440\u043E\u0432\u0435\u0440\u0438\u0442\u044C, \u043A\u0443\u0434\u0430 \u0443\u0439\u0434\u0443\u0442 \u0437\u0430\u043F\u0440\u043E\u0441\u044B. \u0412\u044B\u0431\u0435\u0440\u0438\u0442\u0435 \xAB\u0412\u044B\u043A\u043B\xBB \u0438\u043B\u0438 \u0438\u0441\u043F\u0440\u0430\u0432\u044C\u0442\u0435 \u0444\u0430\u0439\u043B.",
-  noUpstream: "\u0423 \xAB\u0410\u0432\u0442\u043E (Jev)\xBB \u043F\u043E\u043A\u0430 \u043D\u0435\u0442 \u043C\u043E\u0434\u0435\u043B\u0435\u0439: \u0434\u043E\u0431\u0430\u0432\u044C\u0442\u0435 \u043F\u043E\u0441\u0442\u0430\u0432\u0449\u0438\u043A\u0430 \u043D\u0430 \u0441\u0442\u0440\u0430\u043D\u0438\u0446\u0435 \xAB\u041C\u043E\u0434\u0435\u043B\u0438 \u0440\u0435\u0448\u0435\u043D\u0438\u0439\xBB (\u041D\u0430\u0441\u0442\u0440\u043E\u0439\u043A\u0438 \u2192 \u041F\u043B\u0430\u0433\u0438\u043D\u044B \u2192 \u0410\u0441\u0441\u0438\u0441\u0442\u0435\u043D\u0442 CanvasTTY) \u0438\u043B\u0438 \u043F\u043E\u0434\u043D\u0438\u043C\u0438\u0442\u0435 \u043F\u0440\u0435\u0434\u0435\u043B\u044B \u0432\u044B\u0448\u0435 0.",
+  noUpstream: "\u0423 \xAB\u0410\u0432\u0442\u043E (Jev)\xBB \u043D\u0435\u0442 \u043F\u043E\u0441\u0442\u0430\u0432\u0449\u0438\u043A\u0430 \u043C\u043E\u0434\u0435\u043B\u0435\u0439 (OpenRouter \u2014 \u0442\u043E\u043B\u044C\u043A\u043E \u0434\u043B\u044F Jev). \u0414\u043E\u0431\u0430\u0432\u044C\u0442\u0435 \u0435\u0433\u043E \u043D\u0430 \u0441\u0442\u0440\u0430\u043D\u0438\u0446\u0435 \xAB\u041C\u043E\u0434\u0435\u043B\u0438 \u0440\u0435\u0448\u0435\u043D\u0438\u0439\xBB \u0438\u043B\u0438 \u0437\u0430\u043F\u0443\u0441\u0442\u0438\u0442\u0435 \u043E\u043A\u043D\u043E \u043D\u0430 \u043C\u043E\u0434\u0435\u043B\u0438 \u0430\u0433\u0435\u043D\u0442\u0430.",
+  noProvider: "\xAB\u0410\u0432\u0442\u043E (Jev)\xBB: \u043D\u0435\u0442 \u0440\u0430\u0437\u0440\u0435\u0448\u0451\u043D\u043D\u043E\u0433\u043E \u043F\u043E\u0441\u0442\u0430\u0432\u0449\u0438\u043A\u0430 \u043C\u043E\u0434\u0435\u043B\u0435\u0439 (OpenRouter \u2014 \u0442\u043E\u043B\u044C\u043A\u043E \u0434\u043B\u044F Jev). \u0414\u043E\u0431\u0430\u0432\u044C\u0442\u0435 \u0435\u0433\u043E \u043D\u0430 \u0441\u0442\u0440\u0430\u043D\u0438\u0446\u0435 \xAB\u041C\u043E\u0434\u0435\u043B\u0438 \u0440\u0435\u0448\u0435\u043D\u0438\u0439\xBB \u0438\u043B\u0438 \u0437\u0430\u043F\u0443\u0441\u0442\u0438\u0442\u0435 \u043E\u043A\u043D\u043E \u043D\u0430 \u043C\u043E\u0434\u0435\u043B\u0438 \u0430\u0433\u0435\u043D\u0442\u0430.",
+  jevOnly: "OpenRouter \u0441\u043B\u0443\u0436\u0438\u0442 \u0442\u043E\u043B\u044C\u043A\u043E \u0434\u043B\u044F \u0440\u0435\u0448\u0435\u043D\u0438\u0439 \u0441\u0430\u043C\u043E\u0433\u043E Jev: \xAB\u0410\u0432\u0442\u043E\xBB \u043D\u0435 \u043C\u043E\u0436\u0435\u0442 \u043E\u0442\u043F\u0440\u0430\u0432\u043B\u044F\u0442\u044C \u0442\u0443\u0434\u0430 \u0432\u044B\u0437\u043E\u0432\u044B \u043C\u043E\u0434\u0435\u043B\u0435\u0439. \u0412\u044B\u0431\u0435\u0440\u0438\u0442\u0435 \u0434\u0440\u0443\u0433\u043E\u0433\u043E \u043F\u043E\u0441\u0442\u0430\u0432\u0449\u0438\u043A\u0430.",
   listLoading: "\xAB\u0410\u0432\u0442\u043E (Jev)\xBB \u0435\u0449\u0451 \u0437\u0430\u0433\u0440\u0443\u0436\u0430\u0435\u0442 \u0441\u043F\u0438\u0441\u043E\u043A \u043C\u043E\u0434\u0435\u043B\u0435\u0439 OpenRouter (\u0446\u0435\u043D\u044B \u0438 \u043F\u0440\u0435\u0434\u0435\u043B\u044B \u0441 openrouter.ai). \u041F\u043E\u0432\u0442\u043E\u0440\u0438\u0442\u0435 \u0447\u0435\u0440\u0435\u0437 \u043D\u0435\u0441\u043A\u043E\u043B\u044C\u043A\u043E \u0441\u0435\u043A\u0443\u043D\u0434; \u0441\u043E\u0441\u0442\u043E\u044F\u043D\u0438\u0435 \u0432\u0438\u0434\u043D\u043E \u043D\u0430 \u0441\u0442\u0440\u0430\u043D\u0438\u0446\u0435 \xAB\u041C\u043E\u0434\u0435\u043B\u0438 \u0440\u0435\u0448\u0435\u043D\u0438\u0439\xBB.",
   dataClass: "\u041D\u0438 \u043E\u0434\u043D\u043E\u043C\u0443 \u043F\u043E\u0441\u0442\u0430\u0432\u0449\u0438\u043A\u0443 \xAB\u0410\u0432\u0442\u043E (Jev)\xBB \u043D\u0435 \u0434\u043E\u0432\u0435\u0440\u0435\u043D \u043A\u043B\u0430\u0441\u0441 \u0434\u0430\u043D\u043D\u044B\u0445 \u044D\u0442\u043E\u0433\u043E \u043E\u043A\u043D\u0430. \u041F\u043E\u0432\u044B\u0441\u044C\u0442\u0435 \u0434\u043E\u0432\u0435\u0440\u0438\u0435 \u043F\u043E\u0441\u0442\u0430\u0432\u0449\u0438\u043A\u0443 \u043D\u0430 \u0441\u0442\u0440\u0430\u043D\u0438\u0446\u0435 \xAB\u041C\u043E\u0434\u0435\u043B\u0438 \u0440\u0435\u0448\u0435\u043D\u0438\u0439\xBB \u0438\u043B\u0438 \u043F\u043E\u043D\u0438\u0437\u044C\u0442\u0435 \u043A\u043B\u0430\u0441\u0441 \u043E\u043A\u043D\u0430.",
   router: "\xAB\u0410\u0432\u0442\u043E (Jev)\xBB \u043D\u0435 \u0441\u043C\u043E\u0433 \u043E\u0442\u043A\u0440\u044B\u0442\u044C \u043B\u043E\u043A\u0430\u043B\u044C\u043D\u044B\u0439 \u043F\u043E\u0440\u0442 \u043D\u0430 127.0.0.1. \u041F\u043E\u043F\u0440\u043E\u0431\u0443\u0439\u0442\u0435 \u0435\u0449\u0451 \u0440\u0430\u0437; \u043F\u043E\u0434\u0440\u043E\u0431\u043D\u043E\u0441\u0442\u0438 \u2014 \u0432 \u0436\u0443\u0440\u043D\u0430\u043B\u0435 \u043F\u043B\u0430\u0433\u0438\u043D\u0430.",
@@ -12294,11 +12324,40 @@ var TokenStore = class {
   }
 };
 
+// src/auto/jevOnly.ts
+import { isIP } from "node:net";
+var PRIVATE = /^(?:127\.|10\.|192\.168\.|172\.(?:1[6-9]|2\d|3[01])\.|169\.254\.|0\.|::1$|::$|f[cd][0-9a-f]{2}:|fe80:)/iu;
+var JevOnlyHosts = class {
+  cache = null;
+  lookup;
+  now;
+  constructor(options = {}) {
+    this.lookup = options.lookup === void 0 ? defaultLookup : options.lookup;
+    this.now = options.now ?? Date.now;
+  }
+  async forbidden(url) {
+    if (modelTrafficForbidden(url)) return true;
+    const host = hostOf(url);
+    if (!isIP(host) || !this.lookup || PRIVATE.test(host)) return false;
+    if (!this.cache || this.now() - this.cache.at > 6e5) {
+      const addresses = /* @__PURE__ */ new Set();
+      for (const domain of JEV_ONLY_DOMAINS) for (const address of await this.lookup(domain).catch(() => [])) addresses.add(address.toLowerCase());
+      this.cache = { at: this.now(), addresses };
+    }
+    return this.cache.addresses.has(host.toLowerCase());
+  }
+};
+var defaultLookup = async (host) => {
+  const { lookup } = await import("node:dns/promises");
+  return (await lookup(host, { all: true })).map((entry) => entry.address);
+};
+
 // src/auto/router.ts
 var ROUTER_TIMEOUTS = { jevMs: 2500, headersMs: 6e4, firstChunkMs: 6e4, idleMs: 9e4, totalMs: 15 * 6e4, memberMs: 18e4, turnMs: 12e4, turnXhighMs: 24e4 };
 var LONG_EFFORTS = /* @__PURE__ */ new Set(["xhigh", "max", "ultra"]);
 var meaningful = (text6) => text6.split("\n").some((line) => line.trim() !== "" && !line.startsWith(":"));
 var ROUTER_LIMITS = Object.freeze({ bodyBytes: 32 * 1048576, perCard: 16, total: 64, attempts: 6, conversations: 1024, leaseMs: 30 * 6e4, recent: 50, logBytes: 512 * 1024, outcomes: 512 });
+var NO_PROVIDER = "Auto (Jev): no model provider is allowed for this card. OpenRouter is used only for Jev's own decisions. Add another provider on the Decision models page, or start this card on its agent's own model.";
 var COOLDOWN_MS = Object.freeze({ transient: 3e4, quota: 3e5, missing: 9e5, auth: 9e5, maxRetryAfter: 24 * 36e5 });
 var HttpError = class extends Error {
   status;
@@ -12501,6 +12560,7 @@ var AutoRouter = class {
   agentic = /* @__PURE__ */ new Set();
   /** Calls running now per upstream (for subscription-like upstreams' parallel cap). */
   upstreamActive = /* @__PURE__ */ new Map();
+  jevOnly;
   /** Per-route fan-out outcomes (route key → counts), kept in `fanout-outcomes.json`. */
   outcomes = /* @__PURE__ */ new Map();
   stats = { requests: 0, turns: 0, continuations: 0, small: 0, jevAsked: 0, jevAnswered: 0, rules: 0, leaseReuses: 0, failovers: 0, fanOuts: 0, merged: 0, fanOutToolCalls: 0, fanOutDegraded: 0, judgeFailed: 0 };
@@ -12518,6 +12578,7 @@ var AutoRouter = class {
     this.tokens = new TokenStore(deps.directory, this.now);
     this.salt = this.loadSalt();
     this.spend = new Spend(deps.directory, this.now);
+    this.jevOnly = deps.jevOnly ?? new JevOnlyHosts();
     this.loadOutcomes();
     this.loadRecent();
   }
@@ -12802,7 +12863,7 @@ var AutoRouter = class {
   /** Who may take this request now: enabled, allowed, trusted with the card's class, not cooling down, large enough. */
   usable(grant, promptTokens, maxTokens) {
     const mode = this.deps.dataClassMode();
-    const healthy = this.deps.inventory().entries.filter((entry) => entry.upstream.enabled && !entry.excluded && upstreamAllowed(entry.upstream, grant.dataClass, mode) && !this.coolingDown(entry.upstream.id, entry.model));
+    const healthy = this.deps.inventory().entries.filter((entry) => entry.upstream.enabled && !entry.excluded && !modelTrafficForbidden(entry.upstream.baseUrl) && upstreamAllowed(entry.upstream, grant.dataClass, mode) && !this.coolingDown(entry.upstream.id, entry.model));
     const wanted = typeof maxTokens === "number" && maxTokens > 0 ? maxTokens : 0;
     const fits = healthy.filter((entry) => (entry.context === null || entry.context >= promptTokens + Math.min(wanted, 4096)) && (entry.output === null || !wanted || entry.output >= Math.min(wanted, 32768)));
     return fits.length ? fits : healthy;
@@ -12916,7 +12977,7 @@ var AutoRouter = class {
       }
       record4.tier = request2.kind === "small" ? "small" : request2.view.level;
       const list = chosen.list;
-      if (!list.length) throw new HttpError(503, "no_model", "Auto (Jev): no allowed model is available now (all are off, excluded, cooling down or not allowed for this card's data class).");
+      if (!list.length) throw new HttpError(503, "no_model", this.deps.inventory().entries.some((entry) => entry.upstream.enabled && !entry.excluded && !modelTrafficForbidden(entry.upstream.baseUrl)) ? "Auto (Jev): no allowed model is available now (all are off, excluded, cooling down or not allowed for this card's data class)." : this.deps.noProviderMessage?.() ?? NO_PROVIDER);
       if (request2.kind === "turn" && kind === "turn") {
         const typical = this.typicalOutput(grant.sessionId, body.max_tokens);
         const decision = chooseStrategy({
@@ -12997,6 +13058,7 @@ var AutoRouter = class {
     let lastStatus = 503;
     let lastCode = "no_upstream";
     let capped = null;
+    let jevOnlySkipped = false;
     for (const entry of list) {
       const candidate = { upstream: entry.upstream, model: { id: entry.model } };
       if (controller.signal.aborted) throw new HttpError(499, "aborted", "The call was cancelled.");
@@ -13009,6 +13071,11 @@ var AutoRouter = class {
         lastStatus = typeof status === "number" ? status : 504;
         lastCode = code;
       };
+      if (await this.jevOnly.forbidden(`${candidate.upstream.baseUrl}/chat/completions`)) {
+        record4.attempts--;
+        jevOnlySkipped = true;
+        continue;
+      }
       const key = candidate.upstream.key === "none" ? null : await this.deps.key(candidate.upstream).catch(() => null);
       if (candidate.upstream.key !== "none" && !key) {
         failover("error", candidate.upstream.id, COOLDOWN_MS.auth, "no_key");
@@ -13203,6 +13270,7 @@ data: [DONE]
       }
     }
     if (capped && record4.attempts === 0) throw capped;
+    if (jevOnlySkipped && record4.attempts === 0) throw new HttpError(503, "no_provider", this.deps.noProviderMessage?.() ?? NO_PROVIDER);
     throw new HttpError(lastStatus === 429 ? 429 : 503, lastCode, `Auto (Jev): no allowed model answered (last: ${lastCode}). It tries again on the next call.`);
   }
   busyUpstream(id, delta) {
@@ -13232,6 +13300,7 @@ data: [DONE]
       record4.ms = this.now() - started;
       return { record: record4, bytes: extra.bytes ?? null, contentType: extra.contentType ?? null, parsed: extra.parsed ?? null };
     };
+    if (await this.jevOnly.forbidden(`${entry.upstream.baseUrl}/chat/completions`)) return done("failed");
     const key = entry.upstream.key === "none" ? null : await this.deps.key(entry.upstream).catch(() => null);
     if (entry.upstream.key !== "none" && !key) {
       this.cool(entry.upstream.id, COOLDOWN_MS.auth);
@@ -13519,8 +13588,6 @@ var TEST_TIMEOUT_MS = 1e4;
 var AutoService = class {
   settings;
   readable;
-  /** The person (or this service on their key) saved Auto settings at least once. */
-  everSaved;
   router;
   catalog;
   options;
@@ -13530,7 +13597,6 @@ var AutoService = class {
     this.options = options;
     this.readable = options.savedUnavailable !== true;
     this.settings = normalizeAutoSettings(this.readable ? options.saved : null);
-    this.everSaved = this.readable && options.saved !== void 0 && options.saved !== null;
     this.catalog = new CatalogStore({
       directory: join14(options.dataDir, "auto"),
       bundled: bundled_default,
@@ -13553,6 +13619,8 @@ var AutoService = class {
       badge: (sessionId, model) => options.publishBadge(sessionId, model ? { text: badgeText(model.model), tone: "neutral", tooltip: AUTO_STRINGS[this.options.locale].badgeTip(model.tier, model.source) } : null),
       log: (level, message) => options.host.log(level, message),
       ...options.parallelCap ? { parallelCap: options.parallelCap } : {},
+      noProviderMessage: () => AUTO_STRINGS[this.options.locale].noProvider,
+      ...options.jevOnly ? { jevOnly: options.jevOnly } : {},
       ...options.transport ? { transport: options.transport } : {},
       ...options.now ? { now: options.now } : {},
       ...options.timeouts ? { timeouts: options.timeouts } : {}
@@ -13571,25 +13639,12 @@ var AutoService = class {
   loaded(saved) {
     this.settings = normalizeAutoSettings(saved);
     this.readable = true;
-    this.everSaved ||= saved !== void 0 && saved !== null;
     this.configureCatalog();
   }
   /** Whether the Jev · OpenRouter key is saved (for OpenRouter's own address). */
   async jevKey() {
     const stored = await this.options.readKey(JEV_OPENROUTER_SECRET).catch(() => null);
     return !!stored && stored.origin === originOf3(OPENROUTER_BASE_URL);
-  }
-  /**
-   * Auto works with just a key: while Auto's settings were never saved and list no upstream, a saved Jev ·
-   * OpenRouter key adds the OpenRouter upstream on that key (every suitable model, trusted with D1 like a new
-   * upstream on the page). Once anything was saved, the person's list stays as they left it.
-   */
-  async adoptJevKey() {
-    if (!this.readable || this.everSaved || this.settings.upstreams.length || !await this.jevKey()) return false;
-    const next = structuredClone(this.settings);
-    next.upstreams.push({ id: "openrouter", preset: "openrouter", baseUrl: OPENROUTER_BASE_URL, trust: "D1", key: "jev", models: [], allModels: true, excluded: [], enabled: true });
-    await this.save(next);
-    return true;
   }
   /** Background refresh only while an upstream is on; OpenRouter's list only when an OpenRouter upstream uses it. */
   configureCatalog() {
@@ -13716,7 +13771,6 @@ var AutoService = class {
   // The decision models page
   // ---------------------------------------------------------------------------------------------------------------
   async state() {
-    await this.adoptJevKey().catch(() => false);
     const keys = {};
     for (const upstream of this.settings.upstreams) keys[upstream.id] = upstream.key === "none" ? true : !!await this.keyFor(upstream).catch(() => null);
     return { jevKey: await this.jevKey(), settings: this.settings, readable: this.readable, keys, recent: this.router.recent(), stats: this.router.statsView(), catalog: this.catalog.status(), models: this.modelRows(), waitingForList: this.inventory().waitingForList, outcomes: this.router.routeOutcomes() };
@@ -13724,9 +13778,9 @@ var AutoService = class {
   async save(value) {
     if (!this.readable) throw new Error(this.options.locale === "ru" ? "\u0421\u043E\u0445\u0440\u0430\u043D\u0451\u043D\u043D\u044B\u0435 \u043D\u0430\u0441\u0442\u0440\u043E\u0439\u043A\u0438 \u0435\u0449\u0451 \u043D\u0435 \u043F\u0440\u043E\u0447\u0438\u0442\u0430\u043D\u044B, \u043F\u043E\u044D\u0442\u043E\u043C\u0443 \u043D\u0438\u0447\u0435\u0433\u043E \u043D\u0435 \u0438\u0437\u043C\u0435\u043D\u0435\u043D\u043E." : "The saved settings could not be read yet, so nothing is changed.");
     const next = validateAutoSettings(value);
+    if (next.upstreams.some((upstream) => isJevOnlyUpstream(upstream) && !this.settings.upstreams.some((old) => old.id === upstream.id && isJevOnlyUpstream(old)))) throw new Error(AUTO_STRINGS[this.options.locale].jevOnly);
     await this.options.host.callHost("storage.set", { key: AUTO_STORAGE_KEY, value: next });
     this.settings = next;
-    this.everSaved = true;
     this.configureCatalog();
     this.options.host.emit("settings", null);
     return next;
@@ -13744,6 +13798,7 @@ var AutoService = class {
   async test(upstreamId) {
     const upstream = this.settings.upstreams.find((entry) => entry.id === upstreamId);
     if (!upstream) throw new Error("Unknown upstream.");
+    if (isJevOnlyUpstream(upstream)) throw new Error(AUTO_STRINGS[this.options.locale].jevOnly);
     const key = await this.keyFor(upstream);
     if (upstream.key !== "none" && !key) return { ok: false, status: null, missing: [], listed: null };
     const controller = new AbortController();
@@ -14247,6 +14302,10 @@ function decide(ctx) {
     const drop = (reason) => {
       dropped.push({ key, cli: raw.cli, label: raw.label, model: raw.model, reason });
     };
+    if (raw.endpoint && modelTrafficForbidden(raw.endpoint.includes("://") ? raw.endpoint : `https://${raw.endpoint}`) || raw.model && /^openrouter\//iu.test(raw.model)) {
+      drop("OpenRouter serves only Jev's decisions, never model calls");
+      continue;
+    }
     if (ctx.providersGiven && !entry) {
       drop("not offered by list_providers");
       continue;
@@ -15724,8 +15783,8 @@ ${JSON.stringify({ ...a, model: answer.model })}` };
     return { running: true };
   }
   /**
-   * The short view's key was saved (the person's click): Jev decides turns from now on when task triage was Off, and
-   * Auto adds its OpenRouter upstream on that key while its settings were never saved. Nothing else changes.
+   * The short view's Jev key was saved (the person's click): Jev decides turns from now on when task triage was Off.
+   * The key serves Jev only; Auto never sends model calls to OpenRouter. Nothing else changes.
    */
   async quickKeySaved(backendId) {
     this.keyChanged(backendId);
@@ -15735,7 +15794,6 @@ ${JSON.stringify({ ...a, model: answer.model })}` };
       next.enabled = true;
       await this.save(next);
     }
-    await this.auto.adoptJevKey().catch(() => false);
     return null;
   }
   keyChanged(backendId) {

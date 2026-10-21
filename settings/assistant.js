@@ -72,9 +72,6 @@
     refresh();
   }
 
-  // src/auto/catalog/identity.ts
-  var EFFORTS = ["none", "minimal", "low", "medium", "high", "xhigh", "max", "ultra"];
-
   // src/shared/catalog.ts
   var COMMAND_REVIEW = {
     serves_request: {
@@ -245,7 +242,26 @@
     logRetentionDays: LOG_POLICY.retentionDays
   };
 
+  // src/auto/catalog/identity.ts
+  var EFFORTS = ["none", "minimal", "low", "medium", "high", "xhigh", "max", "ultra"];
+
+  // src/auto/jevOnlyRule.ts
+  var JEV_ONLY_DOMAINS = ["openrouter.ai"];
+  function hostOf(url) {
+    try {
+      return new URL(url).hostname.toLowerCase().replace(/\.+$/u, "").replace(/^\[|\]$/gu, "");
+    } catch {
+      return null;
+    }
+  }
+  function modelTrafficForbidden(url) {
+    const host3 = hostOf(url);
+    if (host3 === null) return true;
+    return JEV_ONLY_DOMAINS.some((domain) => host3 === domain || host3.endsWith(`.${domain}`));
+  }
+
   // src/auto/settings.ts
+  var OPENROUTER_BASE_URL = "https://openrouter.ai/api/v1";
   var DEFAULT_AUTO_SETTINGS = {
     upstreams: [],
     preference: "balanced",
@@ -256,10 +272,12 @@
     catalog: { autoRefresh: true, refreshHours: 168 },
     strategy: { consensus: "auto", k: 3, bestOfN: false, turnUsdCap: 1 }
   };
+  function isJevOnlyUpstream(upstream) {
+    return upstream.preset === "openrouter" || modelTrafficForbidden(upstream.baseUrl ?? OPENROUTER_BASE_URL);
+  }
 
   // src/ui/autoRouting.ts
   var newAutoView = () => ({ checks: /* @__PURE__ */ new Map(), filter: /* @__PURE__ */ new Map(), type: "coding", shown: /* @__PURE__ */ new Map(), refreshing: false });
-  var OPENROUTER = "https://openrouter.ai/api/v1";
   var TYPES = ["coding", "review", "research", "writing", "chat"];
   var PAGE = 40;
   function catalogNote(text, locale) {
@@ -272,6 +290,13 @@
     if (/unavailable|failed/u.test(text)) return locale === "ru" ? "\u0438\u0441\u0442\u043E\u0447\u043D\u0438\u043A \u043D\u0435\u0434\u043E\u0441\u0442\u0443\u043F\u0435\u043D" : "a source is unavailable";
     return locale === "ru" ? "\u0434\u0430\u043D\u043D\u044B\u0435 \u0438\u0441\u0442\u043E\u0447\u043D\u0438\u043A\u0430 \u043D\u0435 \u043F\u043E\u0434\u043E\u0448\u043B\u0438" : text;
   }
+  var jevOnlyUpstream = (upstream) => upstream.preset === "openrouter" || /(?:^|\.)openrouter\.ai$/iu.test((() => {
+    try {
+      return new URL(upstream.baseUrl).hostname.replace(/\.+$/u, "");
+    } catch {
+      return "";
+    }
+  })());
   var AUTO_TYPE_EN = { coding: "coding", review: "review", research: "research", writing: "writing", chat: "chat" };
   var AUTO_TYPE_RU = { coding: "\u043A\u043E\u0434", review: "\u0440\u0435\u0432\u044C\u044E", research: "\u0438\u0441\u0441\u043B\u0435\u0434\u043E\u0432\u0430\u043D\u0438\u0435", writing: "\u0442\u0435\u043A\u0441\u0442\u044B", chat: "\u043E\u0431\u0449\u0435\u043D\u0438\u0435" };
   var AUTO_LEVEL_EN = { small: "small", medium: "medium", large: "large" };
@@ -362,6 +387,7 @@
       drafts: (ok, all) => `${ok} of ${all} drafts`,
       fanStats: (s) => s.fanOuts ? ` Several models: ${s.fanOuts} turns, ${s.merged} merged, ${s.fanOutToolCalls} turned out to call tools, ${s.fanOutDegraded} with drafts missing, ${s.judgeFailed} judge failures.` : "",
       classes: { D0: "Public", D1: "Internal", D2: "Confidential", D3: "Secret" },
+      jevOnlyNote: "Off: OpenRouter serves only Jev's own decisions, never Auto's model calls.",
       turnLine: (r) => `${r.model ?? "\u2014"} \xB7 ${r.taskType ? AUTO_TYPE_EN[r.taskType] ?? r.taskType : "\u2014"}, ${r.difficulty ? AUTO_LEVEL_EN[r.difficulty] ?? r.difficulty : "\u2014"}${r.strategy && r.strategy !== "single" ? " \xB7 several models" : ""}${r.costUsd !== null ? ` \xB7 $${r.costUsd.toFixed(4)}` : ""}`,
       recent: "Recent decisions",
       noRecent: "Nothing routed yet.",
@@ -457,6 +483,7 @@
       drafts: (ok, all) => `\u0447\u0435\u0440\u043D\u043E\u0432\u0438\u043A\u043E\u0432: ${ok} \u0438\u0437 ${all}`,
       fanStats: (s) => s.fanOuts ? ` \u041D\u0435\u0441\u043A\u043E\u043B\u044C\u043A\u043E \u043C\u043E\u0434\u0435\u043B\u0435\u0439: \u0445\u043E\u0434\u043E\u0432 ${s.fanOuts}, \u0441\u0432\u0435\u0434\u0435\u043D\u043E ${s.merged}, \u043E\u043A\u0430\u0437\u0430\u043B\u0438\u0441\u044C \u0441 \u0438\u043D\u0441\u0442\u0440\u0443\u043C\u0435\u043D\u0442\u0430\u043C\u0438 ${s.fanOutToolCalls}, \u0431\u0435\u0437 \u0447\u0430\u0441\u0442\u0438 \u0447\u0435\u0440\u043D\u043E\u0432\u0438\u043A\u043E\u0432 ${s.fanOutDegraded}, \u043E\u0442\u043A\u0430\u0437\u043E\u0432 \u0441\u0443\u0434\u044C\u0438 ${s.judgeFailed}.` : "",
       classes: { D0: "\u041E\u0442\u043A\u0440\u044B\u0442\u044B\u0435", D1: "\u0412\u043D\u0443\u0442\u0440\u0435\u043D\u043D\u0438\u0435", D2: "\u041A\u043E\u043D\u0444\u0438\u0434\u0435\u043D\u0446\u0438\u0430\u043B\u044C\u043D\u044B\u0435", D3: "\u0421\u0435\u043A\u0440\u0435\u0442\u043D\u044B\u0435" },
+      jevOnlyNote: "\u0412\u044B\u043A\u043B\u044E\u0447\u0435\u043D: OpenRouter \u0441\u043B\u0443\u0436\u0438\u0442 \u0442\u043E\u043B\u044C\u043A\u043E \u0434\u043B\u044F \u0440\u0435\u0448\u0435\u043D\u0438\u0439 \u0441\u0430\u043C\u043E\u0433\u043E Jev, \u043D\u0435 \u0434\u043B\u044F \u0432\u044B\u0437\u043E\u0432\u043E\u0432 \u043C\u043E\u0434\u0435\u043B\u0435\u0439 \xAB\u0410\u0432\u0442\u043E\xBB.",
       turnLine: (r) => `${r.model ?? "\u2014"} \xB7 ${r.taskType ? AUTO_TYPE_RU[r.taskType] ?? r.taskType : "\u2014"}, ${r.difficulty ? AUTO_LEVEL_RU[r.difficulty] ?? r.difficulty : "\u2014"}${r.strategy && r.strategy !== "single" ? " \xB7 \u043D\u0435\u0441\u043A\u043E\u043B\u044C\u043A\u043E \u043C\u043E\u0434\u0435\u043B\u0435\u0439" : ""}${r.costUsd !== null ? ` \xB7 $${r.costUsd.toFixed(4)}` : ""}`,
       recent: "\u041F\u043E\u0441\u043B\u0435\u0434\u043D\u0438\u0435 \u0440\u0435\u0448\u0435\u043D\u0438\u044F",
       noRecent: "\u041F\u043E\u043A\u0430 \u043D\u0438\u0447\u0435\u0433\u043E \u043D\u0435 \u043C\u0430\u0440\u0448\u0440\u0443\u0442\u0438\u0437\u0438\u0440\u043E\u0432\u0430\u043D\u043E.",
@@ -669,6 +696,7 @@
       check,
       remove
     ));
+    if (jevOnlyUpstream(upstream)) item.append(el("p", { className: "muted", textContent: t2.jevOnlyNote, dataset: { note: "jev-only" } }));
     item.append(el("p", { className: "muted", textContent: t2.trustHelp }));
     const keyChoices = [["own", t2.keyOwn], ...upstream.preset === "openrouter" ? [["jev", t2.keyJev]] : [], ...isLocal(upstream.baseUrl) ? [["none", t2.keyNone]] : []];
     const keyRow = el("div", { className: "row" }, el("span", { className: "label", textContent: t2.keyFrom }), selectOf(`auto-key-from-${upstream.id}`, upstream.key, keyChoices, (value) => edit((entry) => {
@@ -849,16 +877,13 @@
   }
   function addUpstream(settings, t2, save2) {
     const form = el("div", { className: "add" });
-    const preset = selectOf("auto-new-preset", "openrouter", [["openrouter", t2.preset.openrouter], ["openai-compatible", t2.preset["openai-compatible"]]], (value) => {
-      url.disabled = value === "openrouter";
-      url.value = value === "openrouter" ? OPENROUTER : "https://";
-    });
-    const id = el("input", { name: "auto-new-id", placeholder: t2.idLabel, value: settings.upstreams.some((entry) => entry.id === "openrouter") ? "" : "openrouter" });
-    const url = el("input", { name: "auto-new-url", placeholder: t2.baseUrl, value: OPENROUTER, disabled: true });
+    const preset = selectOf("auto-new-preset", "openai-compatible", [["openai-compatible", t2.preset["openai-compatible"]]], () => void 0);
+    const id = el("input", { name: "auto-new-id", placeholder: t2.idLabel, value: "" });
+    const url = el("input", { name: "auto-new-url", placeholder: t2.baseUrl, value: "https://" });
     const add = el("button", { type: "button", textContent: t2.add, name: "auto-add-upstream" });
     add.addEventListener("click", () => {
-      const kind = preset.value;
-      const entry = { id: id.value.trim(), preset: kind, baseUrl: kind === "openrouter" ? OPENROUTER : url.value.trim(), trust: "D1", key: "own", models: [], allModels: kind === "openrouter", excluded: [], enabled: true };
+      void preset;
+      const entry = { id: id.value.trim(), preset: "openai-compatible", baseUrl: url.value.trim(), trust: "D1", key: "own", models: [], allModels: false, excluded: [], enabled: true };
       save2((next) => {
         next.upstreams.push(entry);
       });
@@ -1424,8 +1449,8 @@
       quick: "Auto (Jev)",
       autoOn: "Auto",
       autoOnHelp: "Picks a model for each turn of OpenCode cards started with Model: Auto.",
-      orKey: "OpenRouter key",
-      orKeyHelp: "One key for Jev and for Auto's models. Stored by CanvasTTY, never shown again.",
+      orKey: "Jev key (OpenRouter)",
+      orKeyHelp: "Used only for Jev's own decisions, never for model calls. Stored by CanvasTTY, never shown again.",
       orKeySaved: "Saved",
       orKeyMissing: "Not saved",
       change: "Save",
@@ -1505,8 +1530,8 @@
       quick: "\u0410\u0432\u0442\u043E (Jev)",
       autoOn: "\u0410\u0432\u0442\u043E",
       autoOnHelp: "\u0412\u044B\u0431\u0438\u0440\u0430\u0435\u0442 \u043C\u043E\u0434\u0435\u043B\u044C \u043D\u0430 \u043A\u0430\u0436\u0434\u044B\u0439 \u0445\u043E\u0434 \u0432 \u043E\u043A\u043D\u0430\u0445 OpenCode, \u0437\u0430\u043F\u0443\u0449\u0435\u043D\u043D\u044B\u0445 \u0441 \xAB\u041C\u043E\u0434\u0435\u043B\u044C: \u0410\u0432\u0442\u043E\xBB.",
-      orKey: "\u041A\u043B\u044E\u0447 OpenRouter",
-      orKeyHelp: "\u041E\u0434\u0438\u043D \u043A\u043B\u044E\u0447 \u0434\u043B\u044F Jev \u0438 \u0434\u043B\u044F \u043C\u043E\u0434\u0435\u043B\u0435\u0439 \xAB\u0410\u0432\u0442\u043E\xBB. \u0425\u0440\u0430\u043D\u0438\u0442\u0441\u044F \u0432 CanvasTTY \u0438 \u0431\u043E\u043B\u044C\u0448\u0435 \u043D\u0435 \u043F\u043E\u043A\u0430\u0437\u044B\u0432\u0430\u0435\u0442\u0441\u044F.",
+      orKey: "\u041A\u043B\u044E\u0447 Jev (OpenRouter)",
+      orKeyHelp: "\u0422\u043E\u043B\u044C\u043A\u043E \u0434\u043B\u044F \u0440\u0435\u0448\u0435\u043D\u0438\u0439 \u0441\u0430\u043C\u043E\u0433\u043E Jev, \u043D\u0438\u043A\u043E\u0433\u0434\u0430 \u0434\u043B\u044F \u0432\u044B\u0437\u043E\u0432\u043E\u0432 \u043C\u043E\u0434\u0435\u043B\u0435\u0439. \u0425\u0440\u0430\u043D\u0438\u0442\u0441\u044F \u0432 CanvasTTY \u0438 \u0431\u043E\u043B\u044C\u0448\u0435 \u043D\u0435 \u043F\u043E\u043A\u0430\u0437\u044B\u0432\u0430\u0435\u0442\u0441\u044F.",
       orKeySaved: "\u0421\u043E\u0445\u0440\u0430\u043D\u0451\u043D",
       orKeyMissing: "\u041D\u0435 \u0441\u043E\u0445\u0440\u0430\u043D\u0451\u043D",
       change: "\u0421\u043E\u0445\u0440\u0430\u043D\u0438\u0442\u044C",
@@ -1838,7 +1863,7 @@
     };
     const on = a.upstreams.some((upstream) => upstream.enabled) && a.dailyUsdCap > 0;
     const toggleNode = toggle("auto-on", on, t.autoOn, (value) => saveAuto((next) => {
-      for (const upstream of next.upstreams) upstream.enabled = value;
+      for (const upstream of next.upstreams) upstream.enabled = value && !isJevOnlyUpstream(upstream);
       if (value && next.dailyUsdCap <= 0) next.dailyUsdCap = 1;
     }));
     const input = el2("input", { type: "password", placeholder: t.orKey, autocomplete: "off", name: "quick-key", className: "input" });

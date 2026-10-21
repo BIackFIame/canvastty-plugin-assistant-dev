@@ -55,6 +55,9 @@ export function catalogNote(text: string, locale: 'en' | 'ru'): string {
   return locale === 'ru' ? 'данные источника не подошли' : text;
 }
 
+/** An upstream on OpenRouter (saved before the Jev-only rule): shown off, with a note. */
+const jevOnlyUpstream = (upstream: AutoUpstream): boolean => upstream.preset === 'openrouter' || /(?:^|\.)openrouter\.ai$/iu.test((() => { try { return new URL(upstream.baseUrl).hostname.replace(/\.+$/u, ''); } catch { return ''; } })());
+
 const AUTO_TYPE_EN: Record<string, string> = { coding: 'coding', review: 'review', research: 'research', writing: 'writing', chat: 'chat' };
 const AUTO_TYPE_RU: Record<string, string> = { coding: 'код', review: 'ревью', research: 'исследование', writing: 'тексты', chat: 'общение' };
 const AUTO_LEVEL_EN: Record<string, string> = { small: 'small', medium: 'medium', large: 'large' };
@@ -102,6 +105,7 @@ export const AUTO_PAGE_STRINGS = {
     drafts: (ok: number, all: number) => `${ok} of ${all} drafts`,
     fanStats: (s: AutoState['stats']) => s.fanOuts ? ` Several models: ${s.fanOuts} turns, ${s.merged} merged, ${s.fanOutToolCalls} turned out to call tools, ${s.fanOutDegraded} with drafts missing, ${s.judgeFailed} judge failures.` : '',
     classes: { D0: 'Public', D1: 'Internal', D2: 'Confidential', D3: 'Secret' } as Record<string, string>,
+    jevOnlyNote: 'Off: OpenRouter serves only Jev\'s own decisions, never Auto\'s model calls.',
     turnLine: (r: DecisionRecord) => `${r.model ?? '—'} · ${r.taskType ? AUTO_TYPE_EN[r.taskType] ?? r.taskType : '—'}, ${r.difficulty ? AUTO_LEVEL_EN[r.difficulty] ?? r.difficulty : '—'}${r.strategy && r.strategy !== 'single' ? ' · several models' : ''}${r.costUsd !== null ? ` · $${r.costUsd.toFixed(4)}` : ''}`,
     recent: 'Recent decisions', noRecent: 'Nothing routed yet.',
     stats: (s: AutoState['stats']) => `${s.requests} model calls, Jev asked ${s.jevAsked} times (${s.jevAnswered} answered), ${s.leaseReuses} reused a turn's choice, ${s.failovers} failovers; today $${s.spentToday.toFixed(4)}; ${s.listening ? `listening for ${s.cards} card(s)` : 'not listening'}${s.hosts.length ? `; sent to ${s.hosts.join(', ')}` : ''}.`,
@@ -152,6 +156,7 @@ export const AUTO_PAGE_STRINGS = {
     drafts: (ok: number, all: number) => `черновиков: ${ok} из ${all}`,
     fanStats: (s: AutoState['stats']) => s.fanOuts ? ` Несколько моделей: ходов ${s.fanOuts}, сведено ${s.merged}, оказались с инструментами ${s.fanOutToolCalls}, без части черновиков ${s.fanOutDegraded}, отказов судьи ${s.judgeFailed}.` : '',
     classes: { D0: 'Открытые', D1: 'Внутренние', D2: 'Конфиденциальные', D3: 'Секретные' } as Record<string, string>,
+    jevOnlyNote: 'Выключен: OpenRouter служит только для решений самого Jev, не для вызовов моделей «Авто».',
     turnLine: (r: DecisionRecord) => `${r.model ?? '—'} · ${r.taskType ? AUTO_TYPE_RU[r.taskType] ?? r.taskType : '—'}, ${r.difficulty ? AUTO_LEVEL_RU[r.difficulty] ?? r.difficulty : '—'}${r.strategy && r.strategy !== 'single' ? ' · несколько моделей' : ''}${r.costUsd !== null ? ` · $${r.costUsd.toFixed(4)}` : ''}`,
     recent: 'Последние решения', noRecent: 'Пока ничего не маршрутизировано.',
     stats: (s: AutoState['stats']) => `Вызовов моделей: ${s.requests}, Jev спрошен ${s.jevAsked} раз (ответил ${s.jevAnswered}), решение хода повторно: ${s.leaseReuses}, переключений: ${s.failovers}; сегодня $${s.spentToday.toFixed(4)}; ${s.listening ? `слушает, окон: ${s.cards}` : 'не слушает'}${s.hosts.length ? `; отправлено на ${s.hosts.join(', ')}` : ''}.`,
@@ -322,6 +327,7 @@ function upstreamRow(upstream: AutoUpstream, state: AutoState, t: Strings, page:
     el('span', { className: 'label', textContent: t.trust }),
     selectOf(`auto-trust-${upstream.id}`, upstream.trust, trustOptions, value => edit(entry => { entry.trust = value; })),
     check, remove));
+  if (jevOnlyUpstream(upstream)) item.append(el('p', { className: 'muted', textContent: t.jevOnlyNote, dataset: { note: 'jev-only' } }));
   item.append(el('p', { className: 'muted', textContent: t.trustHelp }));
   // Keys: written straight into the plugin's secrets, bound to this upstream's address, never read back.
   const keyChoices: Array<[AutoUpstream['key'], string]> = [['own', t.keyOwn], ...(upstream.preset === 'openrouter' ? [['jev', t.keyJev] as [AutoUpstream['key'], string]] : []), ...(isLocal(upstream.baseUrl) ? [['none', t.keyNone] as [AutoUpstream['key'], string]] : [])];
@@ -448,13 +454,14 @@ function modelTable(upstream: AutoUpstream, rows: ModelRow[] | null, t: Strings,
 
 function addUpstream(settings: AutoRoutingSettings, t: Strings, save: (change: (next: AutoRoutingSettings) => void) => void): HTMLDivElement {
   const form = el('div', { className: 'add' });
-  const preset = selectOf<AutoUpstream['preset']>('auto-new-preset', 'openrouter', [['openrouter', t.preset.openrouter!], ['openai-compatible', t.preset['openai-compatible']!]], value => { url.disabled = value === 'openrouter'; url.value = value === 'openrouter' ? OPENROUTER : 'https://'; });
-  const id = el('input', { name: 'auto-new-id', placeholder: t.idLabel, value: settings.upstreams.some(entry => entry.id === 'openrouter') ? '' : 'openrouter' });
-  const url = el('input', { name: 'auto-new-url', placeholder: t.baseUrl, value: OPENROUTER, disabled: true });
+  // OpenRouter serves only Jev: Auto's providers are OpenAI-compatible addresses elsewhere.
+  const preset = selectOf<AutoUpstream['preset']>('auto-new-preset', 'openai-compatible', [['openai-compatible', t.preset['openai-compatible']!]], () => undefined);
+  const id = el('input', { name: 'auto-new-id', placeholder: t.idLabel, value: '' });
+  const url = el('input', { name: 'auto-new-url', placeholder: t.baseUrl, value: 'https://' });
   const add = el('button', { type: 'button', textContent: t.add, name: 'auto-add-upstream' });
   add.addEventListener('click', () => {
-    const kind = preset.value as AutoUpstream['preset'];
-    const entry: AutoUpstream = { id: id.value.trim(), preset: kind, baseUrl: kind === 'openrouter' ? OPENROUTER : url.value.trim(), trust: 'D1', key: 'own', models: [], allModels: kind === 'openrouter', excluded: [], enabled: true };
+    void preset;
+    const entry: AutoUpstream = { id: id.value.trim(), preset: 'openai-compatible', baseUrl: url.value.trim(), trust: 'D1', key: 'own', models: [], allModels: false, excluded: [], enabled: true };
     save(next => { next.upstreams.push(entry); });
   });
   form.append(preset, id, url, add);

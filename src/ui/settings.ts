@@ -5,6 +5,7 @@
 import type { AssistantBackendPreset, AssistantBackendSettings, AssistantBackendStatus, AssistantCheckResult, AssistantSettings } from '../shared/settings.ts';
 import type { RecentReview } from '../review/reviewService.ts';
 import { applyAppearance, segmented as segmentedOf, settingRow as settingRowOf, toggle as toggleOf, whenIdle, type Appearance } from './common.ts';
+import { isJevOnlyUpstream } from '../auto/settings.ts';
 import { AUTO_PAGE_STRINGS, newAutoView, renderAuto, type AutoState } from './autoRouting.ts';
 import { renderRouting, ROUTE_PAGE_STRINGS, type RouteState } from './routing.ts';
 
@@ -34,7 +35,7 @@ const STRINGS = {
   en: {
     title: 'Decision models', lead: 'Optional: with a key, Jev judges tasks and Auto picks a model for each turn; without one, simple rules are used.',
     quick: 'Auto (Jev)', autoOn: 'Auto', autoOnHelp: 'Picks a model for each turn of OpenCode cards started with Model: Auto.',
-    orKey: 'OpenRouter key', orKeyHelp: 'One key for Jev and for Auto\'s models. Stored by CanvasTTY, never shown again.', orKeySaved: 'Saved', orKeyMissing: 'Not saved', change: 'Save',
+    orKey: 'Jev key (OpenRouter)', orKeyHelp: 'Used only for Jev\'s own decisions, never for model calls. Stored by CanvasTTY, never shown again.', orKeySaved: 'Saved', orKeyMissing: 'Not saved', change: 'Save',
     prefer: 'Prefer', prefCheap: 'Cheaper', prefBalanced: 'Balanced', prefBest: 'Better', preferHelp: 'How much quality to trade for price.',
     dailyCap: 'Daily limit, $', dailyCapHelp: 'Auto stops for the day when it is spent.',
     today: 'Today', todayLine: (usd: number, calls: number) => `$${usd.toFixed(2)} · ${calls} calls`, todaySpend: (usd: number) => `$${usd.toFixed(2)}`, noDecisions: 'No turns routed yet.',
@@ -61,7 +62,7 @@ const STRINGS = {
   ru: {
     title: 'Модели решений', lead: 'Необязательно: с ключом Jev разбирает задачи, а «Авто» выбирает модель на каждый ход; без ключа работают простые правила.',
     quick: 'Авто (Jev)', autoOn: 'Авто', autoOnHelp: 'Выбирает модель на каждый ход в окнах OpenCode, запущенных с «Модель: Авто».',
-    orKey: 'Ключ OpenRouter', orKeyHelp: 'Один ключ для Jev и для моделей «Авто». Хранится в CanvasTTY и больше не показывается.', orKeySaved: 'Сохранён', orKeyMissing: 'Не сохранён', change: 'Сохранить',
+    orKey: 'Ключ Jev (OpenRouter)', orKeyHelp: 'Только для решений самого Jev, никогда для вызовов моделей. Хранится в CanvasTTY и больше не показывается.', orKeySaved: 'Сохранён', orKeyMissing: 'Не сохранён', change: 'Сохранить',
     prefer: 'Предпочтение', prefCheap: 'Дешевле', prefBalanced: 'Сбалансированно', prefBest: 'Лучше', preferHelp: 'Сколько качества можно уступить ради цены.',
     dailyCap: 'Предел в день, $', dailyCapHelp: 'Когда он потрачен, «Авто» останавливается до завтра.',
     today: 'Сегодня', todayLine: (usd: number, calls: number) => `$${usd.toFixed(2)} · вызовов: ${calls}`, todaySpend: (usd: number) => `$${usd.toFixed(2)}`, noDecisions: 'Ходов пока не было.',
@@ -339,7 +340,8 @@ function quickSection(): HTMLElement {
   };
   const on = a.upstreams.some(upstream => upstream.enabled) && a.dailyUsdCap > 0;
   const toggleNode = toggleOf('auto-on', on, t.autoOn, value => saveAuto(next => {
-    for (const upstream of next.upstreams) upstream.enabled = value;
+    // OpenRouter serves only Jev: an upstream there stays off.
+    for (const upstream of next.upstreams) upstream.enabled = value && !isJevOnlyUpstream(upstream);
     if (value && next.dailyUsdCap <= 0) next.dailyUsdCap = 1;
   }));
   // The key: Jev · OpenRouter's (Auto's OpenRouter upstream uses it too). Its backend is added first when missing.
