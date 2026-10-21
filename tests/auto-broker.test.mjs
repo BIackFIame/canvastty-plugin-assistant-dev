@@ -144,9 +144,9 @@ test('broker client: a streamed answer, refusals as statuses, upstream errors wi
   assert.equal(core.calls.at(-1).params.body, undefined, 'the request names the parts, not the body');
 });
 
-async function routerWith(t, { core, upstreams, timeouts = {} }) {
+async function routerWith(t, { core, upstreams, timeouts = {}, now, withdrawnMessage }) {
   const settings = validateAutoSettings({ upstreams, preference: 'balanced', cheaperFallback: false, decider: 'rules', dailyUsdCap: 1, perCardUsdCap: 0.5 });
-  const broker = new AccountBroker(core.host);
+  const broker = new AccountBroker(core.host, now ? { now } : {});
   core.attach(broker);
   const fetched = [];
   const router = new AutoRouter({
@@ -158,8 +158,10 @@ async function routerWith(t, { core, upstreams, timeouts = {} }) {
     broker: {
       send: (upstream, path, init) => broker.send(upstream.account, path, init),
       ready: upstream => !!broker.known(upstream.account),
-      refresh: async () => { await broker.list(); }
+      refresh: async () => { await broker.list(); },
+      withdrawn: upstream => broker.withdrawn(upstream.account)
     },
+    ...(withdrawnMessage ? { withdrawnMessage } : {}),
     transport: async (url, init) => { fetched.push(url); return fetch(url, init); },
     timeouts: { jevMs: 200, headersMs: 1_000, firstChunkMs: 1_000, idleMs: 1_000, ...timeouts }
   });
@@ -228,4 +230,85 @@ test('router: with no listed account and no other upstream the card gets the no-
   assert.equal(answer.status, 503);
   assert.deepEqual(fetched, []);
   assert.equal(core.calls.filter(entry => entry.method === 'accounts.request').length, 0);
+});
+
+test('router (live run 18 C): grants withdrawn in Settings: the CLI is told so plainly, the accounts are unavailable (not cooling down) until allowed again', async (t) => {
+  const FLASH = { ...ACCOUNT, ref: 'canvastty-accounts:glm-flash', id: 'glm-flash', label: 'GLM flash', models: ['glm-4.6-flash'] };
+  const revoked = new Set();
+  let clock = 1_000_000;
+  const core = fakeCore({
+    answer: params => revoked.has(params.ref) ? { refuse: 'not_granted' } : { status: 200, chunks: [sse([{ choices: [{ delta: { content: `ok ${params.ref}` } }] }])] }
+  });
+  // CanvasTTY lists only the accounts the person allowed.
+  const list = core.host.callHost;
+  core.host.callHost = async (method, params) => method === 'accounts.list' ? (core.calls.push({ method, params }), { accounts: [ACCOUNT, FLASH].filter(account => !revoked.has(account.ref)) }) : list(method, params);
+  const upstreams = [
+    { ...accountUpstream(ACCOUNT, []), id: 'acc-glm-53', models: [{ id: 'glm-4.6', tier: 'medium' }] },
+    { ...accountUpstream(FLASH, []), id: 'acc-glm-flash', models: [{ id: 'glm-4.6-flash', tier: 'medium' }] }
+  ];
+  const ru = '«Авто (Jev)»: доступ к аккаунтам отозван в настройках — разрешите его снова или выберите другую модель.';
+  let locale = 'en';
+  const { token, port, router, broker } = await routerWith(t, { core, upstreams, now: () => clock, withdrawnMessage: () => locale === 'ru' ? ru : 'Auto (Jev): access to accounts was withdrawn in Settings — allow it again or choose another model.' });
+  const requests = () => core.calls.filter(entry => entry.method === 'accounts.request').map(entry => entry.params.ref);
+  const say = text => call(port, token, turn({ messages: [{ role: 'user', content: text }] }));
+  assert.equal((await say('turn one')).status, 200);
+  const firstRef = requests()[0];
+  // One grant withdrawn: the other account answers; the withdrawn one is unavailable, not cooling down.
+  revoked.add(firstRef);
+  const two = await say('turn two, another task');
+  assert.equal(two.status, 200);
+  assert.match(two.text, /ok canvastty-accounts:/u);
+  assert.equal(broker.withdrawn(firstRef), true);
+  assert.deepEqual([...router['cooldowns'].keys()].filter(key => key.startsWith('acc-')), [], 'no cooldown for a withdrawn grant');
+  // Both withdrawn: the CLI reads what happened, in plain words (the person's language), not "cooling down".
+  for (const ref of [ACCOUNT.ref, FLASH.ref]) revoked.add(ref);
+  broker.invalidate();
+  const sent = requests().length;
+  const three = await say('turn three, yet another');
+  assert.equal(three.status, 503);
+  assert.match(three.text, /access to accounts was withdrawn in Settings — allow it again or choose another model/u);
+  assert.doesNotMatch(three.text, /cooling down|tries again/u);
+  locale = 'ru';
+  const four = await say('turn four');
+  assert.equal(four.status, 503);
+  assert.match(four.text, /доступ к аккаунтам отозван в настройках/u);
+  assert.ok(requests().length - sent <= 1, 'withdrawn accounts are not called again and again');
+  assert.deepEqual([...router['cooldowns'].keys()].filter(key => key.startsWith('acc-')), []);
+  // Allowed again: the next list read that begins after the refusal lists them, and the turn goes through at once.
+  revoked.clear();
+  clock += 20_000;
+  const five = await say('turn five');
+  assert.equal(five.status, 200, five.text);
+  assert.equal(broker.withdrawn(ACCOUNT.ref) || broker.withdrawn(FLASH.ref), false);
+  // A grant change notice (a core that sends one) clears them at once too.
+  revoked.add(ACCOUNT.ref);
+  await broker.send(ACCOUNT.ref, '/chat/completions', { method: 'POST', body: JSON.stringify({ model: 'glm-4.6' }) });
+  assert.equal(broker.withdrawn(ACCOUNT.ref), true);
+  broker.grantsChanged();
+  assert.equal(broker.withdrawn(ACCOUNT.ref), false);
+});
+
+test('broker client: only not_granted and grant_changed count as withdrawn; other 403s and refusals do not', async () => {
+  let plan = { refuse: 'not_granted' };
+  const core = fakeCore({ answer: () => plan });
+  const broker = new AccountBroker(core.host);
+  core.attach(broker);
+  await broker.list();
+  const send = () => broker.send(REF, '/chat/completions', { method: 'POST', body: JSON.stringify({ model: 'glm-4.6' }) });
+  for (const reason of ['not_granted', 'grant_changed']) {
+    broker.grantsChanged();
+    plan = { refuse: reason };
+    const answer = await send();
+    assert.equal(answer.status, 403);
+    assert.equal(answer.headers.get('x-canvastty-grant-withdrawn'), reason);
+    assert.equal(broker.withdrawn(REF), true, reason);
+    assert.equal(broker.known(REF), null, 'not offered while withdrawn');
+  }
+  for (const reason of ['caller_unavailable', 'account_unknown', 'budget_refused', 'owner_unavailable']) {
+    broker.grantsChanged();
+    plan = { refuse: reason };
+    const answer = await send();
+    assert.equal(answer.headers.get('x-canvastty-grant-withdrawn'), null, reason);
+    assert.equal(broker.withdrawn(REF), false, reason);
+  }
 });

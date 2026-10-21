@@ -128,8 +128,10 @@ export class AutoService {
       broker: {
         send: (upstream, path, init) => this.broker.send(upstream.account ?? '', path, init as Parameters<AccountBroker['send']>[2]),
         ready: upstream => this.accountReady(upstream),
-        refresh: async () => { await this.broker.list(); }
+        refresh: async () => { await this.broker.list(); },
+        withdrawn: upstream => !!upstream.account && this.broker.withdrawn(upstream.account)
       },
+      withdrawnMessage: () => AUTO_STRINGS[this.options.locale].grantWithdrawn,
       noProviderMessage: () => AUTO_STRINGS[this.options.locale].noProvider,
       ...(options.jevOnly ? { jevOnly: options.jevOnly } : {}),
       ...(options.transport ? { transport: options.transport } : {}),
