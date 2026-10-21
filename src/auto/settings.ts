@@ -5,6 +5,7 @@
  */
 import { validUrl, type DataClass } from '../shared/settings.ts';
 import { isEffort, type ReasoningEffort } from './catalog/identity.ts';
+import { modelTrafficForbidden } from './jevOnlyRule.ts';
 
 export type AutoTier = 'small' | 'medium' | 'large';
 export const AUTO_TIERS: readonly AutoTier[] = ['small', 'medium', 'large'];
@@ -160,6 +161,8 @@ export function validateAutoUpstream(value: unknown): AutoUpstream {
   if (allModels && value.preset !== 'openrouter') fail('Only OpenRouter publishes a model list Auto can use on its own.');
   const excluded = value.excluded ?? [];
   if (!Array.isArray(excluded) || excluded.length > MAX_EXCLUDED || excluded.some(id => typeof id !== 'string' || !MODEL_ID.test(id))) fail(`At most ${MAX_EXCLUDED} excluded models, by their ids.`);
+  // OpenRouter carries only Jev's own decisions: an upstream there (or saved from before this rule) stays off.
+  if (value.enabled && (value.preset === 'openrouter' || modelTrafficForbidden(baseUrl))) fail(JEV_ONLY_MESSAGE);
   return { id: value.id, preset: value.preset, baseUrl: baseUrl.replace(/\/+$/u, ''), trust: value.trust as DataClass, key, models, allModels, excluded: [...new Set(excluded as string[])], enabled: value.enabled };
 }
 
@@ -195,7 +198,7 @@ export function normalizeAutoSettings(value: unknown): AutoRoutingSettings {
   const upstreams: AutoUpstream[] = [];
   for (const raw of Array.isArray(source.upstreams) ? source.upstreams.slice(0, MAX_AUTO_UPSTREAMS) : []) {
     try {
-      const entry = validateAutoUpstream(raw);
+      const entry = validateAutoUpstream(jevOnlyOff(raw));
       if (!upstreams.some(other => other.id === entry.id)) upstreams.push(entry);
     } catch { /* this one alone is dropped */ }
   }
@@ -205,6 +208,18 @@ export function normalizeAutoSettings(value: unknown): AutoRoutingSettings {
     try { validateAutoSettings({ ...candidate, [key]: source[key] }); candidate[key] = source[key]; } catch { /* default */ }
   }
   return validateAutoSettings(candidate);
+}
+
+export const JEV_ONLY_MESSAGE = 'OpenRouter is used only for Jev\'s own decisions: Auto cannot send model calls there. Use another provider.';
+
+/** An upstream on OpenRouter saved before the Jev-only rule: kept, switched off. */
+export function isJevOnlyUpstream(upstream: Pick<AutoUpstream, 'preset' | 'baseUrl'>): boolean {
+  return upstream.preset === 'openrouter' || modelTrafficForbidden(upstream.baseUrl ?? OPENROUTER_BASE_URL);
+}
+function jevOnlyOff(raw: unknown): unknown {
+  if (!isRecord(raw)) return raw;
+  const preset = raw.preset, baseUrl = preset === 'openrouter' ? OPENROUTER_BASE_URL : raw.baseUrl;
+  return preset === 'openrouter' || typeof baseUrl === 'string' && modelTrafficForbidden(baseUrl) ? { ...raw, enabled: false } : raw;
 }
 
 /** The secret an upstream's own key is saved under. */

@@ -4,12 +4,14 @@ import type { AutoTier } from './settings.ts';
 
 export type AutoRefusal = 'provider' | 'environment' | 'project' | 'projectUnreadable' | 'noUpstream' | 'listLoading' | 'dataClass' | 'router' | 'unknownValue';
 
-const EN: Record<AutoRefusal, string> & { badgeTip(tier: AutoTier, source: string): string; tiers: Record<AutoTier, string>; sources: Record<string, string> } = {
+const EN: Record<AutoRefusal, string> & { badgeTip(tier: AutoTier, source: string): string; tiers: Record<AutoTier, string>; sources: Record<string, string>; noProvider: string; jevOnly: string } = {
   provider: 'Model: Auto (Jev) works with OpenCode for now. Choose Off for this agent.',
   environment: 'Auto (Jev) runs on this computer; it cannot reach a container or a remote host yet. Choose Off, or run the card on this computer.',
   project: 'This project\'s OpenCode config chooses its own model or providers, so Auto (Jev) cannot guarantee where prompts go. Remove model/provider settings from it, or choose Off.',
   projectUnreadable: 'This project\'s OpenCode config could not be read, so Auto (Jev) cannot check where prompts go. Choose Off, or fix the file.',
-  noUpstream: 'Auto (Jev) has no model to use yet: add an upstream on the Decision models page (Settings → Plugins → CanvasTTY Assistant), or raise its caps above 0.',
+  noUpstream: 'Auto (Jev) has no model provider (OpenRouter serves only Jev). Add one on the Decision models page, or start this card on its agent\'s own model.',
+  noProvider: 'Auto (Jev): no allowed model provider (OpenRouter serves only Jev). Add one on the Decision models page, or start this card on its agent\'s own model.',
+  jevOnly: 'OpenRouter serves only Jev\'s own decisions: Auto cannot send model calls there. Use another provider.',
   listLoading: 'Auto (Jev) is still loading OpenRouter\'s model list (prices and limits from openrouter.ai). Try again in a few seconds; the Decision models page shows its state.',
   dataClass: 'No Auto (Jev) upstream is trusted with this card\'s data class. Raise an upstream\'s trust on the Decision models page, or lower the card\'s class.',
   router: 'Auto (Jev) could not open its local port on 127.0.0.1. Try again; the plugin log has the details.',
@@ -24,7 +26,9 @@ const RU: typeof EN = {
   environment: '«Авто (Jev)» работает на этом компьютере и пока не достаёт до контейнера или удалённого хоста. Выберите «Выкл» или запустите окно на этом компьютере.',
   project: 'Конфиг OpenCode этого проекта сам выбирает модель или провайдеров, поэтому «Авто (Jev)» не может обещать, куда уйдут запросы. Уберите из него model/provider или выберите «Выкл».',
   projectUnreadable: 'Конфиг OpenCode этого проекта не читается, поэтому «Авто (Jev)» не может проверить, куда уйдут запросы. Выберите «Выкл» или исправьте файл.',
-  noUpstream: 'У «Авто (Jev)» пока нет моделей: добавьте поставщика на странице «Модели решений» (Настройки → Плагины → Ассистент CanvasTTY) или поднимите пределы выше 0.',
+  noUpstream: 'У «Авто (Jev)» нет поставщика моделей (OpenRouter — только для Jev). Добавьте его на странице «Модели решений» или запустите окно на модели агента.',
+  noProvider: '«Авто (Jev)»: нет разрешённого поставщика моделей (OpenRouter — только для Jev). Добавьте его на странице «Модели решений» или запустите окно на модели агента.',
+  jevOnly: 'OpenRouter служит только для решений самого Jev: «Авто» не может отправлять туда вызовы моделей. Выберите другого поставщика.',
   listLoading: '«Авто (Jev)» ещё загружает список моделей OpenRouter (цены и пределы с openrouter.ai). Повторите через несколько секунд; состояние видно на странице «Модели решений».',
   dataClass: 'Ни одному поставщику «Авто (Jev)» не доверен класс данных этого окна. Повысьте доверие поставщику на странице «Модели решений» или понизьте класс окна.',
   router: '«Авто (Jev)» не смог открыть локальный порт на 127.0.0.1. Попробуйте ещё раз; подробности — в журнале плагина.',

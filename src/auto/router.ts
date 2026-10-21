@@ -11,6 +11,7 @@ import type { Inventory, InventoryEntry } from './inventory.ts';
 import { plan, turnView, type Level, type SelectionReason, type TurnDecision, type TurnView } from './select.ts';
 import { DEFAULT_OUTPUT, type AutoRoutingSettings, type AutoTier, type AutoUpstream } from './settings.ts';
 import { hashToken, TokenStore, type LaunchGrant } from './tokens.ts';
+import { JevOnlyHosts, modelTrafficForbidden } from './jevOnly.ts';
 
 /**
  * The Auto (Jev) router: an OpenAI Chat Completions endpoint on 127.0.0.1 for agent CLIs started with "Model: Auto
@@ -49,6 +50,10 @@ export interface RouterDeps {
   turn?(text: string, grant: LaunchGrant): void;
   /** The card's model badge changed (only on a change). */
   badge?(sessionId: string, model: { model: string; tier: Level; source: DecisionSource } | null): void;
+  /** OpenRouter is for Jev only: the request-time check of every model call's host (tests pass their own lookup). */
+  jevOnly?: JevOnlyHosts;
+  /** The person-facing text when no allowed provider is left (localized by the service). */
+  noProviderMessage?(): string;
   /** At most this many calls at once on a subscription-like (flat-rate) upstream; null: no such cap. */
   parallelCap?(upstream: AutoUpstream): number | null;
   log?(level: 'info' | 'warn', message: string): void;
@@ -78,6 +83,8 @@ export interface FanOutRecord {
   judge: { upstream: string; model: string } | null;
   outcome: FanOutOutcome | null;
 }
+
+const NO_PROVIDER = 'Auto (Jev): no model provider is allowed for this card. OpenRouter is used only for Jev\'s own decisions. Add another provider on the Decision models page, or start this card on its agent\'s own model.';
 
 const COOLDOWN_MS = Object.freeze({ transient: 30_000, quota: 300_000, missing: 900_000, auth: 900_000, maxRetryAfter: 24 * 3_600_000 });
 
@@ -296,6 +303,7 @@ export class AutoRouter {
   private readonly agentic = new Set<string>();
   /** Calls running now per upstream (for subscription-like upstreams' parallel cap). */
   private readonly upstreamActive = new Map<string, number>();
+  private readonly jevOnly: JevOnlyHosts;
   /** Per-route fan-out outcomes (route key → counts), kept in `fanout-outcomes.json`. */
   private readonly outcomes = new Map<string, RouteOutcome>();
   readonly stats: Omit<RouterStats, 'hosts'> = { requests: 0, turns: 0, continuations: 0, small: 0, jevAsked: 0, jevAnswered: 0, rules: 0, leaseReuses: 0, failovers: 0, fanOuts: 0, merged: 0, fanOutToolCalls: 0, fanOutDegraded: 0, judgeFailed: 0 };
@@ -309,6 +317,7 @@ export class AutoRouter {
     this.tokens = new TokenStore(deps.directory, this.now);
     this.salt = this.loadSalt();
     this.spend = new Spend(deps.directory, this.now);
+    this.jevOnly = deps.jevOnly ?? new JevOnlyHosts();
     this.loadOutcomes();
     this.loadRecent();
   }
@@ -535,7 +544,7 @@ export class AutoRouter {
   /** Who may take this request now: enabled, allowed, trusted with the card's class, not cooling down, large enough. */
   private usable(grant: LaunchGrant, promptTokens: number, maxTokens: unknown): InventoryEntry[] {
     const mode = this.deps.dataClassMode();
-    const healthy = this.deps.inventory().entries.filter(entry => entry.upstream.enabled && !entry.excluded
+    const healthy = this.deps.inventory().entries.filter(entry => entry.upstream.enabled && !entry.excluded && !modelTrafficForbidden(entry.upstream.baseUrl)
       && upstreamAllowed(entry.upstream, grant.dataClass, mode) && !this.coolingDown(entry.upstream.id, entry.model));
     // A model whose known context or output is too small for this request is left out, unless none would remain.
     const wanted = typeof maxTokens === 'number' && maxTokens > 0 ? maxTokens : 0;
@@ -609,7 +618,9 @@ export class AutoRouter {
       }
       record.tier = request.kind === 'small' ? 'small' : request.view.level;
       const list = chosen.list;
-      if (!list.length) throw new HttpError(503, 'no_model', 'Auto (Jev): no allowed model is available now (all are off, excluded, cooling down or not allowed for this card\'s data class).');
+      if (!list.length) throw new HttpError(503, 'no_model', this.deps.inventory().entries.some(entry => entry.upstream.enabled && !entry.excluded && !modelTrafficForbidden(entry.upstream.baseUrl))
+        ? 'Auto (Jev): no allowed model is available now (all are off, excluded, cooling down or not allowed for this card\'s data class).'
+        : this.deps.noProviderMessage?.() ?? NO_PROVIDER);
       if (request.kind === 'turn' && kind === 'turn') {
         const typical = this.typicalOutput(grant.sessionId, body.max_tokens);
         const decision = chooseStrategy({
@@ -686,6 +697,7 @@ export class AutoRouter {
     let lastStatus = 503;
     let lastCode = 'no_upstream';
     let capped: HttpError | null = null;
+    let jevOnlySkipped = false;
     for (const entry of list) {
       const candidate = { upstream: entry.upstream, model: { id: entry.model } };
       if (controller.signal.aborted) throw new HttpError(499, 'aborted', 'The call was cancelled.');
@@ -698,6 +710,8 @@ export class AutoRouter {
         lastStatus = typeof status === 'number' ? status : 504;
         lastCode = code;
       };
+      // OpenRouter carries only Jev's decisions: never a model call there, whatever the settings or inventory say.
+      if (await this.jevOnly.forbidden(`${candidate.upstream.baseUrl}/chat/completions`)) { record.attempts--; jevOnlySkipped = true; continue; }
       const key = candidate.upstream.key === 'none' ? null : await this.deps.key(candidate.upstream).catch(() => null);
       if (candidate.upstream.key !== 'none' && !key) { failover('error', candidate.upstream.id, COOLDOWN_MS.auth, 'no_key'); continue; }
       // An OpenRouter effort variant: the effort it was scored at is sent, unless the CLI chose one itself.
@@ -835,6 +849,7 @@ export class AutoRouter {
       }
     }
     if (capped && record.attempts === 0) throw capped;
+    if (jevOnlySkipped && record.attempts === 0) throw new HttpError(503, 'no_provider', this.deps.noProviderMessage?.() ?? NO_PROVIDER);
     throw new HttpError(lastStatus === 429 ? 429 : 503, lastCode, `Auto (Jev): no allowed model answered (last: ${lastCode}). It tries again on the next call.`);
   }
 
@@ -865,6 +880,7 @@ export class AutoRouter {
       record.status = status; record.ms = this.now() - started;
       return { record, bytes: extra.bytes ?? null, contentType: extra.contentType ?? null, parsed: extra.parsed ?? null };
     };
+    if (await this.jevOnly.forbidden(`${entry.upstream.baseUrl}/chat/completions`)) return done('failed');
     const key = entry.upstream.key === 'none' ? null : await this.deps.key(entry.upstream).catch(() => null);
     if (entry.upstream.key !== 'none' && !key) { this.cool(entry.upstream.id, COOLDOWN_MS.auth); return done('failed'); }
     const effort = entry.sendEffort && entry.effort && body.reasoning === undefined && body.reasoning_effort === undefined ? { reasoning: { effort: entry.effort } } : {};

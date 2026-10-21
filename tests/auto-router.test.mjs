@@ -375,7 +375,7 @@ test('classification and candidates (pure)', () => {
   assert.equal(tierFor('simple', true, 'cheap'), 'medium', 'design-level work: large, one step cheaper');
   const settings = validateAutoSettings({
     upstreams: [
-      { id: 'cloud', preset: 'openrouter', trust: 'D1', key: 'own', enabled: true, models: TIERED },
+      { id: 'cloud', preset: 'openai-compatible', baseUrl: 'https://cloud.example/v1', trust: 'D1', key: 'own', enabled: true, models: TIERED },
       { id: 'local', preset: 'openai-compatible', baseUrl: 'http://127.0.0.1:9/v1', trust: 'D3', key: 'none', enabled: true, models: [{ id: 'local/coder', tier: 'medium' }] }
     ], preference: 'cheap', cheaperFallback: false, decider: 'jev', dailyUsdCap: 1, perCardUsdCap: 1
   });
@@ -388,7 +388,7 @@ test('classification and candidates (pure)', () => {
   assert.deepEqual(ids('large', 'D1', 'strict', { cheaperFallback: true }), ['vendor/large-a', 'vendor/medium-b', 'vendor/medium-a', 'local/coder', 'vendor/small-b', 'vendor/small-a']);
   assert.deepEqual(ids('large', 'D1', 'strict', { preference: 'best' }), ['vendor/large-a']);
   assert.throws(() => validateAutoSettings({ ...settings, upstreams: [{ ...settings.upstreams[1], baseUrl: 'https://example.com/v1' }] }), /D3 stays on this computer/u);
-  assert.throws(() => validateAutoSettings({ ...settings, upstreams: [{ ...settings.upstreams[0], baseUrl: 'https://evil.example/v1' }] }), /fixed address/u);
+  assert.throws(() => validateAutoSettings({ ...settings, upstreams: [{ ...settings.upstreams[0], preset: 'openrouter', baseUrl: 'https://evil.example/v1', enabled: false }] }), /fixed address/u);
   assert.throws(() => validateAutoSettings({ ...settings, upstreams: [{ ...settings.upstreams[1], baseUrl: 'http://example.com/v1', trust: 'D1' }] }), /http on this computer only/u);
   assert.throws(() => validateAutoSettings({ ...settings, upstreams: [{ ...settings.upstreams[1], preset: 'openai-compatible', key: 'jev', trust: 'D1' }] }), /Jev · OpenRouter key/u);
 });

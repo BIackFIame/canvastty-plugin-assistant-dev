@@ -429,8 +429,8 @@ export class Assistant {
   }
 
   /**
-   * The short view's key was saved (the person's click): Jev decides turns from now on when task triage was Off, and
-   * Auto adds its OpenRouter upstream on that key while its settings were never saved. Nothing else changes.
+   * The short view's Jev key was saved (the person's click): Jev decides turns from now on when task triage was Off.
+   * The key serves Jev only; Auto never sends model calls to OpenRouter. Nothing else changes.
    */
   async quickKeySaved(backendId: string): Promise<null> {
     this.keyChanged(backendId);
@@ -440,7 +440,6 @@ export class Assistant {
       next.enabled = true;
       await this.save(next);
     }
-    await this.auto.adoptJevKey().catch(() => false);
     return null;
   }
 

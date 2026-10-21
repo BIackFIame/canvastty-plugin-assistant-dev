@@ -37,7 +37,19 @@ function routingCatalog({ at = epoch, now = epoch, openRouter = true } = {}) {
 }
 
 const settings = (upstreams, extra = {}) => validateAutoSettings({ upstreams, preference: 'balanced', cheaperFallback: false, decider: 'jev', dailyUsdCap: 1, perCardUsdCap: 1, ...extra });
-const openRouter = (extra = {}) => ({ id: 'or', preset: 'openrouter', trust: 'D1', key: 'own', enabled: true, models: [], ...extra });
+/**
+ * OpenRouter serves only Jev (the owner's rule): the same models as an OpenAI-compatible provider of the person's
+ * own, listed with their prices, limits and the effort each runs at (`overrides` replace a listed model's fields).
+ */
+const LISTED = [
+  { id: 'vendor/alpha-1', effort: 'high', priceIn: 1, priceOut: 4, context: 400_000 },
+  { id: 'vendor/beta-2', priceIn: 0.5, priceOut: 2, context: 200_000 },
+  { id: 'vendor/gamma-3', priceIn: 0.2, priceOut: 0.8, context: 64_000 },
+  { id: 'vendor/delta-4', effort: 'high', priceIn: 0.1, priceOut: 0.4, context: 32_000, output: 4_096 }
+];
+const PROVIDER_URL = 'https://models.example/v1';
+const openRouter = ({ models = [], ...extra } = {}) => ({ id: 'or', preset: 'openai-compatible', baseUrl: PROVIDER_URL, trust: 'D1', key: 'own', enabled: true,
+  models: LISTED.map(model => { const override = models.find(entry => entry.id === model.id); if (!override) return model; const { effort, ...rest } = { ...model, ...override }; return override.tier ? rest : { ...rest, ...(effort ? { effort } : {}) }; }), ...extra });
 const direct = (models, extra = {}) => ({ id: 'direct', preset: 'openai-compatible', baseUrl: 'https://api.direct.example/v1', trust: 'D1', key: 'own', enabled: true, models, ...extra });
 const view = (type, level, confidence = null, from = 'jev') => turnView({ difficulty: level === 'small' ? 'simple' : level === 'large' ? 'hard' : 'normal', strong: false, type, confidence }, from, '');
 const healthy = inventory => inventory.entries.filter(entry => entry.upstream.enabled && !entry.excluded);
@@ -69,35 +81,30 @@ test('matching: the bare model name, separators only; vendor prefixes and routin
   assert.equal(variantScores(index, 'beta-2', null, ctx, 'coding').size, 2, 'Artificial Analysis and LiveBench');
 });
 
-test('inventory: OpenRouter\'s suitable models with list prices and limits, effort variants only where measured, the person\'s overrides and exclusions', () => {
-  const s = settings([openRouter({ models: [{ id: 'vendor/gamma-3', tier: 'large' }, { id: 'vendor/extra', priceIn: 2, priceOut: 3 }], excluded: ['vendor/delta-4'] })]);
+test('inventory: OpenRouter serves only Jev — an OpenRouter upstream offers no model; a provider of your own with its prices, limits, efforts, tiers and exclusions', () => {
+  const jevOnly = buildInventory({ ...settings([]), upstreams: [{ id: 'jev-or', preset: 'openrouter', baseUrl: 'https://openrouter.ai/api/v1', trust: 'D1', key: 'jev', models: [{ id: 'vendor/alpha-1' }], allModels: true, excluded: [], enabled: true }] }, routingCatalog());
+  assert.deepEqual([jevOnly.entries.length, jevOnly.waitingForList.length], [0, 0], 'not even with its list loaded');
+  const s = settings([openRouter({ models: [{ id: 'vendor/gamma-3', tier: 'large' }], excluded: ['vendor/delta-4'] })]);
   const inventory = buildInventory(s, routingCatalog());
-  const keys = inventory.entries.map(entry => entry.key).sort();
-  assert.deepEqual(keys, ['or|vendor/alpha-1|', 'or|vendor/alpha-1|high', 'or|vendor/alpha-1|low', 'or|vendor/beta-2|', 'or|vendor/delta-4|', 'or|vendor/delta-4|high', 'or|vendor/extra|', 'or|vendor/gamma-3|'].sort());
   const byKey = Object.fromEntries(inventory.entries.map(entry => [entry.key, entry]));
-  assert.deepEqual([byKey['or|vendor/alpha-1|high'].priceIn, byKey['or|vendor/alpha-1|high'].priceOut, byKey['or|vendor/alpha-1|high'].priceSource, byKey['or|vendor/alpha-1|high'].context], [1, 4, 'openrouter', 400_000]);
-  assert.equal(byKey['or|vendor/alpha-1|high'].sendEffort, true);
+  assert.deepEqual(Object.keys(byKey).sort(), ['or|vendor/alpha-1|high', 'or|vendor/beta-2|', 'or|vendor/delta-4|high', 'or|vendor/gamma-3|'].sort());
+  assert.deepEqual([byKey['or|vendor/alpha-1|high'].priceIn, byKey['or|vendor/alpha-1|high'].priceOut, byKey['or|vendor/alpha-1|high'].priceSource, byKey['or|vendor/alpha-1|high'].context], [1, 4, 'person', 400_000]);
+  assert.equal(byKey['or|vendor/alpha-1|high'].sendEffort, false, 'the provider\'s own setting: nothing extra is sent');
   assert.equal(byKey['or|vendor/alpha-1|high'].scores.coding.value, 57.5);
-  assert.equal(byKey['or|vendor/alpha-1|'].scores.coding, undefined, 'the default variant stays unknown');
   assert.equal(byKey['or|vendor/beta-2|'].scores.coding.value, 55);
   assert.equal(byKey['or|vendor/gamma-3|'].tier, 'large');
   assert.equal(byKey['or|vendor/gamma-3|'].scores.coding, undefined);
-  assert.equal(byKey['or|vendor/extra|'].priceSource, 'person');
-  assert.equal(byKey['or|vendor/extra|'].known, false);
   assert.equal(byKey['or|vendor/delta-4|high'].excluded, true);
   assert.match(inventory.cohorts.coding, /^artificial-analysis:4\.3\.2:/u, 'the source covering the most models');
-  // The writing type: Artificial Analysis has none; LiveBench is the only cohort.
   assert.match(inventory.cohorts.writing, /^livebench:2026-10-01/u);
   // An OpenAI-compatible upstream: the person's ids only; prices from models.dev for that origin.
   const own = buildInventory(settings([direct([{ id: 'beta-2' }, { id: 'unknown-model' }])]), routingCatalog());
   assert.deepEqual(own.entries.map(entry => [entry.model, entry.priceIn, entry.priceOut, entry.priceSource, entry.context, !!entry.scores.coding]),
     [['beta-2', 0.3, 1, 'models.dev', 128_000, true], ['unknown-model', null, null, null, null, false]]);
-  // Old prices are not compared: after 8 days the list's and models.dev's prices are unknown (scores stay).
-  const old = buildInventory(s, routingCatalog({ now: epoch + 8 * DAY }));
-  const stale = old.entries.find(entry => entry.key === 'or|vendor/alpha-1|high');
-  assert.deepEqual([stale.priceIn, stale.priceSource, stale.scores.coding.value, stale.scores.coding.historical], [null, null, 57.5, true]);
-  // Without the list yet: the upstream waits for it.
-  assert.deepEqual(buildInventory(s, routingCatalog({ openRouter: false })).waitingForList, ['or']);
+  // Old models.dev prices are not compared after 8 days (scores stay, marked old); your own prices stay.
+  const old = buildInventory(settings([direct([{ id: 'beta-2' }])]), routingCatalog({ now: epoch + 8 * DAY }));
+  assert.deepEqual([old.entries[0].priceIn, old.entries[0].priceSource, old.entries[0].scores.coding.value, old.entries[0].scores.coding.historical], [null, null, 55, true]);
+  assert.equal(buildInventory(s, routingCatalog({ now: epoch + 8 * DAY })).entries.find(entry => entry.key === 'or|vendor/alpha-1|high').priceIn, 1);
 });
 
 test('selection by preference: the cheapest model within the window of the best score for the turn (by level), best none', () => {
@@ -192,7 +199,7 @@ test('unknown scores: never ahead of known ones; with none known, manual tiers f
   assert.deepEqual(Object.values(first(tiered, { view: view('coding', 'medium') })).slice(0, 2), ['or|vendor/gamma-3|', 'manual_tier']);
   assert.equal(first(tiered, { view: view('coding', 'large') }, 'best').key, 'or|vendor/alpha-1|high', 'other tiers still go by score');
   // Titles: the cheapest priced model, no matter the score.
-  assert.equal(plan(healthy(tiered), { kind: 'small' }, { preference: 'best', cheaperFallback: false }).list[0].key, 'or|vendor/delta-4|');
+  assert.equal(plan(healthy(tiered), { kind: 'small' }, { preference: 'best', cheaperFallback: false }).list[0].key, 'or|vendor/delta-4|high');
 });
 
 test('cooldowns and limits shape the candidates before scoring; the launch tells OpenCode a context the router can serve', () => {
@@ -200,7 +207,7 @@ test('cooldowns and limits shape the candidates before scoring; the launch tells
   const cooled = healthy(inventory).filter(entry => entry.model !== 'vendor/alpha-1');
   assert.equal(plan(cooled, { kind: 'turn', view: view('coding', 'large'), preferred: null }, { preference: 'best', cheaperFallback: false }).list[0].key, 'or|vendor/beta-2|', 'the best healthy score');
   const limit = limitsFor(inventory);
-  assert.equal(limit.context, 300_000, 'the median context of the scored or tiered models (one per model: 400k, 200k)');
+  assert.equal(limit.context, 64_000, 'a list of your own: the smallest context of the models offered');
   assert.equal(limitsFor(buildInventory(settings([direct([{ id: 'a', context: 64_000, output: 4_096 }, { id: 'b', context: 200_000 }])]), routingCatalog())).context, 64_000, 'a short list of your own: the smallest');
 });
 
@@ -261,7 +268,7 @@ async function routerWith(t, { extra = {}, upstreamExtra = {}, decide, behaviour
     dataClassMode: () => 'strict',
     key: async () => 'up-key',
     decide: decide ?? (async () => { jev.calls++; return { difficulty: 'hard', strong: false, type: 'coding', confidence: 0.05 }; }),
-    transport: (url, init) => fetch(String(url).replace('https://openrouter.ai/api/v1', upstream.url), init),
+    transport: (url, init) => fetch(String(url).replace(PROVIDER_URL, upstream.url), init),
     timeouts: { jevMs: 300, headersMs: 500, firstChunkMs: 500, idleMs: 500 }
   });
   t.after(() => router.stop());
@@ -271,21 +278,21 @@ async function routerWith(t, { extra = {}, upstreamExtra = {}, decide, behaviour
   return { upstream, router, ask, jev, set: next => { current = next; } };
 }
 
-test('router: the best coding score with its effort sent to OpenRouter; the decision says type, difficulty, score, price and why — no text', async t => {
+test('router: the best coding score at its effort; the decision says type, difficulty, score, price and why — no text', async t => {
   const { upstream, router, ask } = await routerWith(t);
   const answer = await ask('Redesign the storage layer MARKER-SELECT-91');
   assert.equal(answer.status, 200);
   await answer.text();
   const sent = upstream.posts().at(-1).json;
   assert.equal(sent.model, 'vendor/alpha-1');
-  assert.deepEqual(sent.reasoning, { effort: 'high' }, 'the variant it was scored at');
+  assert.equal(sent.reasoning, undefined, 'the effort names the provider\'s own setting: nothing extra is sent');
   const record = router.recent()[0];
   assert.deepEqual([record.taskType, record.difficulty, record.model, record.effort, record.score, record.why, record.priceIn, record.priceOut],
     ['coding', 'large', 'vendor/alpha-1', 'high', 57.5, 'best_score', 1, 4]);
   assert.match(record.scoreSource, /^Artificial Analysis v4\.3\.2/u);
   assert.ok(!JSON.stringify(router.recent()).includes('MARKER-SELECT-91'));
   assert.deepEqual(record.tradeoff, { window: 0, bestModel: 'vendor/alpha-1', bestEffort: 'high', bestScore: 57.5, bestPriceIn: 1, bestPriceOut: 4 });
-  // The CLI's own effort is never overridden.
+  // The CLI's own effort passes as it came.
   await (await ask('Another redesign', { reasoning: { effort: 'low' } })).text();
   assert.deepEqual(upstream.posts().at(-1).json.reasoning, { effort: 'low' });
 });

@@ -23,6 +23,7 @@ import { QUALITY_WINDOW, tierFor, type Level, type TurnView } from '../auto/sele
 import type { AutoPreference, AutoTier } from '../auto/settings.ts';
 import { classRank, type DataClass, type DataClassMode } from '../shared/settings.ts';
 import { resolveModel, type Resolved } from './aliases.ts';
+import { modelTrafficForbidden } from '../auto/jevOnlyRule.ts';
 import { quotaOf, shadowPrice, type LimitsCache, type ShadowPrice, type SubscriptionQuota } from './limits.ts';
 import { DEFAULT_MAX_PARALLEL, DEFAULT_RESERVE, SPEED_WEIGHT, trustRank, type PlanDecl, type RouteAllow, type RouteSettings, type TrustLevel } from './settings.ts';
 
@@ -437,6 +438,8 @@ export function decide(ctx: RouteContext): RouteDecision {
     const entry = ctx.providers.find(provider => provider.id === raw.cli);
     const key = `${raw.cli}|${raw.signIn}|${raw.model ?? ''}|${raw.effort ?? ''}`;
     const drop = (reason: string): void => { dropped.push({ key, cli: raw.cli, label: raw.label, model: raw.model, reason }); };
+    // OpenRouter serves only Jev's own decisions: no route whose model calls would go there.
+    if (raw.endpoint && modelTrafficForbidden(raw.endpoint.includes('://') ? raw.endpoint : `https://${raw.endpoint}`) || raw.model && /^openrouter\//iu.test(raw.model)) { drop('OpenRouter serves only Jev\'s decisions, never model calls'); continue; }
     // Facts about the CLI.
     if (ctx.providersGiven && !entry) { drop('not offered by list_providers'); continue; }
     if (entry && (entry.available === false || entry.installed === false)) { drop('its CLI is not installed or not available'); continue; }

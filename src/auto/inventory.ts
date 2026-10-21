@@ -3,6 +3,7 @@ import type { ReasoningEffort } from './catalog/identity.ts';
 import { offeredByDefault, type OpenRouterModel } from './catalog/openrouter.ts';
 import { BenchmarkIndex, bareModelId, chooseCohort, TASK_TYPES, variantScores, type MatchContext, type MeasuredSpeed, type Score, type TaskType } from './catalog/scoring.ts';
 import type { AutoModel, AutoRoutingSettings, AutoTier, AutoUpstream } from './settings.ts';
+import { modelTrafficForbidden } from './jevOnlyRule.ts';
 
 /**
  * Every model Auto could send a turn to, with what the catalog knows about it: price and context (the person's
@@ -69,7 +70,9 @@ export function buildInventory(settings: AutoRoutingSettings, catalog: RoutingCa
   const byId = new Map<string, OpenRouterModel>((openRouterList ?? []).map(model => [model.id, model]));
   const scoreMaps = new Map<InventoryEntry, Map<TaskType, Map<string, Score>>>();
   for (const upstream of settings.upstreams) {
-    const openRouter = upstream.preset === 'openrouter';
+    // OpenRouter carries only Jev's decisions: none of its models is ever a candidate (jevOnly.ts).
+    if (upstream.preset === 'openrouter' || modelTrafficForbidden(upstream.baseUrl)) continue;
+    const openRouter: boolean = false;
     const context: MatchContext = { openRouter, origin: openRouter ? null : originOf(upstream.baseUrl) };
     const listed = new Map(upstream.models.map(model => [model.id, model]));
     const ids: string[] = [...listed.keys()];
