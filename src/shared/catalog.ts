@@ -151,8 +151,31 @@ const COMMAND_REVIEW_META: QuestionSet = {
     criteria: COMMAND_REVIEW.security_weakening!.criteria as { true: string; false: string } }
 };
 
+/**
+ * (c) task.shape — how a task splits (Auto (Jev) autopilot, D3). Asked under the task.route use case, on the same
+ * task text; its answers only size a plan the orchestrator follows (no allow, no tightening). Added without
+ * touching the other sets: ASSISTANT_CATALOG_VERSION stays 1, and the set has its own pinned hash.
+ */
+const TASK_SHAPE: QuestionSet = {
+  shape: { type: 'choice',
+    instructions: 'How is the work that `task` asks for structured?',
+    criteria: {
+      single_step: 'One piece of work that one agent does from start to end',
+      independent_parts: 'Two or more parts that can be done at the same time without waiting on each other',
+      pipeline: 'Parts that must happen in order, each using the result of the one before',
+      unclear_large: 'A large piece of work whose parts `task` does not name' } },
+  parts: { type: 'choice',
+    instructions: 'How many separate parts does `task` name or clearly imply?',
+    criteria: {
+      one: 'One',
+      two_three: 'Two or three',
+      four_six: 'Four to six',
+      seven_plus: 'Seven or more' } }
+};
+
 export const QUESTION_SETS = {
   'task.route': TASK_ROUTE,
+  'task.shape': TASK_SHAPE,
   'command.review': COMMAND_REVIEW,
   'command.review@meta': COMMAND_REVIEW_META
 } as const satisfies Readonly<Record<string, QuestionSet>>;
@@ -160,7 +183,7 @@ export type QuestionSetId = keyof typeof QUESTION_SETS;
 
 /** Which sets a use case may ask. */
 export const USE_CASE_SETS: Readonly<Record<AssistantUseCase, readonly QuestionSetId[]>> = {
-  'task.route': ['task.route'],
+  'task.route': ['task.route', 'task.shape'],
   'command.review': ['command.review', 'command.review@meta']
 };
 
@@ -173,6 +196,7 @@ export const METADATA_VARIANTS: Readonly<Partial<Record<QuestionSetId, QuestionS
  */
 export const SYNTHETIC_STATES: Readonly<Record<QuestionSetId, Readonly<Record<string, unknown>>>> = {
   'task.route': { task: 'Rename the variable tmp to buffer in utils.ts' },
+  'task.shape': { task: 'Add a dark theme to the settings page and its tests' },
   'command.review': { person_request: 'Run the unit tests', action: { tool: 'Bash', command: 'npm test', shape: { program: 'npm', subcommand: 'test', flags: [] } }, facts: { stays_inside_project: 'yes', network_access: 'none', deletes_files: 'no' } },
   'command.review@meta': { action: { shape: { program: 'npm', subcommand: 'test', flags: [] } }, facts: { stays_inside_project: 'yes', network_access: 'none', deletes_files: 'no' } }
 };
