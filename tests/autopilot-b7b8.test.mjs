@@ -155,6 +155,54 @@ test('B8 without a core that has it, without consent, without routing: nothing s
   assert.ok(!empty.host.calls.some(call => call.method === 'sessions.create' && call.params.role === 'orchestrator'));
 });
 
+test('live run 17: the orchestrator "Start with Auto (Jev)" started has the person\'s task (full session id), its route in the agent tree, and a refused launch is counted apart', async () => {
+  const ORCH = 'c11e2af6-50e0-4a78-a9dc-141aaac5ea8f';
+  const { assistant, host } = assistantWith({ sessions: async (method, params) => { if (params.role === 'probe') throw new Error('role must be agent or orchestrator.'); return method === 'sessions.create' ? { sessionId: ORCH } : null; } });
+  const cwd = project('run17');
+  const task = 'Do these:\n- explain Bloom filters in two sentences\n- create hello.mjs and hello.test.mjs in code/\n- update the docs';
+  const started = await assistant.startAuto({ task, cwd });
+  assert.equal(started.started, true, JSON.stringify(started));
+  assert.equal(started.sessionId, ORCH);
+  // The person's own text for that card (as a launcher Task would be), and only for it.
+  assert.deepEqual(started.plan, { mode: 'orchestrate', children: 3 });
+  const typed = task.trim();
+  assert.deepEqual(assistant.review.requestFor(ORCH), { text: typed, byPerson: true });
+  assert.equal(assistant.review.requestFor(`${ORCH.slice(0, 8)}-0000-0000-0000-000000000000`), null);
+  // CanvasTTY prepares its launch (the launcher has no Task: null): the start task stays.
+  const options = host.calls.find(call => call.method === 'sessions.create' && call.params.role === 'orchestrator').params.launchOptions;
+  const ctx = (extra = {}) => ({ sessionId: ORCH, provider: started.provider, profile: 'normal', role: 'orchestrator', cwd, restoring: false, resume: false, options: { ...options[ASSISTANT] }, chosen: true, environment: null, ...extra });
+  assert.ok(!(await assistant.launch(ctx()))?.refuse);
+  assert.equal(assistant.review.requestFor(ORCH).text, typed);
+  // Its subagents: one routed with pick_route, one spawned without it (refused, never started).
+  const caller = { id: ORCH, provider: started.provider, role: 'orchestrator', title: 'Auto (Jev)', status: 'working', cwd, workingDirectory: cwd };
+  const spawn = lastJson(await assistant.tool('pick_route', caller, { task: 'create hello.mjs', providers, accountRoutes })).spawn;
+  const kid = (id, model) => ctx({ sessionId: id, provider: spawn.provider, role: 'subagent', parentSessionId: ORCH, options: { task: '', dataClass: 'default', model } });
+  const routed = await assistant.launch(kid('71b88188-b4af-4416-809c-70fdc2f6d719', spawn.launchOptions[ASSISTANT].model));
+  assert.ok(!routed?.refuse, JSON.stringify(routed));
+  assert.ok((await assistant.launch(kid('2e9d4929-1060-43dd-bcb4-caaea0bd02e0', 'off'))).refuse, 'without pick_route: refused');
+  const now = Date.now();
+  const card = (id, role, status, extra = {}) => ({ id, provider: started.provider, role, title: id.slice(0, 8), status, exitCode: null, startedAt: now, cwd, workingDirectory: cwd, ...extra });
+  assistant.sessionEvent({ type: 'created', session: card(ORCH, 'orchestrator', 'working', { title: 'Auto (Jev)' }) });
+  assistant.sessionEvent({ type: 'created', session: card('71b88188-b4af-4416-809c-70fdc2f6d719', 'subagent', 'working', { parentSessionId: ORCH, provider: spawn.provider }) });
+  assistant.sessionEvent({ type: 'created', session: card('2e9d4929-1060-43dd-bcb4-caaea0bd02e0', 'subagent', 'failed', { parentSessionId: ORCH, provider: spawn.provider, exitCode: 1 }) });
+  const view = await assistant.treeView();
+  const tree = view.trees.find(entry => entry.root.id === ORCH);
+  assert.ok(tree, 'the tree');
+  // The orchestrator's route from the B8 decision, not "default model · cost unknown".
+  assert.ok(tree.root.model, `model shown (${started.route})`);
+  assert.ok(started.route.toLowerCase().includes(tree.root.model.toLowerCase()), `${tree.root.model} in ${started.route}`);
+  assert.ok(tree.root.cost && ['plan', 'flat', 'launch'].includes(tree.root.cost.kind), JSON.stringify(tree.root.cost));
+  // Only started agents count; the plan's "N of M" counts started parts; the refusal is apart.
+  assert.equal(tree.root.children.length, 1);
+  assert.equal(tree.root.refused, 1);
+  assert.equal(tree.root.planChildren, 3);
+  assert.equal(tree.totals.agents, 2);
+  assert.equal(tree.totals.refused, 1);
+  // A later launch of the same card that is not refused clears it (a restart that starts).
+  assistant.sessionEvent({ type: 'closed', session: { id: '2e9d4929-1060-43dd-bcb4-caaea0bd02e0', role: 'subagent' } });
+  assert.equal((await assistant.treeView()).trees.find(entry => entry.root.id === ORCH).totals.refused, 0);
+});
+
 // ---------------------------------------------------------------------------------------------------------------
 // Against the real core: TerminalManager + LaunchPipeline (+ PluginSessions)
 // ---------------------------------------------------------------------------------------------------------------

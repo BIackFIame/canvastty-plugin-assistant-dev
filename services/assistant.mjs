@@ -8263,7 +8263,7 @@ var ReviewService = class {
   state(sessionId) {
     let state = this.sessions.get(sessionId);
     if (!state) {
-      state = { suspect: false, launchTask: null, turns: [], subagent: false, parent: null, dataClass: null, strict: false, reviewed: /* @__PURE__ */ new Map() };
+      state = { suspect: false, launchTask: null, turns: [], startTask: null, subagent: false, parent: null, dataClass: null, strict: false, reviewed: /* @__PURE__ */ new Map() };
       this.sessions.set(sessionId, state);
       while (this.sessions.size > MAX_SESSIONS) this.forget(this.sessions.keys().next().value);
     }
@@ -8282,6 +8282,21 @@ var ReviewService = class {
       state.subagent = launch.role === "subagent";
       state.parent = state.subagent ? launch.parentSessionId ?? null : null;
     }
+    if (state.subagent) state.startTask = null;
+  }
+  /**
+   * "Start with Auto (Jev)": the person typed `task` on the Assistant's page, and this plugin started the orchestrator
+   * `sessionId` (core B8) with it. Recorded for that card only (its full session id, as sessions.create answered it),
+   * as the person's own text for its reviews and for the trust chain of its subagents, the same as a task typed in
+   * the launcher's Task field or a turn its Auto router saw. Memory only, until the card closes.
+   */
+  notePersonStart(sessionId, task) {
+    const value = task.trim().slice(0, MAX_REQUEST_CHARS);
+    if (!sessionId || !value) return;
+    const state = this.state(sessionId);
+    state.subagent = false;
+    state.parent = null;
+    state.startTask = value;
   }
   /**
    * A new user turn of a card on Auto (Jev), as its router read it (the latest user text, envelopes stripped). Kept
@@ -8302,11 +8317,11 @@ var ReviewService = class {
   /** The task a card was given, for the agent tree: the launcher's task, else its first turn. */
   taskOf(sessionId) {
     const state = this.sessions.get(sessionId);
-    return state ? state.launchTask ?? state.turns[0] ?? null : null;
+    return state ? state.launchTask ?? state.startTask ?? state.turns[0] ?? null : null;
   }
   /** A card's own texts, most recent first: its latest turn, its earlier turns, then the launcher's task. */
   ownTexts(state) {
-    return distinct([...[...state.turns].reverse(), state.launchTask]);
+    return distinct([...[...state.turns].reverse(), state.launchTask, state.subagent ? null : state.startTask]);
   }
   /** The texts the person typed for this card or, for a subagent, for the nearest card above it that is not one. */
   personTexts(state) {
@@ -10144,10 +10159,11 @@ function priceKey(cost) {
   return cost.kind === "plan" || cost.kind === "launch" || cost.kind === "flat" ? cost.label : null;
 }
 function totalsOf(root) {
-  const totals = { agents: 0, running: 0, usd: null, plans: [], unpriced: 0, tokens: null, providerEstimate: null };
+  const totals = { agents: 0, refused: 0, running: 0, usd: null, plans: [], unpriced: 0, tokens: null, providerEstimate: null };
   const plans = /* @__PURE__ */ new Map();
   const visit = (node) => {
     totals.agents++;
+    totals.refused += node.refused;
     if (node.status === "running") totals.running++;
     if (node.usage) {
       totals.tokens = (totals.tokens ?? 0) + node.usage.tokens;
@@ -10190,7 +10206,10 @@ function buildTree(input, options = {}) {
     placed.add(card.id);
     const route = input.route(card.id);
     const top = input.autoTop?.(card.id) ?? null;
-    const children = depth >= TREE_LIMITS.depth ? [] : (kids.get(card.id) ?? []).filter((child) => !placed.has(child.id)).sort((a, b) => (a.startedAt ?? 0) - (b.startedAt ?? 0) || a.id.localeCompare(b.id)).map((child) => node(child, depth + 1));
+    const below = (kids.get(card.id) ?? []).filter((child) => !placed.has(child.id));
+    const refused = below.filter((child) => input.refused?.(child.id) === true && !kids.has(child.id));
+    for (const child of refused) placed.add(child.id);
+    const children = depth >= TREE_LIMITS.depth ? [] : below.filter((child) => !refused.includes(child)).sort((a, b) => (a.startedAt ?? 0) - (b.startedAt ?? 0) || a.id.localeCompare(b.id)).map((child) => node(child, depth + 1));
     const usage = input.usage?.(card.id) ?? null;
     const cost = measuredCost(costOf(route) ?? (top ? { kind: "plan", label: top.label, share: null, window: null } : null), usage);
     return {
@@ -10205,8 +10224,9 @@ function buildTree(input, options = {}) {
       usage,
       startedAt: typeof card.startedAt === "number" && Number.isFinite(card.startedAt) ? card.startedAt : null,
       endedAt: input.endedAt(card.id),
-      planChildren: card.role === "orchestrator" || children.length ? input.planChildren(card.id) : null,
+      planChildren: card.role === "orchestrator" || children.length || refused.length ? input.planChildren(card.id) : null,
       descendants: children.reduce((sum, child) => sum + 1 + child.descendants, 0),
+      refused: refused.length,
       children
     };
   };
@@ -14727,15 +14747,13 @@ function decide(ctx) {
   const types = view.type === "chat" ? ["chat"] : [view.type, "chat"];
   const maps = scoreMaps(raws, ctx.index, types);
   const mapOf = (raw, type) => raw.resolved.identity ? maps.get(variantKey(raw.resolved.identity, raw.effort, raw.context))?.get(type) : void 0;
-  const scoredAs = raws.some((raw) => (mapOf(raw, view.type)?.size ?? 0) > 0) ? view.type : "chat";
-  const cohort = chooseCohort(raws.filter((raw) => raw.resolved.identity).map((raw) => ({ model: raw.resolved.identity, scores: mapOf(raw, scoredAs) ?? /* @__PURE__ */ new Map() })));
-  const chatCohort = chooseCohort(raws.filter((raw) => raw.resolved.identity).map((raw) => ({ model: raw.resolved.identity, scores: mapOf(raw, "chat") ?? /* @__PURE__ */ new Map() })));
   const policy = ctx.settings.newModels;
   const fits = /* @__PURE__ */ new Map();
   const level = view.level;
   const tier = tierFor(view.difficulty, view.strong, ctx.preference);
   const share = ctx.settings.expectedShare[level];
   const candidates = [];
+  const usable2 = [];
   for (const raw of raws) {
     const entry = ctx.providers.find((provider) => provider.id === raw.cli);
     const key = `${raw.cli}|${raw.signIn}|${raw.model ?? ""}|${raw.effort ?? ""}`;
@@ -14800,23 +14818,8 @@ function decide(ctx) {
       drop(raw.trust === "auto" ? `no Auto upstream is trusted with ${ctx.cardClass}` : `trust ${raw.trust} is below this card's ${ctx.cardClass} (${ctx.mode === "strict" ? "Strict" : "D3 stays on this computer"})`);
       continue;
     }
-    const scores = mapOf(raw, scoredAs);
     const boost = raw.resolved.identity ? ctx.settings.boosts[raw.resolved.identity] ?? 0 : 0;
     const pin = raw.resolved.identity ? ctx.settings.pins[raw.resolved.identity] ?? null : null;
-    let score2 = null;
-    const measured = cohort ? scores?.get(cohort) : void 0;
-    if (measured) score2 = { value: measured.value + boost, raw: measured.value, label: measured.label, source: "measured", historical: measured.historical };
-    else if (cohort && scores?.size && policy !== "wait") {
-      for (const [other, value] of scores) {
-        const fitKey = `${scoredAs}|${other}`;
-        if (!fits.has(fitKey)) fits.set(fitKey, anchorFit(ctx.index, scoredAs, other, cohort));
-        const fit = fits.get(fitKey);
-        if (!fit) continue;
-        const mappedValue = Math.round((fit.a * value.value + fit.b) * 100) / 100;
-        score2 = { value: mappedValue - PROVISIONAL_PENALTY + boost, raw: mappedValue, label: `${value.label} \u2192 mapped`, source: "provisional", historical: value.historical, mapped: { from: value.label, anchors: fit.anchors, r2: fit.r2 } };
-        break;
-      }
-    }
     const ref = taskUsd(level, raw.kind === "auto" ? { priceIn: ctx.auto.priceIn, priceOut: ctx.auto.priceOut } : apiPrice(ctx.catalog, raw.resolved.identity));
     let cost = null;
     let costBasis = "unpriced";
@@ -14894,7 +14897,7 @@ function decide(ctx) {
     spawn.launchOptions = launchOptionsFor(raw.cli, plugins, { kind: raw.kind, account: accountOptions });
     if ((raw.kind === "subscription" || raw.kind === "coding-plan") && raw.model) spawn.model = raw.model;
     if (raw.effort && raw.effortVia === "spawn" && raw.kind !== "auto") spawn.effort = raw.effort;
-    candidates.push({
+    const candidate = {
       key,
       cli: raw.cli,
       kind: raw.kind,
@@ -14907,10 +14910,10 @@ function decide(ctx) {
       identity: raw.resolved.identity,
       resolvedFrom: raw.resolved.from,
       effort: raw.effort,
-      scoredEffort: measured?.effort ?? raw.effort,
-      overall: chatCohort ? mapOf(raw, "chat")?.get(chatCohort)?.value ?? null : null,
+      scoredEffort: raw.effort,
+      overall: null,
       planPreferred: null,
-      score: score2,
+      score: null,
       pin,
       boost,
       cost,
@@ -14923,8 +14926,36 @@ function decide(ctx) {
       demoted: null,
       planCost: null,
       spawn,
-      newModel: !!raw.model && raw.kind !== "auto" && (score2 === null || score2.source === "provisional")
-    });
+      newModel: false
+    };
+    candidates.push(candidate);
+    usable2.push({ raw, candidate });
+  }
+  const usableRaws = usable2.map((entry) => entry.raw);
+  const scoredAs = usableRaws.some((raw) => (mapOf(raw, view.type)?.size ?? 0) > 0) ? view.type : "chat";
+  const cohort = chooseCohort(usableRaws.filter((raw) => raw.resolved.identity).map((raw) => ({ model: raw.resolved.identity, scores: mapOf(raw, scoredAs) ?? /* @__PURE__ */ new Map() })));
+  const chatCohort = chooseCohort(usableRaws.filter((raw) => raw.resolved.identity).map((raw) => ({ model: raw.resolved.identity, scores: mapOf(raw, "chat") ?? /* @__PURE__ */ new Map() })));
+  for (const { raw, candidate } of usable2) {
+    const scores = mapOf(raw, scoredAs);
+    const boost = candidate.boost;
+    let score2 = null;
+    const measured = cohort ? scores?.get(cohort) : void 0;
+    if (measured) score2 = { value: measured.value + boost, raw: measured.value, label: measured.label, source: "measured", historical: measured.historical };
+    else if (cohort && scores?.size && policy !== "wait") {
+      for (const [other, value] of scores) {
+        const fitKey = `${scoredAs}|${other}`;
+        if (!fits.has(fitKey)) fits.set(fitKey, anchorFit(ctx.index, scoredAs, other, cohort));
+        const fit = fits.get(fitKey);
+        if (!fit) continue;
+        const mappedValue = Math.round((fit.a * value.value + fit.b) * 100) / 100;
+        score2 = { value: mappedValue - PROVISIONAL_PENALTY + boost, raw: mappedValue, label: `${value.label} \u2192 mapped`, source: "provisional", historical: value.historical, mapped: { from: value.label, anchors: fit.anchors, r2: fit.r2 } };
+        break;
+      }
+    }
+    candidate.score = score2;
+    candidate.scoredEffort = measured?.effort ?? raw.effort;
+    candidate.overall = chatCohort ? mapOf(raw, "chat")?.get(chatCohort)?.value ?? null : null;
+    candidate.newModel = !!raw.model && raw.kind !== "auto" && (score2 === null || score2.source === "provisional");
   }
   planCosts(candidates, ctx, raws);
   const measuredIdentities = new Set(candidates.filter((c) => c.score?.source === "measured" && c.identity).map((c) => c.identity));
@@ -15455,10 +15486,34 @@ var AccountsFeed = class {
     read2.catch(() => void 0);
     return await within2(read2, deadlineMs) ?? this.quotaCache?.value ?? null;
   }
+  /**
+   * The first reads of a service run (at its start, and when the person first opens the settings page), so neither
+   * waits for the first routing decision: the routes (on that read Accounts reads its accounts' quota) and the quota.
+   * Accounts answers the routes before its own quota read ends, so while a model account's quota says it was not
+   * read yet both are read once more `retryMs` later. Bounded: two rounds at most, each within its deadline.
+   */
+  async warm(retryMs = 2500, wait = (ms) => new Promise((resolve9) => {
+    const timer = setTimeout(resolve9, ms);
+    timer.unref?.();
+  })) {
+    const round5 = async () => {
+      const routes = await this.routes(-1, 3e3);
+      const quota = await this.quota(0, 3e3, true);
+      return { routes: routes !== null, quota: quota !== null, unread: unreadQuota(quota) };
+    };
+    const first = await round5();
+    if (!first.unread || this.mode !== "ready") return first;
+    await wait(retryMs);
+    return round5();
+  }
   state() {
     return { mode: this.mode, reason: this.reason, routesAt: this.routesCache?.at ?? null, quotaAt: this.quotaCache?.at ?? null };
   }
 };
+function unreadQuota(answer) {
+  const accounts = isRecord10(answer) && Array.isArray(answer.accounts) ? answer.accounts : [];
+  return accounts.filter((entry) => isRecord10(entry) && isRecord10(entry.quota) && entry.quota.observedAt == null && entry.quota.state === "unknown" && !/not readable/iu.test(String(entry.quota.note ?? ""))).length;
+}
 function environmentsFrom(value) {
   const raw = isRecord10(value) && Array.isArray(value.environments) ? value.environments : [];
   const out = [];
@@ -15678,6 +15733,24 @@ function digestOf(providers, rows) {
   const clis = providers.list.filter((entry) => entry.available !== false && entry.installed !== false).map((entry) => `${entry.id}${entry.signIn && entry.signIn !== "unknown" ? `:${entry.signIn}` : ""}`);
   const accounts = rows.filter((row) => row.state === "ready").map((row) => `@${row.accountId}`);
   return [.../* @__PURE__ */ new Set([...clis, ...accounts])].join(" ").slice(0, 300);
+}
+function droppedReasons(dropped, max) {
+  const own = [];
+  const byReason = /* @__PURE__ */ new Map();
+  for (const entry of dropped) {
+    if (entry.model) {
+      const line = `${entry.cli} ${entry.model}: ${entry.reason}`;
+      if (!own.includes(line)) own.push(line);
+      continue;
+    }
+    const clis = byReason.get(entry.reason) ?? [];
+    if (!clis.includes(entry.cli)) clis.push(entry.cli);
+    byReason.set(entry.reason, clis);
+  }
+  const grouped = [...byReason].map(([reason, clis]) => `${clis.join(", ")}: ${reason}`);
+  const unscored = (line) => line.includes(": no measured score");
+  const all = [...own.filter(unscored), ...own.filter((line) => !unscored(line)), ...grouped];
+  return all.length > max ? [...all.slice(0, max - 1), `and ${all.length - max + 1} more`] : all;
 }
 var trimSlash = (path) => path.length > 1 ? path.replace(/[\\/]+$/u, "") : path;
 function parseDigest(value) {
@@ -16100,8 +16173,12 @@ var RouteService = class {
     });
     const seen = /* @__PURE__ */ new Set();
     const candidates = [decision.top, ...decision.alternatives, ...decision.groups.flat()].filter((c) => !!c && !seen.has(c.key) && !!seen.add(c.key)).filter((c) => !limit2.ownSignIn || c.kind === "subscription" && !c.signIn.startsWith("pool:") || c.kind === "cli-default");
-    const dropped = [...new Set(decision.dropped.map((entry) => `${entry.cli}${entry.model ? ` ${entry.model}` : ""}: ${entry.reason}`))].slice(0, 4);
+    const dropped = droppedReasons(decision.dropped, 4);
     return { candidates, dropped };
+  }
+  /** Accounts' routes and pools, CanvasTTY's provider list and measured use, read now (start, page open). */
+  async refreshPeers() {
+    await this.peerInputs();
   }
   /**
    * What the Assistant reads itself before a decision (each where the core and the person allow it, within a short
@@ -16209,7 +16286,7 @@ var RouteService = class {
     }
     const serverLines = servers.map((entry) => `On your server ${entry.server} (${entry.spawn.provider}, its own sign-in there): spawn_agent ${JSON.stringify(entry.spawn)}.`);
     if (!decision.top) {
-      const reasons = [...new Set(decision.dropped.map((entry) => `${entry.cli}${entry.model ? ` ${entry.model}` : ""}: ${entry.reason}`))].slice(0, 6);
+      const reasons = droppedReasons(decision.dropped, 6);
       if (servers.length) return { content: `No route on this computer is usable now${reasons.length ? ` (${reasons.join("; ")})` : ""}.
 ${serverLines.join("\n")}
 ${JSON.stringify({ servers })}` };
@@ -17072,6 +17149,8 @@ var Assistant = class {
   leaves = /* @__PURE__ */ new Map();
   /** Orchestrators "Start with Auto (Jev)" started: where they run. */
   started = /* @__PURE__ */ new Map();
+  /** Launches this service refused (they never started), by full session id, for the agent tree's counts. */
+  refused = /* @__PURE__ */ new Set();
   /** Whether this CanvasTTY lets a plugin start an orchestrator (B8): null until asked. */
   b8 = null;
   constructor(options) {
@@ -17186,6 +17265,29 @@ var Assistant = class {
   get pageLocale() {
     return this.locale;
   }
+  warming = null;
+  pageWarmed = false;
+  /**
+   * The first reads of this service run, so the settings page and the first decisions see Accounts' routes and quota
+   * and the limit windows at once, not "not read yet" until something routes: limits.get (the feed's read, shared
+   * when one runs), Accounts' accounts.routes and accounts.quota (plugins.request, where the person allowed it), and
+   * what the routing view keeps of them. At service start and when the person first opens the settings page.
+   */
+  warmReads() {
+    this.warming ??= (async () => {
+      await Promise.allSettled([this.limitsFeed.read(), this.accounts.warm()]);
+      await this.routing.refreshPeers().catch(() => void 0);
+    })().finally(() => {
+      this.warming = null;
+    });
+    return this.warming;
+  }
+  /** The settings page asked for its state the first time this run: the same reads, then it is told to reload. */
+  pageOpened() {
+    if (this.pageWarmed) return;
+    this.pageWarmed = true;
+    void this.warmReads().then(() => this.host.emit("settings", null), () => void 0);
+  }
   /**
    * `canvastty.activity`: `limit.exhausted` (CanvasTTY saw the default login's window of a CLI used up, provider-wide)
    * rests that CLI's own sign-in routes until the reset; other activity is ignored.
@@ -17280,6 +17382,7 @@ var Assistant = class {
       this.autoTop.delete(session.id);
       this.leaves.delete(session.id);
       this.started.delete(session.id);
+      this.refused.delete(session.id);
       this.sessions.delete(session.id);
       this.review.forget(session.id);
       this.classes.delete(session.id);
@@ -17311,6 +17414,14 @@ var Assistant = class {
    * (which counted it as one) is gone and a saved value of it is ignored.
    */
   async launch(context) {
+    const answer = await this.launchAnswer(context);
+    if (answer && "refuse" in answer && answer.refuse) {
+      this.refused.add(context.sessionId);
+      while (this.refused.size > 1024) this.refused.delete(this.refused.keys().next().value);
+    } else this.refused.delete(context.sessionId);
+    return answer;
+  }
+  async launchAnswer(context) {
     const ask = launchAsk(context);
     if (context.chosen === false) return ask ? this.policy(context) : null;
     const options = context.options ?? {};
@@ -17534,7 +17645,9 @@ ${JSON.stringify({ ...plan3, type: view.type, level: view.level, shape: shaped.s
     if (!sessionId) return { started: false, code: "refused" };
     this.bindings.markAuto(sessionId);
     this.bindings.setPlan(sessionId, plan3.children);
-    this.started.set(sessionId, { server, provider: spawn.provider });
+    this.review.notePersonStart(sessionId, task);
+    const treeRoute = { model: candidate.model, identity: candidate.identity, kind: candidate.kind, label: candidate.label, costBasis: candidate.costBasis, estimate: candidate.estimate };
+    this.started.set(sessionId, { server, provider: spawn.provider, route: treeRoute });
     while (this.started.size > 64) this.started.delete(this.started.keys().next().value);
     void this.host.callHost("sessions.send", { sessionId, text: `${task.replace(/\s*\n\s*/gu, " ")} \u2014 ${AUTOPILOT_PROMPT} ${planText(plan3)}` }).catch(() => void 0);
     return { started: true, sessionId, provider: spawn.provider, route: label2, kind: candidate.kind, server, plan: { mode: plan3.mode, children: plan3.children } };
@@ -17744,7 +17857,8 @@ ${JSON.stringify({ ...a, model: answer.model })}` };
           ...used.totals.providerCostEstimate !== void 0 ? { providerEstimate: Math.round(used.totals.providerCostEstimate * 1e4) / 1e4 } : {}
         };
       },
-      route: (id) => this.routing.routeOf(id),
+      route: (id) => this.routing.routeOf(id) ?? this.started.get(id)?.route ?? null,
+      refused: (id) => this.refused.has(id),
       task: (id) => this.review.taskOf(id),
       planChildren: (id) => this.bindings.planOf(id),
       endedAt: (id) => this.harness.finished(id),
@@ -17961,6 +18075,7 @@ serve({
     await assistant.auto.resume();
     resolveReady(assistant);
     void assistant.limitsFeed.start().catch((error) => host.log("warn", `limits: ${error instanceof Error ? error.message : String(error)}`));
+    void assistant.warmReads();
     if (failed.length) retryStored(host, failed, (stored) => assistant?.storageRecovered(stored));
     try {
       const answer = await host.callHost("sessions.subscribe", {});
@@ -18018,6 +18133,7 @@ serve({
     // "Where agents run" on the decision models page (route v2).
     "route.state": async () => {
       const a = await ready;
+      a.pageOpened();
       return {
         ...a.routing.state(),
         feed: { mode: a.limitsFeed.mode, lastReadAt: a.limitsFeed.lastReadAt, lastError: a.limitsFeed.lastError },
@@ -18027,6 +18143,7 @@ serve({
     // Accounts' quota through plugins.request (after the person approved the pair), for the page.
     "route.accountsQuota": async (params) => {
       const a = await ready;
+      a.pageOpened();
       const quota = await a.accounts.quota(6e4, 3e3, params?.force === true);
       return { ...a.accounts.state(), quota };
     },

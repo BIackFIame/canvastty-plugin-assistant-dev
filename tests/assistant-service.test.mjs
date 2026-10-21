@@ -720,6 +720,59 @@ test('live run 11: two new files reviewed at once; the 2,026-character test file
   assert.notEqual(big.verdict, 'allow');
 });
 
+test('live run 17: a task typed on "Start with Auto (Jev)" is the person\'s own text for the orchestrator started with it (by full session id): its subagent\'s new in-project files pass the trust chain as with a launcher task', async () => {
+  const PERSON = 'Two-part test task. Part T: explain Bloom filters in two sentences. Part C: in code17/ create hello.mjs exporting hello() and hello.test.mjs with 2 node:test cases; create these two new files only, no shell commands.';
+  const CHILD = 'In code17 create exactly two new files: hello.mjs exporting hello() that returns \'hello\', and hello.test.mjs with 2 node:test cases. File-writing tools only.';
+  const ORCH = 'c11e2af6-50e0-4a78-a9dc-141aaac5ea8f';
+  const engine = (serves) => {
+    const e = fakeEngine({ mode: 'auto', qualified: false, smart: null });
+    e.hasVerifier = () => false; // as live: no second reviewer set up
+    const ask = e.ask.bind(e);
+    e.ask = async (request, ctx) => {
+      const decision = await ask(request, ctx);
+      const answers = answersOf(serves, 0.01, { effect_hidden: 0.17 });
+      const mapped = request.map?.(answers, {}, { variant: 'full', truncated: false, family: 'jev', autoCapable: true });
+      return { ...decision, answers, outcome: mapped?.outcome ?? null, qualifiedOutcome: mapped?.qualifiedOutcome ?? null };
+    };
+    return e;
+  };
+  const dir = join(project, 'code17');
+  mkdirSync(dir, { recursive: true });
+  const run = async ({ start = true, launcher = null, serves = 0.95, parent = ORCH, file = 'code17/hello.mjs', on = true } = {}) => {
+    const { review } = service(engine(serves), {}, { trustChain: () => on });
+    // As CanvasTTY orders it in run 17: the launch is prepared (no Task field: null), then sessions.create answers.
+    review.noteLaunch(ORCH, { task: launcher, dataClass: null, triage: false, role: 'orchestrator' });
+    if (start) review.notePersonStart(ORCH, PERSON);
+    review.noteLaunch('71b88188-b4af-4416-809c-70fdc2f6d719', { task: null, dataClass: null, triage: false, role: 'subagent', parentSessionId: parent });
+    review.noteTurn('71b88188-b4af-4416-809c-70fdc2f6d719', CHILD, { role: 'subagent', parentSessionId: parent });
+    const answer = await review.decide({ ...write('71b88188-b4af-4416-809c-70fdc2f6d719', file), agentCwd: dir, input: { filePath: join(project, file), content: 'export function hello() { return \'hello\'; }\n' } }, 10_000);
+    return { answer, reason: review.recent()[0]?.reason, review };
+  };
+  // Before the fix (run 17 as it ran): no launcher task, not on Auto, so nothing of the person's: refused.
+  const before = await run({ start: false });
+  assert.notEqual(before.answer.verdict, 'allow');
+  // The start task: the same as the launcher's Task field would be.
+  const started = await run();
+  assert.deepEqual([started.answer.verdict, started.reason], ['allow', 'trust-chain']);
+  const launcher = await run({ start: false, launcher: PERSON });
+  assert.deepEqual([launcher.answer.verdict, launcher.reason], ['allow', 'trust-chain'], 'the launcher Task field, unchanged');
+  assert.deepEqual(started.review.requestFor(ORCH), { text: PERSON, byPerson: true });
+  assert.equal(started.review.taskOf(ORCH), PERSON, 'the agent tree shows the task too');
+  // Named and below 0.95 with low risks (as run 10), the second file too.
+  assert.equal((await run({ serves: 0.83, file: 'code17/hello.test.mjs' })).answer.verdict, 'allow');
+  // The same conditions as before still bound it: the switch, an unnamed file below 0.95, outside the project.
+  assert.notEqual((await run({ on: false })).answer.verdict, 'allow');
+  assert.notEqual((await run({ serves: 0.83, file: 'code17/other.mjs' })).answer.verdict, 'allow');
+  assert.notEqual((await run({ file: '../outside17.mjs' })).answer.verdict, 'allow');
+  // Bound by the full session id: a card with only the same 8-character prefix gets nothing of it.
+  assert.notEqual((await run({ parent: `${ORCH.slice(0, 8)}-0000-0000-0000-000000000000` })).answer.verdict, 'allow');
+  // Never for a subagent: a start task on a card that turns out to be one is dropped.
+  const { review } = service(engine(0.95), {}, { trustChain: () => true });
+  review.notePersonStart('sub17', PERSON);
+  review.noteLaunch('sub17', { task: null, dataClass: null, triage: false, role: 'subagent', parentSessionId: 'x' });
+  assert.equal(review.taskOf('sub17'), null);
+});
+
 test('OpenRouter serves only Jev: the short view\'s key adds no Auto upstream; a saved OpenRouter upstream stays off, cannot be added, enabled or tested; Jev triage turns on with the key; the service follows the page\'s language', async () => {
   const jevKey = JSON.stringify({ origin: 'https://openrouter.ai', value: KEY });
   {

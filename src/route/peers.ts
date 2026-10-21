@@ -146,9 +146,34 @@ export class AccountsFeed {
     return (await within(read, deadlineMs)) ?? this.quotaCache?.value ?? null;
   }
 
+  /**
+   * The first reads of a service run (at its start, and when the person first opens the settings page), so neither
+   * waits for the first routing decision: the routes (on that read Accounts reads its accounts' quota) and the quota.
+   * Accounts answers the routes before its own quota read ends, so while a model account's quota says it was not
+   * read yet both are read once more `retryMs` later. Bounded: two rounds at most, each within its deadline.
+   */
+  async warm(retryMs = 2_500, wait: (ms: number) => Promise<void> = ms => new Promise(resolve => { const timer = setTimeout(resolve, ms); (timer as { unref?: () => void }).unref?.(); })): Promise<{ routes: boolean; quota: boolean; unread: number }> {
+    const round = async (): Promise<{ routes: boolean; quota: boolean; unread: number }> => {
+      // A fresh read each round (-1: no cached answer is new enough), within the deadline.
+      const routes = await this.routes(-1, 3_000);
+      const quota = await this.quota(0, 3_000, true);
+      return { routes: routes !== null, quota: quota !== null, unread: unreadQuota(quota) };
+    };
+    const first = await round();
+    if (!first.unread || this.mode !== 'ready') return first;
+    await wait(retryMs);
+    return round();
+  }
+
   state(): { mode: PeerMode; reason: string | null; routesAt: number | null; quotaAt: number | null } {
     return { mode: this.mode, reason: this.reason, routesAt: this.routesCache?.at ?? null, quotaAt: this.quotaCache?.at ?? null };
   }
+}
+
+/** Model accounts in an `accounts.quota` answer whose quota Accounts has not read yet (no observation, no error). */
+export function unreadQuota(answer: unknown): number {
+  const accounts = isRecord(answer) && Array.isArray(answer.accounts) ? answer.accounts : [];
+  return accounts.filter(entry => isRecord(entry) && isRecord(entry.quota) && entry.quota.observedAt == null && entry.quota.state === 'unknown' && !/not readable/iu.test(String(entry.quota.note ?? ''))).length;
 }
 
 /** One environment kind subagents may use (list_providers' `environments`), by name only. */

@@ -457,9 +457,6 @@ export function decide(ctx: RouteContext): RouteDecision {
   const types: TaskType[] = view.type === 'chat' ? ['chat'] : [view.type, 'chat'];
   const maps = scoreMaps(raws, ctx.index, types);
   const mapOf = (raw: Raw, type: TaskType): Map<string, Score> | undefined => raw.resolved.identity ? maps.get(variantKey(raw.resolved.identity, raw.effort, raw.context))?.get(type) : undefined;
-  const scoredAs: TaskType = raws.some(raw => (mapOf(raw, view.type)?.size ?? 0) > 0) ? view.type : 'chat';
-  const cohort = chooseCohort(raws.filter(raw => raw.resolved.identity).map(raw => ({ model: raw.resolved.identity!, scores: mapOf(raw, scoredAs) ?? new Map() })));
-  const chatCohort = chooseCohort(raws.filter(raw => raw.resolved.identity).map(raw => ({ model: raw.resolved.identity!, scores: mapOf(raw, 'chat') ?? new Map() })));
   const policy = ctx.settings.newModels;
   const fits = new Map<string, ReturnType<typeof anchorFit>>();
   const level: Level = view.level;
@@ -467,6 +464,7 @@ export function decide(ctx: RouteContext): RouteDecision {
   const share = ctx.settings.expectedShare[level];
 
   const candidates: Candidate[] = [];
+  const usable: Array<{ raw: Raw; candidate: Candidate }> = [];
   for (const raw of raws) {
     const entry = ctx.providers.find(provider => provider.id === raw.cli);
     const key = `${raw.cli}|${raw.signIn}|${raw.model ?? ''}|${raw.effort ?? ''}`;
@@ -495,24 +493,8 @@ export function decide(ctx: RouteContext): RouteDecision {
     const trust = trustOf(raw.trust, ctx, ctx.auto?.trusted ?? false);
     if (!trust.ok) { drop(raw.trust === 'auto' ? `no Auto upstream is trusted with ${ctx.cardClass}` : `trust ${raw.trust} is below this card's ${ctx.cardClass} (${ctx.mode === 'strict' ? 'Strict' : 'D3 stays on this computer'})`); continue; }
 
-    // Score.
-    const scores = mapOf(raw, scoredAs);
     const boost = raw.resolved.identity ? ctx.settings.boosts[raw.resolved.identity] ?? 0 : 0;
     const pin = raw.resolved.identity ? ctx.settings.pins[raw.resolved.identity] ?? null : null;
-    let score: CandidateScore | null = null;
-    const measured = cohort ? scores?.get(cohort) : undefined;
-    if (measured) score = { value: measured.value + boost, raw: measured.value, label: measured.label, source: 'measured', historical: measured.historical };
-    else if (cohort && scores?.size && policy !== 'wait') {
-      for (const [other, value] of scores) {
-        const fitKey = `${scoredAs}|${other}`;
-        if (!fits.has(fitKey)) fits.set(fitKey, anchorFit(ctx.index, scoredAs, other, cohort));
-        const fit = fits.get(fitKey);
-        if (!fit) continue;
-        const mappedValue = Math.round((fit.a * value.value + fit.b) * 100) / 100;
-        score = { value: mappedValue - PROVISIONAL_PENALTY + boost, raw: mappedValue, label: `${value.label} → mapped`, source: 'provisional', historical: value.historical, mapped: { from: value.label, anchors: fit.anchors, r2: fit.r2 } };
-        break;
-      }
-    }
 
     // Cost and capacity.
     const ref = taskUsd(level, raw.kind === 'auto' ? { priceIn: ctx.auto!.priceIn, priceOut: ctx.auto!.priceOut } : apiPrice(ctx.catalog, raw.resolved.identity));
@@ -583,15 +565,46 @@ export function decide(ctx: RouteContext): RouteDecision {
     if ((raw.kind === 'subscription' || raw.kind === 'coding-plan') && raw.model) spawn.model = raw.model;
     if (raw.effort && raw.effortVia === 'spawn' && raw.kind !== 'auto') spawn.effort = raw.effort;
 
-    candidates.push({
+    const candidate: Candidate = {
       key, cli: raw.cli, kind: raw.kind, signIn: raw.signIn, label: raw.label,
       ...(raw.planId ? { planId: raw.planId } : {}), ...(raw.accountId ? { accountId: raw.accountId } : {}), ...(raw.endpoint ? { endpoint: raw.endpoint } : {}),
       model: raw.kind === 'auto' ? ctx.auto!.model : raw.model, identity: raw.resolved.identity, resolvedFrom: raw.resolved.from, effort: raw.effort,
-      scoredEffort: measured?.effort ?? raw.effort,
-      overall: chatCohort ? (mapOf(raw, 'chat')?.get(chatCohort)?.value ?? null) : null, planPreferred: null,
-      score, pin, boost, cost, costBasis, estimate, quota, availability, trust: { level: raw.trust, warn: trust.warn }, allow: raw.allow, demoted: null, planCost: null, spawn,
-      newModel: !!raw.model && raw.kind !== 'auto' && (score === null || score.source === 'provisional')
-    });
+      scoredEffort: raw.effort, overall: null, planPreferred: null,
+      score: null, pin, boost, cost, costBasis, estimate, quota, availability, trust: { level: raw.trust, warn: trust.warn }, allow: raw.allow, demoted: null, planCost: null, spawn,
+      newModel: false
+    };
+    candidates.push(candidate);
+    usable.push({ raw, candidate });
+  }
+
+  // Scores, in one cohort chosen among the routes still usable: a route that was just dropped (no key, its CLI not
+  // installed, used up, Never) must not pick the task type or the benchmark the usable ones are compared in. Otherwise
+  // a writing task whose only writing scores belong to a key-less account finds every ready account unscored.
+  const usableRaws = usable.map(entry => entry.raw);
+  const scoredAs: TaskType = usableRaws.some(raw => (mapOf(raw, view.type)?.size ?? 0) > 0) ? view.type : 'chat';
+  const cohort = chooseCohort(usableRaws.filter(raw => raw.resolved.identity).map(raw => ({ model: raw.resolved.identity!, scores: mapOf(raw, scoredAs) ?? new Map() })));
+  const chatCohort = chooseCohort(usableRaws.filter(raw => raw.resolved.identity).map(raw => ({ model: raw.resolved.identity!, scores: mapOf(raw, 'chat') ?? new Map() })));
+  for (const { raw, candidate } of usable) {
+    const scores = mapOf(raw, scoredAs);
+    const boost = candidate.boost;
+    let score: CandidateScore | null = null;
+    const measured = cohort ? scores?.get(cohort) : undefined;
+    if (measured) score = { value: measured.value + boost, raw: measured.value, label: measured.label, source: 'measured', historical: measured.historical };
+    else if (cohort && scores?.size && policy !== 'wait') {
+      for (const [other, value] of scores) {
+        const fitKey = `${scoredAs}|${other}`;
+        if (!fits.has(fitKey)) fits.set(fitKey, anchorFit(ctx.index, scoredAs, other, cohort));
+        const fit = fits.get(fitKey);
+        if (!fit) continue;
+        const mappedValue = Math.round((fit.a * value.value + fit.b) * 100) / 100;
+        score = { value: mappedValue - PROVISIONAL_PENALTY + boost, raw: mappedValue, label: `${value.label} → mapped`, source: 'provisional', historical: value.historical, mapped: { from: value.label, anchors: fit.anchors, r2: fit.r2 } };
+        break;
+      }
+    }
+    candidate.score = score;
+    candidate.scoredEffort = measured?.effort ?? raw.effort;
+    candidate.overall = chatCohort ? (mapOf(raw, 'chat')?.get(chatCohort)?.value ?? null) : null;
+    candidate.newModel = !!raw.model && raw.kind !== 'auto' && (score === null || score.source === 'provisional');
   }
 
   planCosts(candidates, ctx, raws);

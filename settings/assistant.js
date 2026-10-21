@@ -1176,7 +1176,7 @@
           "li",
           { className: "row", dataset: { host: host3 } },
           el("code", { textContent: host3 }),
-          el("span", { textContent: of.map((row2) => `${row2.account ?? row2.accountId} \xB7 ${row2.model} \xB7 ${cliName(row2.provider)} \xB7 ${row2.state}`).join("; ") }),
+          el("span", { textContent: of.map((row2) => `${row2.account ?? row2.accountId} \xB7 ${row2.model} \xB7 ${cliName(row2.provider)} \xB7 ${row2.state}${row2.quota?.remainingPercent != null ? t2.poolLeft(Math.round(row2.quota.remainingPercent)) : ""}`).join("; ") }),
           selectOf2(`route-allow-${host3}`, settings.allow[key] ?? "allow", allowOptions, (value) => save2((next) => {
             if (value === "allow") delete next.allow[key];
             else next.allow[key] = value;

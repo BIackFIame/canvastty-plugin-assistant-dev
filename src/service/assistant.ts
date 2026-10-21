@@ -33,7 +33,7 @@ import { AUTOPILOT_STRINGS } from '../autopilot/i18n.ts';
 import { ruleDifficulty } from '../harness/router.ts';
 import { turnView, type TurnView } from '../auto/select.ts';
 import { DEFAULT_MAX_PARALLEL } from '../route/settings.ts';
-import { buildTree, type TreeView } from '../tree/agentTree.ts';
+import { buildTree, type TreeRoute, type TreeView } from '../tree/agentTree.ts';
 
 /**
  * The Assistant service: one process that answers CanvasTTY's decision hook (command review), its launch pipeline
@@ -140,7 +140,9 @@ export class Assistant {
   /** Leaf cards this service started on servers: the orchestrator that asked, the server, the CLI. */
   private readonly leaves = new Map<string, { parent: string; server: string; provider: string }>();
   /** Orchestrators "Start with Auto (Jev)" started: where they run. */
-  private readonly started = new Map<string, { server: string | null; provider: string }>();
+  private readonly started = new Map<string, { server: string | null; provider: string; route?: TreeRoute }>();
+  /** Launches this service refused (they never started), by full session id, for the agent tree's counts. */
+  private readonly refused = new Set<string>();
   /** Whether this CanvasTTY lets a plugin start an orchestrator (B8): null until asked. */
   private b8: boolean | null = null;
 
@@ -231,6 +233,30 @@ export class Assistant {
 
   get pageLocale(): Locale { return this.locale; }
 
+  private warming: Promise<void> | null = null;
+  private pageWarmed = false;
+
+  /**
+   * The first reads of this service run, so the settings page and the first decisions see Accounts' routes and quota
+   * and the limit windows at once, not "not read yet" until something routes: limits.get (the feed's read, shared
+   * when one runs), Accounts' accounts.routes and accounts.quota (plugins.request, where the person allowed it), and
+   * what the routing view keeps of them. At service start and when the person first opens the settings page.
+   */
+  warmReads(): Promise<void> {
+    this.warming ??= (async () => {
+      await Promise.allSettled([this.limitsFeed.read(), this.accounts.warm()]);
+      await this.routing.refreshPeers().catch(() => undefined);
+    })().finally(() => { this.warming = null; });
+    return this.warming;
+  }
+
+  /** The settings page asked for its state the first time this run: the same reads, then it is told to reload. */
+  pageOpened(): void {
+    if (this.pageWarmed) return;
+    this.pageWarmed = true;
+    void this.warmReads().then(() => this.host.emit('settings', null), () => undefined);
+  }
+
   /**
    * `canvastty.activity`: `limit.exhausted` (CanvasTTY saw the default login's window of a CLI used up, provider-wide)
    * rests that CLI's own sign-in routes until the reset; other activity is ignored.
@@ -318,7 +344,7 @@ export class Assistant {
     this.routing.sessionEvent(event);
     const ended = event.type === 'closed' || event.type === 'exited' || session.status === 'exited';
     if (ended) { this.bindings.ended(session.id); this.usage.ended(session.id); }
-    if (event.type === 'closed') { this.usage.closed(session.id); this.autoTop.delete(session.id); this.leaves.delete(session.id); this.started.delete(session.id); this.sessions.delete(session.id); this.review.forget(session.id); this.classes.delete(session.id); this.triaged.delete(session.id); this.auto.sessionClosed(session.id); return; }
+    if (event.type === 'closed') { this.usage.closed(session.id); this.autoTop.delete(session.id); this.leaves.delete(session.id); this.started.delete(session.id); this.refused.delete(session.id); this.sessions.delete(session.id); this.review.forget(session.id); this.classes.delete(session.id); this.triaged.delete(session.id); this.auto.sessionClosed(session.id); return; }
     this.sessions.set(session.id, session);
   }
 
@@ -345,6 +371,16 @@ export class Assistant {
    * (which counted it as one) is gone and a saved value of it is ignored.
    */
   async launch(context: LaunchContext): Promise<LaunchAnswer | null> {
+    const answer = await this.launchAnswer(context);
+    // A refused launch never started: the agent tree leaves it out of its counts and shows it as refused.
+    if (answer && 'refuse' in answer && answer.refuse) {
+      this.refused.add(context.sessionId);
+      while (this.refused.size > 1_024) this.refused.delete(this.refused.keys().next().value!);
+    } else this.refused.delete(context.sessionId);
+    return answer;
+  }
+
+  private async launchAnswer(context: LaunchContext): Promise<LaunchAnswer | null> {
     // What the launch asks for (model, effort, plugins, shared peer fields): only on a core that says (B7).
     const ask = launchAsk(context);
     if (context.chosen === false) return ask ? this.policy(context) : null;
@@ -564,7 +600,12 @@ export class Assistant {
     // Marked before its launch is prepared too: its subagents are routed, within the plan's child count.
     this.bindings.markAuto(sessionId);
     this.bindings.setPlan(sessionId, plan.children);
-    this.started.set(sessionId, { server, provider: spawn.provider });
+    // The person typed this task on the Assistant's page: their own text for this orchestrator (by its full session id)
+    // and for the trust chain of its subagents, as a task typed in the launcher's Task field would be.
+    this.review.notePersonStart(sessionId, task);
+    // The agent tree shows the route this decision chose (model, account or plan, its cost basis), by full session id.
+    const treeRoute: TreeRoute = { model: candidate.model, identity: candidate.identity, kind: candidate.kind, label: candidate.label, costBasis: candidate.costBasis, estimate: candidate.estimate };
+    this.started.set(sessionId, { server, provider: spawn.provider, route: treeRoute });
     while (this.started.size > 64) this.started.delete(this.started.keys().next().value!);
     // The first prompt is typed once the launch started (CanvasTTY waits for it); the person sees the card meanwhile.
     void this.host.callHost('sessions.send', { sessionId, text: `${task.replace(/\s*\n\s*/gu, ' ')} — ${AUTOPILOT_PROMPT} ${planText(plan)}` }).catch(() => undefined);
@@ -757,7 +798,8 @@ export class Assistant {
           ...(used.totals.providerCostEstimate !== undefined ? { providerEstimate: Math.round(used.totals.providerCostEstimate * 10_000) / 10_000 } : {})
         };
       },
-      route: id => this.routing.routeOf(id),
+      route: id => this.routing.routeOf(id) ?? this.started.get(id)?.route ?? null,
+      refused: id => this.refused.has(id),
       task: id => this.review.taskOf(id),
       planChildren: id => this.bindings.planOf(id),
       endedAt: id => this.harness.finished(id),

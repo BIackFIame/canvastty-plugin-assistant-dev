@@ -48,6 +48,8 @@ export interface TreeInputs {
   autoTop?(id: string): { model: string | null; label: string } | null;
   /** Measured usage of a card (null: not measured here). */
   usage?(id: string): TreeUsage | null;
+  /** A launch that was refused and never started: left out of the agents and the plan count, counted apart. */
+  refused?(id: string): boolean;
 }
 
 export interface TreeNode {
@@ -65,13 +67,17 @@ export interface TreeNode {
   endedAt: number | null;
   /** The autopilot plan's child count (null: none). */
   planChildren: number | null;
-  /** Every card below this one. */
+  /** Every card below this one (refused launches not counted). */
   descendants: number;
+  /** Launches of this card's subagents that were refused and never started (not among `children`). */
+  refused: number;
   children: TreeNode[];
 }
 
 export interface TreeTotals {
+  /** Agents that started (refused launches are in `refused`). */
   agents: number;
+  refused: number;
   running: number;
   /** Paid routes only; null when no card in the tree has a dollar estimate. */
   usd: { low: number; high: number } | null;
@@ -152,10 +158,11 @@ export function modelLabel(model: string | null | undefined): string | null {
 function priceKey(cost: TreeCost): string | null { return cost.kind === 'plan' || cost.kind === 'launch' || cost.kind === 'flat' ? cost.label : null; }
 
 function totalsOf(root: TreeNode): TreeTotals {
-  const totals: TreeTotals = { agents: 0, running: 0, usd: null, plans: [], unpriced: 0, tokens: null, providerEstimate: null };
+  const totals: TreeTotals = { agents: 0, refused: 0, running: 0, usd: null, plans: [], unpriced: 0, tokens: null, providerEstimate: null };
   const plans = new Map<string, TreeTotals['plans'][number]>();
   const visit = (node: TreeNode): void => {
     totals.agents++;
+    totals.refused += node.refused;
     if (node.status === 'running') totals.running++;
     if (node.usage) {
       totals.tokens = (totals.tokens ?? 0) + node.usage.tokens;
@@ -202,8 +209,12 @@ export function buildTree(input: TreeInputs, options: { focus?: string | null } 
     placed.add(card.id);
     const route = input.route(card.id);
     const top = input.autoTop?.(card.id) ?? null;
-    const children = depth >= TREE_LIMITS.depth ? [] : (kids.get(card.id) ?? [])
-      .filter(child => !placed.has(child.id))
+    const below = (kids.get(card.id) ?? []).filter(child => !placed.has(child.id));
+    // A refused launch never started: not an agent of the tree, not one of the plan's parts.
+    const refused = below.filter(child => input.refused?.(child.id) === true && !kids.has(child.id));
+    for (const child of refused) placed.add(child.id);
+    const children = depth >= TREE_LIMITS.depth ? [] : below
+      .filter(child => !refused.includes(child))
       .sort((a, b) => (a.startedAt ?? 0) - (b.startedAt ?? 0) || a.id.localeCompare(b.id))
       .map(child => node(child, depth + 1));
     const usage = input.usage?.(card.id) ?? null;
@@ -220,8 +231,9 @@ export function buildTree(input: TreeInputs, options: { focus?: string | null } 
       usage,
       startedAt: typeof card.startedAt === 'number' && Number.isFinite(card.startedAt) ? card.startedAt : null,
       endedAt: input.endedAt(card.id),
-      planChildren: card.role === 'orchestrator' || children.length ? input.planChildren(card.id) : null,
+      planChildren: card.role === 'orchestrator' || children.length || refused.length ? input.planChildren(card.id) : null,
       descendants: children.reduce((sum, child) => sum + 1 + child.descendants, 0),
+      refused: refused.length,
       children
     };
   };

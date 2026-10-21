@@ -35,6 +35,8 @@ serve({
     resolveReady(assistant);
     // Limit windows without the page where the core lets services read them (feature-detected; the page path stays).
     void assistant.limitsFeed.start().catch(error => host.log('warn', `limits: ${error instanceof Error ? error.message : String(error)}`));
+    // Accounts' routes and quota and the limit windows at once (not "not read yet" until something routes).
+    void assistant.warmReads();
     if (failed.length) retryStored(host, failed, stored => assistant?.storageRecovered(stored));
     try {
       const answer = await host.callHost('sessions.subscribe', {}) as { sessions?: SessionSummary[] } | null;
@@ -81,13 +83,14 @@ serve({
     // "Where agents run" on the decision models page (route v2).
     'route.state': async () => {
       const a = await ready;
+      a.pageOpened();
       return {
         ...(a.routing.state() as Record<string, unknown>), feed: { mode: a.limitsFeed.mode, lastReadAt: a.limitsFeed.lastReadAt, lastError: a.limitsFeed.lastError },
         peers: { accounts: a.accounts.state(), providers: a.providers.mode, usage: a.usage.mode }
       };
     },
     // Accounts' quota through plugins.request (after the person approved the pair), for the page.
-    'route.accountsQuota': async params => { const a = await ready; const quota = await a.accounts.quota(60_000, 3_000, params?.force === true); return { ...a.accounts.state(), quota }; },
+    'route.accountsQuota': async params => { const a = await ready; a.pageOpened(); const quota = await a.accounts.quota(60_000, 3_000, params?.force === true); return { ...a.accounts.state(), quota }; },
     'route.save': async params => { const a = await ready; return a.routing.save(params.settings, a.pageLocale); },
     'route.limits': async params => { const a = await ready; const answer = a.routing.receiveLimits(params.snapshot, 'page'); return { ok: answer.ok, providers: answer.providers, feed: a.limitsFeed.mode }; },
     'route.feedback': async params => (await ready).routing.feedback(str(params.id), params.ok === true),
