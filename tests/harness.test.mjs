@@ -244,7 +244,7 @@ test('task board: the orchestrator adds and assigns; a subagent claims or update
   // The card action points the Task board card at this orchestrator.
   const toast = h.cardAction('task-board', orchestrator.id, orchestrator);
   assert.match(toast.message, /Task board now shows "Refactor" \(1\/2 done\)/u);
-  assert.deepEqual(host.events.at(-1), { event: 'focus', data: { board: orchestrator.id, flows: null } });
+  assert.deepEqual(host.events.at(-1), { event: 'focus', data: { board: orchestrator.id, flows: null, tree: null } });
   // Closing the orchestrator drops its board.
   h.sessionEvent({ type: 'closed', session: orchestrator });
   assert.equal(h.boards.get(orchestrator.id), null);

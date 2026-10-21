@@ -2,6 +2,7 @@
   "apiVersion": 2,
   "id": "canvastty-assistant",
   "name": "CanvasTTY Assistant",
+  "name.ru": "Ассистент CanvasTTY",
   "version": "0.2.0",
   "description": "The Assistant: reviews agents' shell commands and file writes before they run, and helps orchestrators: a route tool that picks where a subagent runs (your subscriptions, coding plans, model accounts or Auto), flows (roles and tasks an orchestrator asks you to approve), a task board, loop alerts on cards a session report, and Model: Auto (Jev) for OpenCode (a local, key-protected router on 127.0.0.1 that picks an allowed model per turn). Decision models (Jev, Laya, Eikos, Ollama) are optional. Settings → Plugins → CanvasTTY Assistant → Settings.",
   "description.ru": "Помощник: проверяет команды и записи файлов агентов до запуска и помогает оркестраторам: инструмент route выбирает, где запустить субагента (ваши подписки, планы для кода, аккаунты моделей или «Авто»), сценарии (роли и задачи, которые оркестратор просит одобрить), доска задач, сигнал «цикл?» на окне отчёт о сессии и модель «Авто (Jev)» для OpenCode (локальный маршрутизатор на 127.0.0.1 с ключом, выбирает разрешённую модель на каждый ход). Модели решений (Jev, Laya, Eikos, Ollama) не обязательны. Настройки → Плагины → Ассистент CanvasTTY → Настройки.",
@@ -16,23 +17,26 @@
     "cards:decorate",
     "limits:read",
     "sessions:launch",
-    "sessions:control"
+    "sessions:control",
+    "sessions:read",
+    "providers:read",
+    "usage:read"
   ],
   "coreFiles": [
     {
       "path": "README.md",
-      "bytes": 30961,
-      "sha256": "d3e4c18d255a2dbfc3ad81015c3a29b9ed81666f2a8b1411d30fb1118afabe08"
+      "bytes": 33872,
+      "sha256": "03cb18ebfa36707d418e85daa0497bb16f368200dc7c80ab0ca6cf56619222df"
     },
     {
       "path": "README.ru.md",
-      "bytes": 54950,
-      "sha256": "b038be5847fb28bb69242308ec5708842306469f0602d7dc2e84bf9933f22e78"
+      "bytes": 59674,
+      "sha256": "2420dbf7fcd781c40f3948925ef49b14f813e61e27af703221f45ae447edabde"
     },
     {
       "path": "services/assistant.mjs",
-      "bytes": 1007546,
-      "sha256": "ba61ed35c98923dbd935f054661a5fedea9c3016d90d781721cdb80853f8b832"
+      "bytes": 1051259,
+      "sha256": "04c3249653ec8a602d68754de61524967c4ade3cda8e7e2048cbbc9c28b3c5c8"
     },
     {
       "path": "settings/assistant.html",
@@ -41,8 +45,8 @@
     },
     {
       "path": "settings/assistant.js",
-      "bytes": 160477,
-      "sha256": "e671f3e66aac9b4b98628d4bd47ac5328b5dc2d1b7e4b0b81f0bc67600393f22"
+      "bytes": 163925,
+      "sha256": "ba23110e870f6d6a5fc8e3fe1e453a37a83aa9e9efa377b60c050b86b91c3325"
     },
     {
       "path": "settings/assistant.css",
@@ -56,13 +60,13 @@
     },
     {
       "path": "settings/harness.js",
-      "bytes": 25423,
-      "sha256": "8c490ab280aa56a44e48f51af4963c2387de2d967bafa10abbca8fd04105d279"
+      "bytes": 25814,
+      "sha256": "4582b033eb962207b7d730cced277282bb1443722578920357df0c4db1c1fd8c"
     },
     {
       "path": "apps/harness.css",
-      "bytes": 6532,
-      "sha256": "607f3ac3315ba7b9376f59dcc60810847eee25941a3a4a130656aad7b4f0eef4"
+      "bytes": 10013,
+      "sha256": "b474c22b2de1c1beda7aa7c8cc9ae379210ab2cb4f8338e7df64af3eaae0b686"
     },
     {
       "path": "apps/flows.html",
@@ -83,6 +87,16 @@
       "path": "apps/board.js",
       "bytes": 6892,
       "sha256": "58d87917e1b8e45a3305e9b7a537f4d7290db0bcf1bddfaf871d03da4f8d8f29"
+    },
+    {
+      "path": "apps/tree.html",
+      "bytes": 451,
+      "sha256": "d530424bcae7cbdf87d7a73f5cabbdfa664b3e7f7dae571b72373c48b29c6f15"
+    },
+    {
+      "path": "apps/tree.js",
+      "bytes": 19925,
+      "sha256": "343e8a6ea60bf663876350e09fe5c456cd2db1d86fc3704e1a96b07de3988ab0"
     }
   ],
   "services": [
@@ -106,6 +120,7 @@
           {
             "key": "model",
             "label": "Model",
+            "label.ru": "Модель",
             "kind": "select",
             "default": "off",
             "options": [
@@ -123,6 +138,7 @@
           {
             "key": "task",
             "label": "Task (for review)",
+            "label.ru": "Задача (для проверки)",
             "kind": "text",
             "default": "",
             "maxLength": 200
@@ -130,6 +146,7 @@
           {
             "key": "dataClass",
             "label": "Data class",
+            "label.ru": "Класс данных",
             "kind": "select",
             "default": "default",
             "options": [
@@ -210,7 +227,7 @@
               },
               "accountRoutes": {
                 "type": "array",
-                "description": "Optional: canvastty-accounts__list_routes rows, once; later calls may omit them or name ready accounts in `digest`.",
+                "description": "Optional, older setups: canvastty-accounts__list_routes rows. Where the person allowed the Assistant to read Accounts, it reads accounts, pools and quotas itself and ignores these.",
                 "items": {
                   "type": "object"
                 },
@@ -273,7 +290,7 @@
               },
               "accountRoutes": {
                 "type": "array",
-                "description": "Optional: canvastty-accounts__list_routes rows, once; later calls may omit them or name ready accounts in `digest`.",
+                "description": "Optional, older setups: canvastty-accounts__list_routes rows. Where the person allowed the Assistant to read Accounts, it reads accounts, pools and quotas itself and ignores these.",
                 "items": {
                   "type": "object"
                 },
@@ -597,6 +614,7 @@
         {
           "id": "flow-preview",
           "title": "Plan from flow…",
+          "title.ru": "План по сценарию…",
           "when": {
             "roles": [
               "orchestrator"
@@ -606,6 +624,7 @@
         {
           "id": "task-board",
           "title": "Task board",
+          "title.ru": "Доска задач",
           "when": {
             "roles": [
               "orchestrator"
@@ -615,9 +634,21 @@
         {
           "id": "report",
           "title": "Report",
+          "title.ru": "Отчёт",
           "when": {
             "roles": [
               "agent",
+              "orchestrator",
+              "subagent"
+            ]
+          }
+        },
+        {
+          "id": "agent-tree",
+          "title": "Agent tree",
+          "title.ru": "Дерево агентов",
+          "when": {
+            "roles": [
               "orchestrator",
               "subagent"
             ]
@@ -631,6 +662,7 @@
       "id": "settings",
       "kind": "canvas-app",
       "title": "Assistant",
+      "title.ru": "Ассистент",
       "description": "Command review, automatic routing, loop alerts and flows.",
       "entry": "settings/harness.html",
       "defaultSize": {
@@ -646,6 +678,7 @@
       "id": "models",
       "kind": "canvas-app",
       "title": "Decision models",
+      "title.ru": "Модели решений",
       "description": "Optional decision models (Jev, Laya, Eikos, Ollama), data rules, recent reviews, Auto (Jev) model routing and where agents run.",
       "entry": "settings/assistant.html",
       "defaultSize": {
@@ -657,6 +690,7 @@
       "id": "flows",
       "kind": "canvas-app",
       "title": "Flow preview",
+      "title.ru": "Просмотр сценария",
       "description": "Roles and tasks of a proposed flow, for you to approve or cancel.",
       "entry": "apps/flows.html",
       "defaultSize": {
@@ -672,6 +706,7 @@
       "id": "board",
       "kind": "canvas-app",
       "title": "Task board",
+      "title.ru": "Доска задач",
       "description": "Tasks of an orchestrator and its subagents.",
       "entry": "apps/board.html",
       "defaultSize": {
@@ -682,7 +717,33 @@
         "width": 420,
         "height": 300
       }
+    },
+    {
+      "id": "tree",
+      "kind": "canvas-app",
+      "title": "Agent tree",
+      "title.ru": "Дерево агентов",
+      "description": "Who started whom: an orchestrator and its agents with model, status, task, cost and time. Click a card to show it on the canvas.",
+      "entry": "apps/tree.html",
+      "defaultSize": {
+        "width": 640,
+        "height": 560
+      },
+      "minSize": {
+        "width": 380,
+        "height": 300
+      }
     }
   ],
-  "settingsContribution": "settings"
+  "settingsContribution": "settings",
+  "uses": [
+    {
+      "plugin": "canvastty-accounts",
+      "method": "accounts.routes"
+    },
+    {
+      "plugin": "canvastty-accounts",
+      "method": "accounts.quota"
+    }
+  ]
 }

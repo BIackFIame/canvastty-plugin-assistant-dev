@@ -167,7 +167,10 @@ export function serve({ methods, notifications = {}, onInitialize, input = proce
     pending.delete(message.id as number);
     clearTimeout(waiter.timer);
     const error = record(message.error);
-    if (message.error) waiter.reject(new Error(typeof error.message === 'string' ? error.message : 'Host request failed.'));
+    // The host's code and data (a shared read's refusal reason) travel with the error.
+    if (message.error) waiter.reject(Object.assign(new Error(typeof error.message === 'string' ? error.message : 'Host request failed.'), {
+      ...(typeof error.code === 'number' ? { code: error.code } : {}), ...(error.data !== undefined ? { data: error.data } : {})
+    }));
     else waiter.resolve(message.result);
   };
 

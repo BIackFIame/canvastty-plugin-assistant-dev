@@ -40,9 +40,9 @@ function serve({ methods, notifications = {}, onInitialize, input = process.stdi
     }
     if (blocked) return;
     if (dropped) {
-      const count2 = dropped;
+      const count3 = dropped;
       dropped = 0;
-      send({ method: "log", params: { level: "warn", message: `Dropped ${count2} events or logs while the host was not reading.` } }, true);
+      send({ method: "log", params: { level: "warn", message: `Dropped ${count3} events or logs while the host was not reading.` } }, true);
     }
     if (!blocked && !queue.length) onFlushed?.();
   }
@@ -105,7 +105,7 @@ function serve({ methods, notifications = {}, onInitialize, input = process.stdi
     }
   };
   const record4 = (value) => value && typeof value === "object" && !Array.isArray(value) ? value : {};
-  const errorText2 = (error) => error instanceof Error ? error.message : String(error);
+  const errorText3 = (error) => error instanceof Error ? error.message : String(error);
   const track = (run) => {
     active++;
     return Promise.resolve().then(run).finally(() => {
@@ -139,7 +139,7 @@ function serve({ methods, notifications = {}, onInitialize, input = process.stdi
     }
     const method = message.method;
     if (method === "canvastty.initialize") {
-      Promise.resolve().then(() => onInitialize?.(record4(message.params), host)).catch((error2) => host.log("error", `initialize failed: ${errorText2(error2)}`));
+      Promise.resolve().then(() => onInitialize?.(record4(message.params), host)).catch((error2) => host.log("error", `initialize failed: ${errorText3(error2)}`));
       return;
     }
     if (method === "canvastty.shutdown") {
@@ -153,7 +153,7 @@ function serve({ methods, notifications = {}, onInitialize, input = process.stdi
         return;
       }
       const handler = Object.hasOwn(notifications, method) ? notifications[method] : void 0;
-      track(() => handler?.(record4(message.params), host)).catch((error2) => host.log("warn", `${method}: ${errorText2(error2)}`));
+      track(() => handler?.(record4(message.params), host)).catch((error2) => host.log("warn", `${method}: ${errorText3(error2)}`));
       return;
     }
     if (typeof method === "string") {
@@ -169,7 +169,7 @@ function serve({ methods, notifications = {}, onInitialize, input = process.stdi
         (result) => {
           if (!send({ id: message.id, result: result ?? null })) send({ id: message.id, error: { code: -32e3, message: "The answer is larger than the frame limit." } });
         },
-        (error2) => send({ id: message.id, error: { code: error2?.code ?? -32e3, message: errorText2(error2).slice(0, 400) } })
+        (error2) => send({ id: message.id, error: { code: error2?.code ?? -32e3, message: errorText3(error2).slice(0, 400) } })
       );
       return;
     }
@@ -178,7 +178,10 @@ function serve({ methods, notifications = {}, onInitialize, input = process.stdi
     pending.delete(message.id);
     clearTimeout(waiter.timer);
     const error = record4(message.error);
-    if (message.error) waiter.reject(new Error(typeof error.message === "string" ? error.message : "Host request failed."));
+    if (message.error) waiter.reject(Object.assign(new Error(typeof error.message === "string" ? error.message : "Host request failed."), {
+      ...typeof error.code === "number" ? { code: error.code } : {},
+      ...error.data !== void 0 ? { data: error.data } : {}
+    }));
     else waiter.resolve(message.result);
   };
   let chunks = [];
@@ -1006,8 +1009,8 @@ function decimalsOf(value) {
   const dot = text6.indexOf(".");
   return dot < 0 ? 0 : Math.min(6, text6.length - dot - 1);
 }
-function sumTolerance(count2, decimals) {
-  return Math.max(0.01, count2 * 0.5 * 10 ** -Math.max(2, decimals)) + 1e-9;
+function sumTolerance(count3, decimals) {
+  return Math.max(0.01, count3 * 0.5 * 10 ** -Math.max(2, decimals)) + 1e-9;
 }
 function spreadConf(n, top) {
   if (n < 2) return 1;
@@ -2251,10 +2254,10 @@ function jsonCallResponse(_route, json) {
   if (!isRecord3(json)) return invalid3("Invalid JSON-mode response.");
   if (typeof json.error === "string" || isRecord3(json.error)) throw new SystemOneError("server", "The server reported an error.");
   const model = typeof json.model === "string" && json.model.length <= 4096 ? json.model : null;
-  const count2 = (value) => typeof value === "number" && Number.isSafeInteger(value) && value >= 0 ? value : null;
+  const count3 = (value) => typeof value === "number" && Number.isSafeInteger(value) && value >= 0 ? value : null;
   const message = isRecord3(json.message) ? json.message : null;
   if (!message || typeof message.content !== "string") return invalid3("Missing JSON-mode message.");
-  return { text: message.content, reportedModel: model, promptTokens: count2(json.prompt_eval_count), outputTokens: count2(json.eval_count), remote: typeof json.remote_host === "string" };
+  return { text: message.content, reportedModel: model, promptTokens: count3(json.prompt_eval_count), outputTokens: count3(json.eval_count), remote: typeof json.remote_host === "string" };
 }
 
 // src/engine/backends/letterReadout.ts
@@ -4364,25 +4367,25 @@ function looksRandom(value) {
   const counts = /* @__PURE__ */ new Map();
   for (const character of value) counts.set(character, (counts.get(character) ?? 0) + 1);
   let entropy = 0;
-  for (const count2 of counts.values()) {
-    const p2 = count2 / value.length;
+  for (const count3 of counts.values()) {
+    const p2 = count3 / value.length;
     entropy -= p2 * Math.log2(p2);
   }
   return entropy >= 4.2;
 }
 function redactCredentials(text6) {
   if (typeof text6 !== "string" || text6.length === 0) return { text: typeof text6 === "string" ? text6 : "", count: 0 };
-  let count2 = 0, result = text6;
+  let count3 = 0, result = text6;
   for (const rule of RULES) {
     result = result.replace(rule.pattern, (match, ...rest) => {
       const end = rest.findIndex((value) => typeof value === "number");
       const groups = (end < 0 ? [] : rest.slice(0, end)).map((value) => typeof value === "string" ? value : "");
       const replaced = rule.replace ? rule.replace(match, ...groups) : marker(rule.kind);
-      if (replaced !== match) count2++;
+      if (replaced !== match) count3++;
       return replaced;
     });
   }
-  return { text: result, count: count2 };
+  return { text: result, count: count3 };
 }
 
 // src/engine/redact.ts
@@ -4402,17 +4405,17 @@ var EXTRA_RULES = [
 ];
 var SENSITIVE_KEY = /api[_-]?key|credential|password|private[_-]?key|secret|token/iu;
 function extraPass(text6) {
-  let count2 = 0, result = text6;
+  let count3 = 0, result = text6;
   for (const rule of EXTRA_RULES) {
     result = result.replace(rule.pattern, (match, ...rest) => {
       const end = rest.findIndex((value) => typeof value === "number");
       const groups = (end < 0 ? [] : rest.slice(0, end)).map((value) => typeof value === "string" ? value : "");
       const replaced = rule.replace(match, ...groups);
-      if (replaced !== match) count2++;
+      if (replaced !== match) count3++;
       return replaced;
     });
   }
-  return { text: result, count: count2 };
+  return { text: result, count: count3 };
 }
 function redactForEgress(text6) {
   const base = redactCredentials(text6);
@@ -4426,28 +4429,28 @@ function redactValue(value, depth = 0) {
     return { value: result.text, count: result.count };
   }
   if (Array.isArray(value)) {
-    let count2 = 0;
+    let count3 = 0;
     const items = value.map((item) => {
       const result = redactValue(item, depth + 1);
-      count2 += result.count;
+      count3 += result.count;
       return result.value;
     });
-    return { value: items, count: count2 };
+    return { value: items, count: count3 };
   }
   if (value && typeof value === "object") {
-    let count2 = 0;
+    let count3 = 0;
     const out = {};
     for (const [key, item] of Object.entries(value)) {
       if (SENSITIVE_KEY.test(key) && item !== null && item !== void 0 && item !== "" && typeof item !== "boolean") {
         out[key] = marker2("key-value");
-        count2++;
+        count3++;
         continue;
       }
       const result = redactValue(item, depth + 1);
       out[key] = result.value;
-      count2 += result.count;
+      count3 += result.count;
     }
-    return { value: out, count: count2 };
+    return { value: out, count: count3 };
   }
   return { value, count: 0 };
 }
@@ -8294,6 +8297,11 @@ var ReviewService = class {
     state.turns.push(value);
     if (state.turns.length > MAX_TURNS) state.turns.splice(1, 1);
   }
+  /** The task a card was given, for the agent tree: the launcher's task, else its first turn. */
+  taskOf(sessionId) {
+    const state = this.sessions.get(sessionId);
+    return state ? state.launchTask ?? state.turns[0] ?? null : null;
+  }
   /** A card's own texts, most recent first: its latest turn, its earlier turns, then the launcher's task. */
   ownTexts(state) {
     return distinct([...[...state.turns].reverse(), state.launchTask]);
@@ -8797,11 +8805,32 @@ var MAX_CARDS2 = 1024;
 var BadgeBoard = class {
   cards = /* @__PURE__ */ new Map();
   shown = /* @__PURE__ */ new Map();
+  /** Badges given as functions, by card and kind, so they can be written again in another language. */
+  renders = /* @__PURE__ */ new Map();
   publish;
   constructor(publish) {
     this.publish = publish;
   }
-  set(sessionId, kind, badge) {
+  set(sessionId, kind, source) {
+    let badge;
+    if (typeof source === "function") {
+      let render = this.renders.get(sessionId);
+      if (!render) {
+        render = /* @__PURE__ */ new Map();
+        this.renders.set(sessionId, render);
+        while (this.renders.size > MAX_CARDS2) this.renders.delete(this.renders.keys().next().value);
+      }
+      render.set(kind, source);
+      try {
+        badge = source();
+      } catch {
+        badge = null;
+      }
+    } else {
+      badge = source;
+      this.renders.get(sessionId)?.delete(kind);
+    }
+    if (!badge) this.renders.get(sessionId)?.delete(kind);
     let entries = this.cards.get(sessionId);
     if (!badge) {
       if (!entries?.delete(kind)) return Promise.resolve();
@@ -8826,6 +8855,13 @@ var BadgeBoard = class {
   forget(sessionId) {
     this.cards.delete(sessionId);
     this.shown.delete(sessionId);
+    this.renders.delete(sessionId);
+  }
+  /** The language changed: every badge given as a function is written again (only changed ones reach CanvasTTY). */
+  relocalize() {
+    const work = [];
+    for (const [sessionId, render] of [...this.renders]) for (const [kind, source] of [...render]) work.push(this.set(sessionId, kind, source));
+    return Promise.all(work).then(() => void 0);
   }
   refresh(sessionId) {
     const entries = this.cards.get(sessionId);
@@ -9047,7 +9083,7 @@ var localeOf = (value) => value === "ru" ? "ru" : "en";
 var time = (locale) => (at) => new Date(at).toLocaleTimeString(locale, { hour: "2-digit", minute: "2-digit", hourCycle: "h23" });
 var EN = {
   loopBadge: "loop?",
-  loopTip: (count2, what) => `The same ${what} was repeated ${count2} times in one turn, with no file edits seen in between. A hint only: look at the card.`,
+  loopTip: (count3, what) => `The same ${what} was repeated ${count3} times in one turn, with no file edits seen in between. A hint only: look at the card.`,
   flowBadge: "flow: preview",
   flowTip: "The orchestrator asks you to approve a flow. Open Flow preview (Settings \u2192 Plugins \u2192 CanvasTTY Assistant) to see roles and tasks, then Start or Cancel.",
   tasksBadge: (done, total) => `tasks ${done}/${total}`,
@@ -9066,6 +9102,7 @@ var EN = {
     missing: "the task misses information",
     tip: (hints) => `Assistant triage: ${hints || "nothing to add"}`
   },
+  treeToast: (title) => `Agent tree now shows "${title}" and the agents it started. Open it from Settings \u2192 Plugins \u2192 CanvasTTY Assistant \u2192 Agent tree; an open tree switches by itself.`,
   boardToast: (title, done, total) => total ? `Task board now shows "${title}" (${done}/${total} done). Open it from Settings \u2192 Plugins \u2192 CanvasTTY Assistant \u2192 Task board; an open board switches by itself.` : `"${title}" has no tasks yet. The board fills when the orchestrator adds tasks or starts a flow.`,
   flowToast: (title) => `Flow preview now shows "${title}". Open it from Settings \u2192 Plugins \u2192 CanvasTTY Assistant \u2192 Flow preview, pick a flow and a goal, then press Start. Tell the orchestrator to run the approved flow.`,
   flowsOff: "Flows are off in the Assistant settings.",
@@ -9164,7 +9201,7 @@ var FIELD_RU = {
 };
 var RU = {
   loopBadge: "\u0446\u0438\u043A\u043B?",
-  loopTip: (count2, what) => `\u041E\u0434\u043D\u0430 \u0438 \u0442\u0430 \u0436\u0435 ${what === "command" ? "\u043A\u043E\u043C\u0430\u043D\u0434\u0430" : "\u043E\u043F\u0435\u0440\u0430\u0446\u0438\u044F"} \u043F\u043E\u0432\u0442\u043E\u0440\u0438\u043B\u0430\u0441\u044C ${count2} \u0440\u0430\u0437 \u0437\u0430 \u043E\u0434\u0438\u043D \u0445\u043E\u0434, \u043F\u0440\u0430\u0432\u043E\u043A \u0444\u0430\u0439\u043B\u043E\u0432 \u043C\u0435\u0436\u0434\u0443 \u043F\u043E\u0432\u0442\u043E\u0440\u0430\u043C\u0438 \u043D\u0435 \u0437\u0430\u043C\u0435\u0447\u0435\u043D\u043E. \u042D\u0442\u043E \u0442\u043E\u043B\u044C\u043A\u043E \u043F\u043E\u0434\u0441\u043A\u0430\u0437\u043A\u0430: \u043F\u043E\u0441\u043C\u043E\u0442\u0440\u0438\u0442\u0435 \u043D\u0430 \u043E\u043A\u043D\u043E.`,
+  loopTip: (count3, what) => `\u041E\u0434\u043D\u0430 \u0438 \u0442\u0430 \u0436\u0435 ${what === "command" ? "\u043A\u043E\u043C\u0430\u043D\u0434\u0430" : "\u043E\u043F\u0435\u0440\u0430\u0446\u0438\u044F"} \u043F\u043E\u0432\u0442\u043E\u0440\u0438\u043B\u0430\u0441\u044C ${count3} \u0440\u0430\u0437 \u0437\u0430 \u043E\u0434\u0438\u043D \u0445\u043E\u0434, \u043F\u0440\u0430\u0432\u043E\u043A \u0444\u0430\u0439\u043B\u043E\u0432 \u043C\u0435\u0436\u0434\u0443 \u043F\u043E\u0432\u0442\u043E\u0440\u0430\u043C\u0438 \u043D\u0435 \u0437\u0430\u043C\u0435\u0447\u0435\u043D\u043E. \u042D\u0442\u043E \u0442\u043E\u043B\u044C\u043A\u043E \u043F\u043E\u0434\u0441\u043A\u0430\u0437\u043A\u0430: \u043F\u043E\u0441\u043C\u043E\u0442\u0440\u0438\u0442\u0435 \u043D\u0430 \u043E\u043A\u043D\u043E.`,
   flowBadge: "\u0441\u0446\u0435\u043D\u0430\u0440\u0438\u0439: \u043F\u0440\u043E\u0441\u043C\u043E\u0442\u0440",
   flowTip: "\u041E\u0440\u043A\u0435\u0441\u0442\u0440\u0430\u0442\u043E\u0440 \u043F\u0440\u043E\u0441\u0438\u0442 \u043E\u0434\u043E\u0431\u0440\u0438\u0442\u044C \u0441\u0446\u0435\u043D\u0430\u0440\u0438\u0439. \u041E\u0442\u043A\u0440\u043E\u0439\u0442\u0435 \xAB\u041F\u0440\u043E\u0441\u043C\u043E\u0442\u0440 \u0441\u0446\u0435\u043D\u0430\u0440\u0438\u044F\xBB (\u041D\u0430\u0441\u0442\u0440\u043E\u0439\u043A\u0438 \u2192 \u041F\u043B\u0430\u0433\u0438\u043D\u044B \u2192 \u0410\u0441\u0441\u0438\u0441\u0442\u0435\u043D\u0442 CanvasTTY), \u043F\u043E\u0441\u043C\u043E\u0442\u0440\u0438\u0442\u0435 \u0440\u043E\u043B\u0438 \u0438 \u0437\u0430\u0434\u0430\u0447\u0438, \u0437\u0430\u0442\u0435\u043C \xAB\u0417\u0430\u043F\u0443\u0441\u0442\u0438\u0442\u044C\xBB \u0438\u043B\u0438 \xAB\u041E\u0442\u043C\u0435\u043D\u0430\xBB.",
   tasksBadge: (done, total) => `\u0437\u0430\u0434\u0430\u0447\u0438 ${done}/${total}`,
@@ -9183,6 +9220,7 @@ var RU = {
     missing: "\u0432 \u0437\u0430\u0434\u0430\u0447\u0435 \u043D\u0435 \u0445\u0432\u0430\u0442\u0430\u0435\u0442 \u0434\u0430\u043D\u043D\u044B\u0445",
     tip: (hints) => `\u0420\u0430\u0437\u0431\u043E\u0440 \u041F\u043E\u043C\u043E\u0449\u043D\u0438\u043A\u0430: ${hints || "\u0434\u043E\u0431\u0430\u0432\u0438\u0442\u044C \u043D\u0435\u0447\u0435\u0433\u043E"}`
   },
+  treeToast: (title) => `\u0414\u0435\u0440\u0435\u0432\u043E \u0430\u0433\u0435\u043D\u0442\u043E\u0432 \u043F\u043E\u043A\u0430\u0437\u044B\u0432\u0430\u0435\u0442 \xAB${title}\xBB \u0438 \u0437\u0430\u043F\u0443\u0449\u0435\u043D\u043D\u044B\u0445 \u0438\u043C \u0430\u0433\u0435\u043D\u0442\u043E\u0432. \u041E\u0442\u043A\u0440\u043E\u0439\u0442\u0435 \u0435\u0433\u043E: \u041D\u0430\u0441\u0442\u0440\u043E\u0439\u043A\u0438 \u2192 \u041F\u043B\u0430\u0433\u0438\u043D\u044B \u2192 \u0410\u0441\u0441\u0438\u0441\u0442\u0435\u043D\u0442 CanvasTTY \u2192 \u0414\u0435\u0440\u0435\u0432\u043E \u0430\u0433\u0435\u043D\u0442\u043E\u0432; \u043E\u0442\u043A\u0440\u044B\u0442\u043E\u0435 \u0434\u0435\u0440\u0435\u0432\u043E \u043F\u0435\u0440\u0435\u043A\u043B\u044E\u0447\u0438\u0442\u0441\u044F \u0441\u0430\u043C\u043E.`,
   boardToast: (title, done, total) => total ? `\u0414\u043E\u0441\u043A\u0430 \u0437\u0430\u0434\u0430\u0447 \u043F\u043E\u043A\u0430\u0437\u044B\u0432\u0430\u0435\u0442 \xAB${title}\xBB (\u0433\u043E\u0442\u043E\u0432\u043E ${done} \u0438\u0437 ${total}). \u041E\u0442\u043A\u0440\u043E\u0439\u0442\u0435 \u0435\u0451: \u041D\u0430\u0441\u0442\u0440\u043E\u0439\u043A\u0438 \u2192 \u041F\u043B\u0430\u0433\u0438\u043D\u044B \u2192 \u0410\u0441\u0441\u0438\u0441\u0442\u0435\u043D\u0442 CanvasTTY \u2192 \u0414\u043E\u0441\u043A\u0430 \u0437\u0430\u0434\u0430\u0447; \u043E\u0442\u043A\u0440\u044B\u0442\u0430\u044F \u0434\u043E\u0441\u043A\u0430 \u043F\u0435\u0440\u0435\u043A\u043B\u044E\u0447\u0438\u0442\u0441\u044F \u0441\u0430\u043C\u0430.` : `\u0423 \xAB${title}\xBB \u043F\u043E\u043A\u0430 \u043D\u0435\u0442 \u0437\u0430\u0434\u0430\u0447. \u0414\u043E\u0441\u043A\u0430 \u0437\u0430\u043F\u043E\u043B\u043D\u0438\u0442\u0441\u044F, \u043A\u043E\u0433\u0434\u0430 \u043E\u0440\u043A\u0435\u0441\u0442\u0440\u0430\u0442\u043E\u0440 \u0434\u043E\u0431\u0430\u0432\u0438\u0442 \u0437\u0430\u0434\u0430\u0447\u0438 \u0438\u043B\u0438 \u0437\u0430\u043F\u0443\u0441\u0442\u0438\u0442 \u0441\u0446\u0435\u043D\u0430\u0440\u0438\u0439.`,
   flowToast: (title) => `\xAB\u041F\u0440\u043E\u0441\u043C\u043E\u0442\u0440 \u0441\u0446\u0435\u043D\u0430\u0440\u0438\u044F\xBB \u043F\u043E\u043A\u0430\u0437\u044B\u0432\u0430\u0435\u0442 \xAB${title}\xBB. \u041E\u0442\u043A\u0440\u043E\u0439\u0442\u0435 \u0435\u0433\u043E: \u041D\u0430\u0441\u0442\u0440\u043E\u0439\u043A\u0438 \u2192 \u041F\u043B\u0430\u0433\u0438\u043D\u044B \u2192 \u0410\u0441\u0441\u0438\u0441\u0442\u0435\u043D\u0442 CanvasTTY \u2192 \u041F\u0440\u043E\u0441\u043C\u043E\u0442\u0440 \u0441\u0446\u0435\u043D\u0430\u0440\u0438\u044F, \u0432\u044B\u0431\u0435\u0440\u0438\u0442\u0435 \u0441\u0446\u0435\u043D\u0430\u0440\u0438\u0439 \u0438 \u0446\u0435\u043B\u044C, \u043D\u0430\u0436\u043C\u0438\u0442\u0435 \xAB\u0417\u0430\u043F\u0443\u0441\u0442\u0438\u0442\u044C\xBB. \u0417\u0430\u0442\u0435\u043C \u043F\u043E\u043F\u0440\u043E\u0441\u0438\u0442\u0435 \u043E\u0440\u043A\u0435\u0441\u0442\u0440\u0430\u0442\u043E\u0440 \u0432\u044B\u043F\u043E\u043B\u043D\u0438\u0442\u044C \u043E\u0434\u043E\u0431\u0440\u0435\u043D\u043D\u044B\u0439 \u0441\u0446\u0435\u043D\u0430\u0440\u0438\u0439.`,
   flowsOff: "\u0421\u0446\u0435\u043D\u0430\u0440\u0438\u0438 \u0432\u044B\u043A\u043B\u044E\u0447\u0435\u043D\u044B \u0432 \u043D\u0430\u0441\u0442\u0440\u043E\u0439\u043A\u0430\u0445 \u041F\u043E\u043C\u043E\u0449\u043D\u0438\u043A\u0430.",
@@ -9730,13 +9768,13 @@ var LoopWatch = class {
       this.sessions.set(sessionId, state);
       while (this.sessions.size > MAX_SESSIONS2) this.sessions.delete(this.sessions.keys().next().value);
     }
-    const count2 = (state.counts.get(fingerprint) ?? 0) + 1;
+    const count3 = (state.counts.get(fingerprint) ?? 0) + 1;
     state.counts.delete(fingerprint);
-    state.counts.set(fingerprint, count2);
+    state.counts.set(fingerprint, count3);
     while (state.counts.size > MAX_FINGERPRINTS) state.counts.delete(state.counts.keys().next().value);
-    if (count2 < this.threshold || state.alerted) return null;
+    if (count3 < this.threshold || state.alerted) return null;
     state.alerted = true;
-    return { sessionId, count: count2, toolName: String(tool.name).slice(0, 40), what: tool.kind === "shell" ? "command" : "action" };
+    return { sessionId, count: count3, toolName: String(tool.name).slice(0, 40), what: tool.kind === "shell" ? "command" : "action" };
   }
   /** Whether a loop is flagged on this card in its current turn. */
   flagged(sessionId) {
@@ -10039,6 +10077,159 @@ ${lines.join("\n")}
 ${JSON.stringify(board.tasks.map(({ id, title, status, assignee, note, detail }) => ({ id, title, status, assignee, note, detail })))}`;
 }
 
+// src/tree/agentTree.ts
+var TREE_LIMITS = Object.freeze({ depth: 12, cards: 400, task: 160, title: 120 });
+var oneLine = (value, max) => {
+  if (typeof value !== "string") return null;
+  const line = value.replace(/[\u0000-\u001f\u007f\u2028\u2029]+/gu, " ").replace(/\s+/gu, " ").trim();
+  if (!line) return null;
+  return line.length > max ? `${line.slice(0, max - 1).trimEnd()}\u2026` : line;
+};
+function statusOf(card) {
+  if (card.status === "failed") return "failed";
+  if (card.status === "done") return "done";
+  if (typeof card.exitCode === "number") return card.exitCode === 0 ? "done" : "failed";
+  if (card.status === "exited") return "done";
+  if (card.status === "needs_approval") return "approval";
+  if (card.status === "working") return "running";
+  return "waiting";
+}
+function costOf(route) {
+  const estimate2 = route?.estimate;
+  if (!route || !estimate2) return null;
+  switch (estimate2.kind) {
+    case "usd":
+      return route.costBasis === "plan" || route.costBasis === "flat" ? { kind: "flat", label: route.label } : { kind: "usd", low: estimate2.low, high: estimate2.high };
+    case "window":
+      return { kind: "plan", label: route.label, share: Number.isFinite(estimate2.share) ? estimate2.share : null, window: estimate2.window };
+    case "launches":
+      return { kind: "launch", label: route.label, used: estimate2.used, allowance: estimate2.allowance, windowHours: estimate2.windowHours };
+    case "flat":
+      return { kind: "flat", label: route.label };
+    default:
+      return route.kind === "subscription" || route.kind === "coding-plan" || route.kind === "cli-default" ? { kind: "plan", label: route.label, share: null, window: null } : null;
+  }
+}
+function measuredCost(cost, usage) {
+  if (!cost || !usage) return cost;
+  if (cost.kind === "usd" && usage.usd !== null) return { kind: "usd", low: usage.usd, high: usage.usd, measured: true };
+  if (cost.kind === "plan") return { ...cost, share: usage.share, measured: true };
+  return cost;
+}
+function modelLabel2(model) {
+  if (typeof model !== "string" || !model.trim()) return null;
+  let id = model.trim().slice(0, 120);
+  id = id.replace(/^[a-z0-9-]+\/(?=.)/iu, "").replace(/\[[^\]]*\]$/u, "");
+  const claude = /^claude-(opus|sonnet|haiku|fable)-(\d+)(?:[-.](\d+))?(?:-\d{8})?$/iu.exec(id);
+  if (claude) return `${claude[1][0].toUpperCase()}${claude[1].slice(1).toLowerCase()} ${claude[2]}${claude[3] ? `.${claude[3]}` : ""}`;
+  const bare = /^(opus|sonnet|haiku|fable)$/iu.exec(id);
+  if (bare) return `${bare[1][0].toUpperCase()}${bare[1].slice(1).toLowerCase()}`;
+  const upper = /^(glm|gpt|qwen|kimi|grok|minimax)(?=[-\d.])/iu.exec(id);
+  if (upper) {
+    const name = upper[1].toLowerCase();
+    const shown = name === "qwen" || name === "kimi" || name === "grok" ? `${name[0].toUpperCase()}${name.slice(1)}` : name === "minimax" ? "MiniMax" : name.toUpperCase();
+    return `${shown}${id.slice(upper[1].length)}`;
+  }
+  return id;
+}
+function priceKey(cost) {
+  return cost.kind === "plan" || cost.kind === "launch" || cost.kind === "flat" ? cost.label : null;
+}
+function totalsOf(root) {
+  const totals = { agents: 0, running: 0, usd: null, plans: [], unpriced: 0, tokens: null, providerEstimate: null };
+  const plans = /* @__PURE__ */ new Map();
+  const visit = (node) => {
+    totals.agents++;
+    if (node.status === "running") totals.running++;
+    if (node.usage) {
+      totals.tokens = (totals.tokens ?? 0) + node.usage.tokens;
+      if (node.usage.providerEstimate !== void 0) totals.providerEstimate = round2((totals.providerEstimate ?? 0) + node.usage.providerEstimate);
+    }
+    const cost = node.cost;
+    if (!cost) totals.unpriced++;
+    else if (cost.kind === "usd") totals.usd = { low: round2((totals.usd?.low ?? 0) + cost.low), high: round2((totals.usd?.high ?? 0) + cost.high) };
+    else {
+      const key = priceKey(cost);
+      const plan3 = plans.get(key) ?? { label: key, share: null, window: null, cards: 0, launches: 0 };
+      plan3.cards++;
+      if (cost.kind === "launch") plan3.launches++;
+      if (cost.kind === "plan" && cost.share !== null) {
+        plan3.share = round2((plan3.share ?? 0) + cost.share);
+        plan3.window ??= cost.window;
+      }
+      plans.set(key, plan3);
+    }
+    node.children.forEach(visit);
+  };
+  visit(root);
+  totals.plans = [...plans.values()].sort((a, b) => b.cards - a.cards || a.label.localeCompare(b.label));
+  return totals;
+}
+var round2 = (value) => Math.round(value * 1e3) / 1e3;
+function buildTree(input, options = {}) {
+  const cards = input.cards.filter((card) => card && typeof card.id === "string" && card.id).slice(0, TREE_LIMITS.cards);
+  const byId = new Map(cards.map((card) => [card.id, card]));
+  const kids = /* @__PURE__ */ new Map();
+  for (const card of cards) {
+    const parent = card.parentSessionId;
+    if (!parent || parent === card.id || !byId.has(parent)) continue;
+    const list = kids.get(parent) ?? [];
+    list.push(card);
+    kids.set(parent, list);
+  }
+  const placed = /* @__PURE__ */ new Set();
+  const node = (card, depth) => {
+    placed.add(card.id);
+    const route = input.route(card.id);
+    const top = input.autoTop?.(card.id) ?? null;
+    const children = depth >= TREE_LIMITS.depth ? [] : (kids.get(card.id) ?? []).filter((child) => !placed.has(child.id)).sort((a, b) => (a.startedAt ?? 0) - (b.startedAt ?? 0) || a.id.localeCompare(b.id)).map((child) => node(child, depth + 1));
+    const usage = input.usage?.(card.id) ?? null;
+    const cost = measuredCost(costOf(route) ?? (top ? { kind: "plan", label: top.label, share: null, window: null } : null), usage);
+    return {
+      id: card.id,
+      title: oneLine(card.title, TREE_LIMITS.title) ?? card.id.slice(0, 8),
+      role: card.role,
+      provider: card.provider,
+      model: modelLabel2(card.model ?? route?.model ?? top?.model ?? null),
+      status: statusOf(card),
+      task: oneLine(input.task(card.id), TREE_LIMITS.task),
+      cost,
+      usage,
+      startedAt: typeof card.startedAt === "number" && Number.isFinite(card.startedAt) ? card.startedAt : null,
+      endedAt: input.endedAt(card.id),
+      planChildren: card.role === "orchestrator" || children.length ? input.planChildren(card.id) : null,
+      descendants: children.reduce((sum, child) => sum + 1 + child.descendants, 0),
+      children
+    };
+  };
+  const isRoot = (card) => !card.parentSessionId || card.parentSessionId === card.id || !byId.has(card.parentSessionId);
+  const roots = cards.filter((card) => isRoot(card) && (card.role === "orchestrator" || kids.has(card.id))).sort((a, b) => (b.startedAt ?? 0) - (a.startedAt ?? 0) || a.id.localeCompare(b.id));
+  const trees = roots.map((card) => node(card, 0));
+  for (const card of cards) {
+    if (placed.has(card.id) || !kids.has(card.id)) continue;
+    let top = card;
+    const seen = /* @__PURE__ */ new Set();
+    while (top.parentSessionId && byId.has(top.parentSessionId) && !seen.has(top.id)) {
+      seen.add(top.id);
+      top = byId.get(top.parentSessionId);
+    }
+    if (!placed.has(top.id)) trees.push(node(top, 0));
+  }
+  const focusRoot = options.focus ? rootOf(options.focus, byId) : null;
+  if (focusRoot) trees.sort((a, b) => Number(b.id === focusRoot) - Number(a.id === focusRoot));
+  return { trees: trees.map((root) => ({ root, totals: totalsOf(root) })) };
+}
+function rootOf(id, byId) {
+  let current = byId.get(id);
+  if (!current) return null;
+  const seen = /* @__PURE__ */ new Set();
+  while (current.parentSessionId && byId.has(current.parentSessionId) && !seen.has(current.id) && seen.size < TREE_LIMITS.cards) {
+    seen.add(current.id);
+    current = byId.get(current.parentSessionId);
+  }
+  return current.id;
+}
+
 // src/harness/harness.ts
 var HARNESS_TOOLS = ["flows_list", "flow_plan", "flow_status", "task_add", "task_update", "task_list"];
 var SETTINGS_KEY = "harness";
@@ -10064,6 +10255,8 @@ var Harness = class {
   sessions = /* @__PURE__ */ new Map();
   /** When a card last stopped working (turn boundaries; a short flicker is not a new turn). */
   stoppedAt = /* @__PURE__ */ new Map();
+  /** When a card finished (done, failed, exited), for the agent tree's elapsed time. */
+  finishedAt = /* @__PURE__ */ new Map();
   /** flow_plan calls per orchestrator, for the rate limit. */
   planCalls = /* @__PURE__ */ new Map();
   pendingWrites = /* @__PURE__ */ new Map();
@@ -10071,7 +10264,7 @@ var Harness = class {
   writing = Promise.resolve();
   pruneTimer = null;
   /** What the person last opened from a card menu: the board and the preview cards follow it. */
-  focus = { board: null, flows: null };
+  focus = { board: null, flows: null, tree: null };
   constructor(options) {
     this.host = options.host;
     this.locale = options.locale;
@@ -10196,6 +10389,7 @@ var Harness = class {
     if (event.type === "closed") {
       this.sessions.delete(session.id);
       this.stoppedAt.delete(session.id);
+      this.finishedAt.delete(session.id);
       this.planCalls.delete(session.id);
       this.loops.forget(session.id);
       this.badges.forget(session.id);
@@ -10211,6 +10405,10 @@ var Harness = class {
     this.sessions.set(session.id, session);
     const now = this.now();
     if (before?.status === "working" && session.status !== "working") this.stoppedAt.set(session.id, now);
+    const finished = statusOf(session);
+    if (finished === "done" || finished === "failed") {
+      if (!this.finishedAt.has(session.id)) this.finishedAt.set(session.id, now);
+    } else this.finishedAt.delete(session.id);
     const { turnStarted } = this.journals.observe(session);
     const stopped = this.stoppedAt.get(session.id);
     if (turnStarted && (stopped === void 0 || now - stopped >= TURN_GAP_MS) && this.loops.turnStarted(session.id)) void this.badges.set(session.id, "loop", null);
@@ -10219,7 +10417,7 @@ var Harness = class {
       void this.badges.set(session.id, "loop", null);
     }
     if (session.role === "orchestrator" && before?.title !== session.title) this.boards.rename(session.id, session.title);
-    if (!before || before.title !== session.title || before.status !== session.status) this.surfacesChanged();
+    if (!before || before.title !== session.title || before.status !== session.status || before.exitCode !== session.exitCode) this.surfacesChanged();
   }
   /** Every pre-tool call CanvasTTY asked the plugin about, with the answer it got. */
   observeDecision(request, verdict) {
@@ -10236,7 +10434,7 @@ var Harness = class {
     });
     if (!signal) return;
     this.journals.loop(sessionId);
-    void this.badges.set(sessionId, "loop", { text: this.strings.loopBadge, tone: "warn", tooltip: this.strings.loopTip(signal.count, signal.what) });
+    void this.badges.set(sessionId, "loop", () => ({ text: this.strings.loopBadge, tone: "warn", tooltip: this.strings.loopTip(signal.count, signal.what) }));
   }
   // ---------------------------------------------------------------------------------------------------------------
   // Agent tools
@@ -10345,7 +10543,7 @@ var Harness = class {
     });
     this.plans.add(plan3);
     this.focus.flows = caller.id;
-    void this.badges.set(caller.id, "flow", { text: this.strings.flowBadge, tone: "info", tooltip: this.strings.flowTip });
+    void this.badges.set(caller.id, "flow", () => ({ text: this.strings.flowBadge, tone: "info", tooltip: this.strings.flowTip }));
     this.surfacesChanged();
     return {
       content: [
@@ -10412,7 +10610,7 @@ ${JSON.stringify(task)}` };
   }
   boardChanged(board) {
     const { done, total } = this.boards.progress(board.orchestratorId);
-    void this.badges.set(board.orchestratorId, "tasks", total ? { text: this.strings.tasksBadge(done, total), tone: "info", tooltip: this.strings.tasksTip } : null);
+    void this.badges.set(board.orchestratorId, "tasks", total ? () => ({ text: this.strings.tasksBadge(done, total), tone: "info", tooltip: this.strings.tasksTip }) : null);
     this.host.emit("board", { orchestratorId: board.orchestratorId });
   }
   // ---------------------------------------------------------------------------------------------------------------
@@ -10430,6 +10628,11 @@ ${JSON.stringify(task)}` };
       this.host.emit("focus", { ...this.focus });
       const { done, total } = this.boards.progress(sessionId);
       return { message: this.strings.boardToast(title, done, total), tone: "info" };
+    }
+    if (actionId === "agent-tree") {
+      this.focus.tree = sessionId;
+      this.host.emit("focus", { ...this.focus });
+      return { message: this.strings.treeToast(title), tone: "info" };
     }
     if (actionId === "flow-preview") {
       if (!this.settings.flows) return { message: this.strings.flowsOff, tone: "warn" };
@@ -10449,6 +10652,16 @@ ${JSON.stringify(task)}` };
   // ---------------------------------------------------------------------------------------------------------------
   // The plugin's own cards (Flow preview, Task board) and settings page. No folder paths reach a page.
   // ---------------------------------------------------------------------------------------------------------------
+  /** Open cards as CanvasTTY last described them (the agent tree reads them). */
+  cards() {
+    return [...this.sessions.values()];
+  }
+  finished(sessionId) {
+    return this.finishedAt.get(sessionId) ?? null;
+  }
+  treeFocus() {
+    return this.focus.tree;
+  }
   orchestrators() {
     return [...this.sessions.values()].filter((session) => session.role === "orchestrator").map((session) => ({ id: session.id, title: session.title || session.id.slice(0, 8), status: session.status }));
   }
@@ -10526,6 +10739,10 @@ ${JSON.stringify(task)}` };
   setBadge(sessionId, kind, badge) {
     return this.badges.set(sessionId, kind, badge);
   }
+  /** Writes every badge again in the current language. */
+  relocalize() {
+    return this.badges.relocalize();
+  }
 };
 
 // src/auto/service.ts
@@ -10561,13 +10778,13 @@ var slug = (v) => {
 };
 var points = (v) => typeof v === "number" && Number.isFinite(v) && v >= 0 && v <= 100 ? v : null;
 var percent = (v) => typeof v === "number" && Number.isFinite(v) && v >= 0 && v <= 1 ? v * 100 : null;
-var round2 = (v, digits) => Math.round(v * 10 ** digits) / 10 ** digits;
+var round3 = (v, digits) => Math.round(v * 10 ** digits) / 10 ** digits;
 function speedOf(row) {
   const medium = object(object(row.performanceByPromptType)?.medium);
   const tps = medium?.medianOutputSpeed;
   if (typeof tps !== "number" || !Number.isFinite(tps) || tps < 0.1 || tps > 1e5) return null;
   const latency = medium?.medianTimeToFirstChunk;
-  return { outputTps: round2(tps, 2), latencyS: typeof latency === "number" && Number.isFinite(latency) && latency >= 0 && latency <= 3600 ? round2(latency, 3) : null };
+  return { outputTps: round3(tps, 2), latencyS: typeof latency === "number" && Number.isFinite(latency) && latency >= 0 && latency <= 3600 ? round3(latency, 3) : null };
 }
 function normalizeArtificialAnalysis(html, fetchedAt) {
   if (Buffer.byteLength(html) > ARTIFICIAL_ANALYSIS_BYTES) throw Error("Artificial Analysis response too large");
@@ -12211,10 +12428,10 @@ function chooseStrategy(input) {
   const judgeTime = input.seconds(judges[0]);
   const singleTime = input.seconds(primary);
   const time2 = drafts.every((value) => value !== null) && judgeTime !== null && singleTime ? TIME_WEIGHT * Math.log2((Math.max(...drafts) + judgeTime) / singleTime) : 0;
-  const round4 = (value) => Math.round(value * 1e3) / 1e3;
-  const ev = { gain: round4(gain), quality: round4(quality), cost: round4(cost), time: round4(time2), total: round4(quality - cost - time2) };
+  const round5 = (value) => Math.round(value * 1e3) / 1e3;
+  const ev = { gain: round5(gain), quality: round5(quality), cost: round5(cost), time: round5(time2), total: round5(quality - cost - time2) };
   if (kind === "consensus" && settings.consensus === "auto" && ev.total <= 0) return { ...single("single_better"), ev };
-  return { kind, reason: kind === "best-of-n" ? "best_of_n_on" : settings.consensus === "always" ? "consensus_always" : "consensus_pays", members, judges, estimateUsd: round4(estimateUsd * 1e3) / 1e3, ev };
+  return { kind, reason: kind === "best-of-n" ? "best_of_n_on" : settings.consensus === "always" ? "consensus_always" : "consensus_pays", members, judges, estimateUsd: round5(estimateUsd * 1e3) / 1e3, ev };
 }
 function parseAnswer(raw) {
   const result = { text: "", toolCalls: false, usage: { in: null, out: null, cost: null } };
@@ -12628,11 +12845,11 @@ var AutoRouter = class {
   loadOutcomes() {
     try {
       const saved = JSON.parse(readFileSync7(this.outcomesFile(), "utf8"));
-      const count2 = (value) => Number.isInteger(value) && value >= 0 ? value : 0;
+      const count3 = (value) => Number.isInteger(value) && value >= 0 ? value : 0;
       for (const [key, raw] of Object.entries(saved).slice(0, ROUTER_LIMITS.outcomes)) {
         if (!raw || typeof raw !== "object" || key.length > 300) continue;
         const r = raw;
-        this.outcomes.set(key, { n: count2(r.n), text: count2(r.text), toolCalls: count2(r.toolCalls), failed: count2(r.failed), timeout: count2(r.timeout) });
+        this.outcomes.set(key, { n: count3(r.n), text: count3(r.text), toolCalls: count3(r.toolCalls), failed: count3(r.failed), timeout: count3(r.timeout) });
       }
     } catch {
     }
@@ -13641,7 +13858,7 @@ var AutoService = class {
       key: (upstream) => this.keyFor(upstream),
       ...options.decide ? { decide: options.decide } : {},
       ...options.turn ? { turn: options.turn } : {},
-      badge: (sessionId, model) => options.publishBadge(sessionId, model ? { text: badgeText(model.model), tone: "neutral", tooltip: AUTO_STRINGS[this.options.locale].badgeTip(model.tier, model.source) } : null),
+      badge: (sessionId, model) => options.publishBadge(sessionId, model ? () => ({ text: badgeText(model.model), tone: "neutral", tooltip: AUTO_STRINGS[this.options.locale].badgeTip(model.tier, model.source) }) : null),
       log: (level, message) => options.host.log(level, message),
       ...options.parallelCap ? { parallelCap: options.parallelCap } : {},
       noProviderMessage: () => AUTO_STRINGS[this.options.locale].noProvider,
@@ -13900,7 +14117,7 @@ function parseLimits(value, receivedAt) {
   return { receivedAt, providers };
 }
 var PER_LAUNCH_PERCENT = 2;
-function quotaOf(limits, reserve, now, launchesSinceRead = 0) {
+function quotaOf(limits, reserve, now, launchesSinceRead = 0, measured = null) {
   const unknown = (note, code, readAt = null) => ({ state: "unknown", headroom: null, pace: null, window: null, readAt, note, code });
   if (!limits) return unknown("not read yet", "unread");
   if (limits.state === "unavailable") return unknown(limits.reason ? `not readable (${limits.reason})` : "not readable", "unreadable");
@@ -13927,22 +14144,22 @@ function quotaOf(limits, reserve, now, launchesSinceRead = 0) {
     }
   }
   if (!tight) return { state: "presumed-reset", headroom: null, pace: null, window: null, readAt: limits.fetchedAt, note: "its windows have probably reset since the last read", code: "reset" };
-  const spent = Math.max(0, Math.min(launchesSinceRead, 100)) * PER_LAUNCH_PERCENT;
+  const spent = measured ? Math.max(0, Math.min(measured.percent, 100)) : Math.max(0, Math.min(launchesSinceRead, 100)) * PER_LAUNCH_PERCENT;
   if (spent > 0 && headroom > 0) headroom = Math.max(1e-3, headroom - spent);
-  const estimated = spent > 0 ? `; ${launchesSinceRead} routed launch(es) since the read counted as ~${spent}%` : "";
+  const estimated = spent <= 0 ? "" : measured ? `; ${Math.round(measured.tokens).toLocaleString("en-US")} tokens measured since the read counted as ~${Math.round(spent * 10) / 10}%` : `; ${launchesSinceRead} routed launch(es) since the read counted as ~${spent}%`;
   const view = { label: tight.label, usedPercent: tight.usedPercent, minutes: tight.windowMinutes };
-  if (headroom <= 0) return { state: "exhausted", headroom: 0, pace: paced ? round3(pace) : null, window: view, readAt: limits.fetchedAt, note: "no headroom above the reserve", code: "no-headroom" };
-  return { state: presumed ? "presumed-reset" : "known", headroom: round3(headroom), pace: paced ? round3(pace) : null, window: view, readAt: limits.fetchedAt, note: `${presumed ? "one window has probably reset since the last read" : ""}${estimated}`.replace(/^; /u, ""), code: presumed ? "reset" : "" };
+  if (headroom <= 0) return { state: "exhausted", headroom: 0, pace: paced ? round4(pace) : null, window: view, readAt: limits.fetchedAt, note: "no headroom above the reserve", code: "no-headroom" };
+  return { state: presumed ? "presumed-reset" : "known", headroom: round4(headroom), pace: paced ? round4(pace) : null, window: view, readAt: limits.fetchedAt, note: `${presumed ? "one window has probably reset since the last read" : ""}${estimated}`.replace(/^; /u, ""), code: presumed ? "reset" : "" };
 }
-var round3 = (value) => Math.round(value * 1e3) / 1e3;
+var round4 = (value) => Math.round(value * 1e3) / 1e3;
 function shadowPrice(quota, share, ref) {
   if (quota.state === "exhausted") return { usd: null, basis: "unavailable" };
   if (quota.state !== "known" || quota.headroom === null) return { usd: 0, basis: "unknown" };
   const burning = quota.pace !== null && quota.pace > 1;
   if (quota.headroom >= share && !burning) return { usd: 0, basis: "free" };
   const base = ref ?? 0;
-  if (quota.headroom < share) return { usd: round3(base * Math.max(1, burning ? quota.pace - 1 : 1)), basis: "low" };
-  return { usd: round3(base * (quota.pace - 1)), basis: "burning" };
+  if (quota.headroom < share) return { usd: round4(base * Math.max(1, burning ? quota.pace - 1 : 1)), basis: "low" };
+  return { usd: round4(base * (quota.pace - 1)), basis: "burning" };
 }
 var RESET_TOLERANCE_MS = 2 * 6e4;
 var EARLY_RESET_MIN_DROP = 5;
@@ -14291,7 +14508,7 @@ function effortVariants(index, identity, takes) {
 }
 function launchOptionsFor(cli, plugins, route) {
   const options = {};
-  if (plugins.has(ACCOUNTS_ID) || route.kind === "account") options[ACCOUNTS_ID] = route.kind === "account" && route.account ? { ...route.account } : { account: "none" };
+  if (plugins.has(ACCOUNTS_ID) || route.account) options[ACCOUNTS_ID] = route.account ? { ...route.account } : { account: "none" };
   if (plugins.has(ASSISTANT_ID) || route.kind === "auto") options[ASSISTANT_ID] = { model: route.kind === "auto" ? "auto" : "off" };
   void cli;
   return options;
@@ -14390,6 +14607,31 @@ function rawCandidates(ctx) {
         allow: ctx.settings.allow[`host:${host}`] ?? "allow",
         effortVia: takes.length ? "accounts" : "none"
       });
+    }
+  }
+  for (const pool of ctx.pools ?? []) {
+    const entry = ctx.providers.find((provider) => provider.id === pool.cli);
+    const plan3 = ctx.settings.plans.find((p2) => p2.cli === pool.cli && p2.kind === "subscription");
+    const models = plan3 && MODEL_CLIS.has(pool.cli) && plan3.models.length && pool.cli !== "opencode" ? plan3.models : [null];
+    const takes = effortsOf(pool.cli, entry);
+    for (const model of models) {
+      const resolved = model ? resolve9(pool.cli, model) : { identity: null, from: "none" };
+      for (const effort of effortVariants(ctx.index, resolved.identity, takes)) {
+        raws.push({
+          cli: pool.cli,
+          kind: "subscription",
+          signIn: `pool:${pool.cli}`,
+          label: `${pool.label} (${pool.ready}/${pool.members} free)`,
+          model,
+          resolved,
+          effort,
+          pool,
+          context: OPENROUTER_CONTEXT,
+          trust: pool.trust === "unset" ? "unset" : pool.trust,
+          allow: ctx.settings.allow[`pool:${pool.cli}`] ?? "allow",
+          effortVia: takes.length ? "spawn" : "none"
+        });
+      }
     }
   }
   if (ctx.auto) {
@@ -14508,7 +14750,7 @@ function decide(ctx) {
       drop("it cannot run as a subagent");
       continue;
     }
-    if (raw.kind !== "account" && raw.kind !== "auto" && (entry?.signIn === "signed_out" || entry?.signIn === "expired")) {
+    if (raw.kind !== "account" && raw.kind !== "auto" && !raw.pool && (entry?.signIn === "signed_out" || entry?.signIn === "expired")) {
       drop(`its sign-in is ${entry.signIn === "expired" ? "expired" : "signed out"}`);
       continue;
     }
@@ -14522,6 +14764,10 @@ function decide(ctx) {
     }
     const plugins = pluginsFor(raw.cli, ctx);
     if (raw.kind === "account" && !plugins.has(ACCOUNTS_ID) && ctx.providersGiven) {
+      drop("the Accounts plugin does not apply to this CLI here");
+      continue;
+    }
+    if (raw.pool && !plugins.has(ACCOUNTS_ID) && ctx.providersGiven) {
       drop("the Accounts plugin does not apply to this CLI here");
       continue;
     }
@@ -14569,9 +14815,20 @@ function decide(ctx) {
     let estimate2 = { kind: "unknown", note: "no price known" };
     let quota = null;
     let availability = { state: "ready", reason: entry?.signIn === "ok" ? "signed in" : "not checked" };
-    if (raw.kind === "subscription" || raw.kind === "cli-default") {
+    if (raw.pool) {
+      const q = raw.pool.quota;
+      const reserve = raw.plan?.reserve ?? DEFAULT_RESERVE;
+      const left = q && q.remainingPercent !== null && q.state !== "unknown" && q.state !== "stale" ? q.remainingPercent - reserve : null;
+      quota = raw.pool.ready <= 0 ? { state: "exhausted", headroom: 0, pace: null, window: null, readAt: q?.observedAt ?? null, note: "no free account in the pool", code: "no-headroom" } : left === null ? { state: "unknown", headroom: null, pace: null, window: null, readAt: q?.observedAt ?? null, note: q?.note || "pool quota not read yet", code: "unread" } : left <= 0 ? { state: "exhausted", headroom: 0, pace: null, window: null, readAt: q.observedAt, note: "no headroom above the reserve in any free account", code: "no-headroom" } : { state: "known", headroom: Math.round(left * 1e3) / 1e3, pace: null, window: { label: raw.pool.window, usedPercent: 100 - q.remainingPercent, minutes: null }, readAt: q.observedAt, note: "", code: "" };
+      const price3 = shadowPrice(quota, share, ref);
+      cost = price3.usd;
+      costBasis = price3.basis;
+      if (price3.basis === "unavailable") availability = { state: "exhausted", reason: `pool: ${quota.note}` };
+      else if (quota.state === "unknown") availability = { state: "unknown", reason: `pool quota unknown: ${quota.note}` };
+      estimate2 = quota.state === "known" ? { kind: "window", share, window: raw.pool.window, usedPercent: quota.window?.usedPercent ?? null } : { kind: "unknown", note: `pool quota unknown (${quota.note})` };
+    } else if (raw.kind === "subscription" || raw.kind === "cli-default") {
       const limits = ctx.limits?.providers.find((provider) => provider.provider === raw.cli);
-      quota = quotaOf(limits, raw.plan?.reserve ?? DEFAULT_RESERVE, ctx.now, ctx.launchesSinceRead?.(raw.cli) ?? 0);
+      quota = quotaOf(limits, raw.plan?.reserve ?? DEFAULT_RESERVE, ctx.now, ctx.launchesSinceRead?.(raw.cli) ?? 0, ctx.spentSinceRead?.(raw.cli) ?? null);
       const price3 = shadowPrice(quota, share, ref);
       cost = price3.usd;
       costBasis = price3.basis;
@@ -14621,7 +14878,7 @@ function decide(ctx) {
       continue;
     }
     const spawn = { provider: raw.cli, launchOptions: {} };
-    let accountOptions = null;
+    let accountOptions = raw.pool ? { ...raw.pool.launchOptions[ACCOUNTS_ID] } : null;
     if (raw.kind === "account") {
       accountOptions = { ...raw.row?.launchOptions?.[ACCOUNTS_ID] ?? { account: raw.accountId, trustFolder: false } };
       accountOptions.effort = raw.effort && raw.effortVia === "accounts" ? raw.effort : typeof accountOptions.effort === "string" ? accountOptions.effort : "default";
@@ -15072,6 +15329,332 @@ function isRecord9(value) {
   return typeof r.id === "string" && typeof r.at === "number" && typeof r.card === "string" && Array.isArray(r.options);
 }
 
+// src/route/peers.ts
+var ACCOUNTS_PLUGIN = "canvastty-accounts";
+var SHARED_METHODS = Object.freeze({ routes: "accounts.routes", quota: "accounts.quota" });
+var isRecord10 = (value) => !!value && typeof value === "object" && !Array.isArray(value);
+var errorText = (error) => error instanceof Error ? error.message : String(error);
+var clean3 = (value, max) => typeof value === "string" ? value.replace(/[\u0000-\u001f\u007f]+/gu, " ").trim().slice(0, max) : "";
+function unsupportedError(error) {
+  const code = isRecord10(error) ? error.code : void 0;
+  return code === -32601 || /unknown host method|does not have the [a-z:]+ permission|not allowed|permission/iu.test(errorText(error));
+}
+function sharedReadReason(error) {
+  const data = isRecord10(error) ? error.data : void 0;
+  if (isRecord10(data) && typeof data.reason === "string" && /^[a-z_]{1,40}$/u.test(data.reason)) return data.reason;
+  const prefix = /^([a-z_]{3,40}):/u.exec(errorText(error));
+  return prefix ? prefix[1] : null;
+}
+function poolRoutesFrom(value) {
+  const raw = isRecord10(value) && Array.isArray(value.pools) ? value.pools : Array.isArray(value) ? value : [];
+  const pools = [];
+  for (const entry of raw.slice(0, 16)) {
+    if (!isRecord10(entry) || typeof entry.agent !== "string" || !/^[a-z0-9-]{1,40}$/u.test(entry.agent)) continue;
+    const count3 = (n) => typeof n === "number" && Number.isInteger(n) && n >= 0 ? Math.min(n, 1e4) : 0;
+    const best = isRecord10(entry.best) ? entry.best : null;
+    const quota = best ? accountQuotaFrom(best) ?? null : null;
+    const trust = typeof entry.trust === "string" && /^(D[0-3]|unset)$/u.test(entry.trust) ? entry.trust : "unset";
+    if (pools.some((pool) => pool.cli === entry.agent)) continue;
+    pools.push({
+      cli: entry.agent,
+      label: clean3(entry.label, 60) || `${entry.agent} pool`,
+      members: count3(entry.members),
+      ready: count3(entry.ready),
+      quota,
+      window: best ? clean3(best.window, 40) || null : null,
+      trust,
+      launchOptions: { [ACCOUNTS_PLUGIN]: { account: `pool:${entry.agent}`, effort: "default", trustFolder: false } }
+    });
+  }
+  return pools;
+}
+var AccountsFeed = class {
+  mode = "probing";
+  reason = null;
+  routesCache = null;
+  quotaCache = null;
+  inflight = /* @__PURE__ */ new Map();
+  refusedAt = 0;
+  host;
+  now;
+  constructor(host, now = Date.now) {
+    this.host = host;
+    this.now = now;
+  }
+  /** Refused or not offered: asked again only now and then (the person may approve it, or update CanvasTTY). */
+  resting() {
+    if (this.mode === "unsupported") return this.now() - this.refusedAt < 30 * 6e4;
+    if (this.mode === "refused") return this.now() - this.refusedAt < 6e4;
+    return false;
+  }
+  request(method, params) {
+    const key = `${method}:${JSON.stringify(params)}`;
+    let pending = this.inflight.get(key);
+    if (!pending) {
+      pending = this.host.callHost("plugins.request", { plugin: ACCOUNTS_PLUGIN, method, params }).then((answer) => {
+        this.mode = "ready";
+        this.reason = null;
+        return isRecord10(answer) && "data" in answer ? answer.data : answer;
+      }, (error) => {
+        const reason = sharedReadReason(error);
+        if (reason && reason !== "timeout" && reason !== "busy" && reason !== "rate_limited" && reason !== "provider_error") {
+          this.mode = "refused";
+          this.reason = reason;
+          this.refusedAt = this.now();
+        } else if (unsupportedError(error)) {
+          this.mode = "unsupported";
+          this.reason = null;
+          this.refusedAt = this.now();
+        } else {
+          this.mode = this.mode === "ready" ? "ready" : "failing";
+          this.reason = reason ?? clean3(errorText(error), 120);
+        }
+        throw error;
+      }).finally(() => this.inflight.delete(key));
+      this.inflight.set(key, pending);
+    }
+    return pending;
+  }
+  /** Model account rows and pools, at most `maxAgeMs` old when a read answers within `deadlineMs`; else the last ones. */
+  async routes(maxAgeMs = 12e4, deadlineMs = 1500) {
+    const now = this.now();
+    if (this.routesCache && now - this.routesCache.at <= maxAgeMs) return { ...this.routesCache.value, at: this.routesCache.at };
+    if (this.resting()) return this.routesCache ? { ...this.routesCache.value, at: this.routesCache.at } : null;
+    const read2 = this.request(SHARED_METHODS.routes, {}).then((data) => {
+      if (!isRecord10(data) || !Array.isArray(data.routes)) {
+        this.mode = "failing";
+        this.reason = "unexpected answer";
+        throw new Error("Accounts answered accounts.routes in an unknown shape.");
+      }
+      const value = { rows: accountRowsFrom(data), pools: poolRoutesFrom(data) };
+      this.routesCache = { at: this.now(), value };
+      return value;
+    });
+    read2.catch(() => void 0);
+    const answer = await within2(read2, deadlineMs);
+    if (answer) return { ...answer, at: this.routesCache.at };
+    return this.routesCache ? { ...this.routesCache.value, at: this.routesCache.at } : null;
+  }
+  /** Accounts' `accounts.quota` (per account and per pool), for the page and the e2e check; null when not readable. */
+  async quota(maxAgeMs = 6e4, deadlineMs = 1500, force = false) {
+    const now = this.now();
+    if (!force && this.quotaCache && now - this.quotaCache.at <= maxAgeMs) return this.quotaCache.value;
+    if (!force && this.resting()) return this.quotaCache?.value ?? null;
+    const read2 = this.request(SHARED_METHODS.quota, {}).then((data) => {
+      this.quotaCache = { at: this.now(), value: data };
+      return data;
+    });
+    read2.catch(() => void 0);
+    return await within2(read2, deadlineMs) ?? this.quotaCache?.value ?? null;
+  }
+  state() {
+    return { mode: this.mode, reason: this.reason, routesAt: this.routesCache?.at ?? null, quotaAt: this.quotaCache?.at ?? null };
+  }
+};
+function environmentsFrom(value) {
+  const raw = isRecord10(value) && Array.isArray(value.environments) ? value.environments : [];
+  const out = [];
+  const id = (v, max) => typeof v === "string" && /^[A-Za-z0-9][A-Za-z0-9._:-]*$/u.test(v) && v.length <= max ? v : null;
+  for (const entry of raw.slice(0, 16)) {
+    if (!isRecord10(entry)) continue;
+    const pluginId = id(entry.pluginId, 80), kind = id(entry.kind, 40);
+    if (!pluginId || !kind) continue;
+    const maxParallel = typeof entry.maxParallel === "number" && Number.isInteger(entry.maxParallel) && entry.maxParallel > 0 ? Math.min(entry.maxParallel, 64) : 1;
+    const servers = Array.isArray(entry.servers) ? entry.servers.filter(isRecord10).map((server) => ({ name: id(server.name, 64), running: typeof server.running === "number" && server.running >= 0 ? Math.floor(server.running) : 0 })).filter((server) => server.name !== null).slice(0, 64) : [];
+    out.push({
+      pluginId,
+      kind,
+      name: clean3(entry.name, 60) || kind,
+      providers: Array.isArray(entry.providers) ? entry.providers.filter((p2) => typeof p2 === "string" && /^[a-z0-9-]{1,40}$/u.test(p2)).slice(0, 16) : null,
+      capBy: id(entry.capBy, 40),
+      maxParallel,
+      servers,
+      localProtection: entry.localProtection === true
+    });
+  }
+  return out;
+}
+var ProvidersFeed = class {
+  mode = "probing";
+  cache = null;
+  pending = null;
+  refusedAt = 0;
+  host;
+  now;
+  constructor(host, now = Date.now) {
+    this.host = host;
+    this.now = now;
+  }
+  /** The list, at most `maxAgeMs` old (it reads only the core's caches, so a read is cheap); null: not offered. */
+  async list(maxAgeMs = 6e4, deadlineMs = 1e3) {
+    const now = this.now();
+    if (this.cache && now - this.cache.at <= maxAgeMs) return { ...this.cache.value, at: this.cache.at };
+    if (this.mode === "unsupported" && now - this.refusedAt < 30 * 6e4) return null;
+    this.pending ??= this.host.callHost("providers.list", {}).then((answer2) => {
+      const parsed = providersFrom(answer2);
+      if (!parsed.given) {
+        this.mode = "failing";
+        return null;
+      }
+      const value = { providers: parsed.list, environments: environmentsFrom(answer2) };
+      this.cache = { at: this.now(), value };
+      this.mode = "ready";
+      return value;
+    }, (error) => {
+      if (unsupportedError(error)) {
+        this.mode = "unsupported";
+        this.refusedAt = this.now();
+      } else this.mode = "failing";
+      return null;
+    }).finally(() => {
+      this.pending = null;
+    });
+    const answer = await within2(this.pending, deadlineMs);
+    if (answer) return { ...answer, at: this.cache.at };
+    return this.cache ? { ...this.cache.value, at: this.cache.at } : null;
+  }
+};
+function within2(work, ms) {
+  return new Promise((resolve9) => {
+    const timer = setTimeout(() => resolve9(null), ms);
+    timer.unref?.();
+    work.then((value) => {
+      clearTimeout(timer);
+      resolve9(value);
+    }, () => {
+      clearTimeout(timer);
+      resolve9(null);
+    });
+  });
+}
+
+// src/route/usage.ts
+var isRecord11 = (value) => !!value && typeof value === "object" && !Array.isArray(value);
+var count2 = (value) => typeof value === "number" && Number.isFinite(value) && value >= 0 ? value : 0;
+function countsFrom(value) {
+  if (!isRecord11(value)) return null;
+  const cost = typeof value.providerCostEstimate === "number" && Number.isFinite(value.providerCostEstimate) && value.providerCostEstimate > 0 && value.providerCostEstimate < 1e3 ? value.providerCostEstimate : void 0;
+  return { input: count2(value.input), output: count2(value.output), cached: Math.min(count2(value.cached), count2(value.input)), events: count2(value.events), ...cost !== void 0 ? { providerCostEstimate: cost } : {} };
+}
+var effectiveTokens = (counts) => counts.input - counts.cached + counts.cached * 0.1 + counts.output;
+function measuredUsd(counts, price3) {
+  if (!price3 || price3.priceIn === null && price3.priceOut === null) return null;
+  const input = (counts.input - counts.cached + counts.cached * 0.1) * (price3.priceIn ?? 0);
+  return Math.round((input + counts.output * (price3.priceOut ?? 0)) / 1e6 * 1e4) / 1e4;
+}
+var MAX_CALLS_PER_MINUTE = 24;
+var UsageMeter = class {
+  mode = "probing";
+  host;
+  now;
+  calls = [];
+  summaries = /* @__PURE__ */ new Map();
+  cards = /* @__PURE__ */ new Map();
+  finished = /* @__PURE__ */ new Set();
+  pending = /* @__PURE__ */ new Map();
+  refusedAt = 0;
+  constructor(host, now = Date.now) {
+    this.host = host;
+    this.now = now;
+  }
+  allowed() {
+    const now = this.now();
+    if (this.mode === "unsupported" && now - this.refusedAt < 30 * 6e4) return false;
+    while (this.calls.length && now - this.calls[0] > 6e4) this.calls.shift();
+    if (this.calls.length >= MAX_CALLS_PER_MINUTE) return false;
+    this.calls.push(now);
+    return true;
+  }
+  call(method, params) {
+    const key = `${method}:${JSON.stringify(params)}`;
+    let pending = this.pending.get(key);
+    if (!pending) {
+      pending = this.host.callHost(method, params).then((answer) => {
+        if (!isRecord11(answer) || (method === "usage.summary" ? !Array.isArray(answer.rows) : typeof answer.measured !== "boolean")) {
+          this.mode = "failing";
+          throw new Error(`${method}: unknown answer`);
+        }
+        this.mode = "ready";
+        return answer;
+      }, (error) => {
+        if (unsupportedError(error)) {
+          this.mode = "unsupported";
+          this.refusedAt = this.now();
+        }
+        throw error;
+      }).finally(() => this.pending.delete(key));
+      this.pending.set(key, pending);
+    }
+    return pending;
+  }
+  /** Per-provider counts of this plugin's cards since `since` (ms); cached 30 s; null when not measured here. */
+  async byProviderSince(since, deadlineMs = 800) {
+    const key = String(Math.floor(since / 1e3));
+    const cached = this.summaries.get(key);
+    const now = this.now();
+    if (cached && now - cached.at <= 3e4) return cached.rows;
+    if (since >= now || now - since > 30 * 24 * 36e5) return null;
+    if (!this.pending.has(`usage.summary:${JSON.stringify({ since, groupBy: ["provider"] })}`) && !this.allowed()) return cached?.rows ?? null;
+    const read2 = this.call("usage.summary", { since, groupBy: ["provider"] }).then((answer) => {
+      const rows = /* @__PURE__ */ new Map();
+      if (isRecord11(answer) && Array.isArray(answer.rows)) for (const row of answer.rows.slice(0, 64)) {
+        if (!isRecord11(row) || typeof row.provider !== "string") continue;
+        const counts = countsFrom(row);
+        if (counts) rows.set(row.provider, counts);
+      }
+      this.summaries.set(key, { at: this.now(), rows });
+      while (this.summaries.size > 16) this.summaries.delete(this.summaries.keys().next().value);
+      return rows;
+    });
+    read2.catch(() => void 0);
+    return await within2(read2, deadlineMs) ?? cached?.rows ?? null;
+  }
+  /** The cached answer for a card (no read), or null. */
+  peekCard(cardId) {
+    const entry = this.cards.get(cardId);
+    return entry && entry.measured ? entry : null;
+  }
+  /** The card ended: its last read after this stays (until the card closes). */
+  ended(cardId) {
+    this.finished.add(cardId);
+    while (this.finished.size > 2048) this.finished.delete(this.finished.values().next().value);
+  }
+  closed(cardId) {
+    this.cards.delete(cardId);
+    this.finished.delete(cardId);
+  }
+  /** Reads the cards whose answers are old (60 s; a finished card once more), within the call budget and deadline. */
+  async refreshCards(ids, deadlineMs = 1200) {
+    const now = this.now();
+    const due = ids.filter((id) => {
+      const entry = this.cards.get(id);
+      if (!entry) return true;
+      if (this.finished.has(id)) return entry.at < now - 6e4 && !("done" in entry);
+      return now - entry.at > 6e4;
+    }).slice(0, 8);
+    const reads = due.map((id) => {
+      if (!this.allowed()) return Promise.resolve();
+      return this.call("usage.session", { cardId: id }).then((answer) => {
+        const value = isRecord11(answer) ? answer : {};
+        const totals = value.measured === true ? countsFrom(value.totals) : null;
+        if (!totals) {
+          this.cards.set(id, { measured: false, at: this.now() });
+          return;
+        }
+        const models = Array.isArray(value.models) ? value.models.slice(0, 16).map((entry) => {
+          const counts = countsFrom(entry);
+          const model = isRecord11(entry) && typeof entry.model === "string" && entry.model.length <= 120 ? entry.model : null;
+          return counts ? { ...counts, model } : null;
+        }).filter((entry) => entry !== null) : [];
+        const usage = { measured: true, totals, models, at: this.now(), ...this.finished.has(id) ? { done: true } : {} };
+        this.cards.set(id, usage);
+        while (this.cards.size > 1024) this.cards.delete(this.cards.keys().next().value);
+      }, () => void 0);
+    });
+    await within2(Promise.all(reads), deadlineMs);
+  }
+};
+
 // src/route/service.ts
 var ROUTE_STORAGE_KEY = "routing";
 var ROUTE_TOOLS = ["route", "pick_route", "route_outcome"];
@@ -15104,17 +15687,17 @@ function parseDigest(value) {
   }
   return clis.length || accounts.length ? { clis, accounts } : null;
 }
-var clean3 = (value, max) => typeof value === "string" ? value.replace(/[\u0000-\u001f\u007f]+/gu, " ").trim().slice(0, max) : "";
-var isRecord10 = (value) => !!value && typeof value === "object" && !Array.isArray(value);
+var clean4 = (value, max) => typeof value === "string" ? value.replace(/[\u0000-\u001f\u007f]+/gu, " ").trim().slice(0, max) : "";
+var isRecord12 = (value) => !!value && typeof value === "object" && !Array.isArray(value);
 var strings2 = (value, max, length = 200) => Array.isArray(value) ? value.filter((item) => typeof item === "string" && item.length > 0 && item.length <= length).slice(0, max) : [];
 function providersFrom(input) {
-  const raw = Array.isArray(input) ? input : isRecord10(input) && Array.isArray(input.providers) ? input.providers : null;
+  const raw = Array.isArray(input) ? input : isRecord12(input) && Array.isArray(input.providers) ? input.providers : null;
   if (!raw) return { list: [], given: false };
   const list = [];
   for (const candidate of raw.slice(0, 16)) {
-    if (!isRecord10(candidate) || typeof candidate.id !== "string" || !/^[a-z0-9-]{1,40}$/u.test(candidate.id)) continue;
-    const model = isRecord10(candidate.model) ? candidate.model : null;
-    const plugins = Array.isArray(candidate.launchOptions) ? candidate.launchOptions.filter(isRecord10).map((entry) => entry.pluginId).filter((id) => typeof id === "string" && id.length <= 80).slice(0, 16) : void 0;
+    if (!isRecord12(candidate) || typeof candidate.id !== "string" || !/^[a-z0-9-]{1,40}$/u.test(candidate.id)) continue;
+    const model = isRecord12(candidate.model) ? candidate.model : null;
+    const plugins = Array.isArray(candidate.launchOptions) ? candidate.launchOptions.filter(isRecord12).map((entry) => entry.pluginId).filter((id) => typeof id === "string" && id.length <= 80).slice(0, 16) : void 0;
     list.push({
       id: candidate.id,
       ...typeof candidate.installed === "boolean" || candidate.installed === null ? { installed: candidate.installed } : {},
@@ -15131,14 +15714,14 @@ function providersFrom(input) {
   return { list, given: raw.length > 0 && list.length > 0 };
 }
 function accountRowsFrom(input) {
-  const raw = Array.isArray(input) ? input : isRecord10(input) && Array.isArray(input.routes) ? input.routes : [];
+  const raw = Array.isArray(input) ? input : isRecord12(input) && Array.isArray(input.routes) ? input.routes : [];
   const rows = [];
   for (const candidate of raw.slice(0, 48)) {
-    if (!isRecord10(candidate)) continue;
+    if (!isRecord12(candidate)) continue;
     const { provider, accountId, model, endpoint, state } = candidate;
     if (typeof provider !== "string" || !/^[a-z0-9-]{1,40}$/u.test(provider) || typeof accountId !== "string" || !/^[A-Za-z0-9._-]{1,64}$/u.test(accountId)) continue;
     if (typeof model !== "string" || !model || model.length > 200 || typeof endpoint !== "string" || !/^[A-Za-z0-9.:[\]-]{1,120}$/u.test(endpoint) || typeof state !== "string" || state.length > 40) continue;
-    const options = isRecord10(candidate.launchOptions) && isRecord10(candidate.launchOptions["canvastty-accounts"]) ? candidate.launchOptions["canvastty-accounts"] : null;
+    const options = isRecord12(candidate.launchOptions) && isRecord12(candidate.launchOptions["canvastty-accounts"]) ? candidate.launchOptions["canvastty-accounts"] : null;
     const launch = options && options.account === accountId ? { "canvastty-accounts": { account: accountId, effort: typeof options.effort === "string" && /^[a-z]{1,12}$/u.test(options.effort) ? options.effort : "default", trustFolder: false } } : void 0;
     const quota = accountQuotaFrom(candidate.quota);
     rows.push({
@@ -15148,15 +15731,15 @@ function accountRowsFrom(input) {
       endpoint,
       state,
       ...quota ? { quota } : {},
-      ...typeof candidate.account === "string" ? { account: clean3(candidate.account, 60) } : {},
-      ...typeof candidate.reason === "string" ? { reason: clean3(candidate.reason, 160) } : {},
+      ...typeof candidate.account === "string" ? { account: clean4(candidate.account, 60) } : {},
+      ...typeof candidate.reason === "string" ? { reason: clean4(candidate.reason, 160) } : {},
       ...launch ? { launchOptions: launch } : {}
     });
   }
   return rows;
 }
 function accountQuotaFrom(value) {
-  if (!isRecord10(value)) return void 0;
+  if (!isRecord12(value)) return void 0;
   const states = ["ok", "low", "exhausted", "presumed-reset", "unknown", "stale"];
   const state = states.find((entry) => entry === value.state);
   if (!state) return void 0;
@@ -15167,9 +15750,9 @@ function accountQuotaFrom(value) {
     remainingPercent: percent2,
     resetsAt: time2(value.resetsAt),
     observedAt: time2(value.observedAt),
-    source: clean3(value.source, 40) || null,
+    source: clean4(value.source, 40) || null,
     confidence: value.confidence === "exact" || value.confidence === "estimated" ? value.confidence : "none",
-    note: clean3(value.note, 160)
+    note: clean4(value.note, 160)
   };
 }
 var optionRecord = (c, decision, now) => ({
@@ -15198,6 +15781,12 @@ var RouteService = class {
   limits = null;
   /** The last list_routes rows an orchestrator passed (for the page), without keys or paths. */
   accountsSeen = null;
+  /** Accounts' pools as last read through plugins.request. */
+  poolsSeen = null;
+  /** Measured use per CLI since its windows were read (filled before each decision). */
+  measured = /* @__PURE__ */ new Map();
+  /** Environments subagents may use (list_providers / providers.list), by name only. */
+  environments = null;
   options;
   now;
   random;
@@ -15236,7 +15825,7 @@ var RouteService = class {
       const parsed = typeof kept.receivedAt === "number" ? parseLimits(kept.snapshot, kept.receivedAt) : null;
       if (parsed) this.limits = { ...parsed, source: "saved" };
       if (Array.isArray(kept.events)) for (const event of kept.events.slice(-MAX_QUOTA_EVENTS)) {
-        if (isRecord10(event) && typeof event.at === "number" && typeof event.provider === "string" && typeof event.kind === "string" && typeof event.note === "string" && ["early-reset", "reset", "exhausted", "recovered", "limit-exit"].includes(event.kind)) this.quotaEvents.push({ at: event.at, provider: clean3(event.provider, 40), kind: event.kind, note: clean3(event.note, 400) });
+        if (isRecord12(event) && typeof event.at === "number" && typeof event.provider === "string" && typeof event.kind === "string" && typeof event.note === "string" && ["early-reset", "reset", "exhausted", "recovered", "limit-exit"].includes(event.kind)) this.quotaEvents.push({ at: event.at, provider: clean4(event.provider, 40), kind: event.kind, note: clean4(event.note, 400) });
       }
     } catch {
     }
@@ -15308,8 +15897,15 @@ var RouteService = class {
     if (!read2) return 0;
     return this.records.all().filter((record4) => {
       const option = record4.spawned ? record4.options[record4.spawned.option] : void 0;
-      return !!option && record4.spawned.at >= read2 && option.cli === cli && (option.kind === "subscription" || option.kind === "cli-default");
+      return !!option && record4.spawned.at >= read2 && option.cli === cli && (option.kind === "subscription" && !option.signIn.startsWith("pool:") || option.kind === "cli-default");
     }).length;
+  }
+  /** The route a subagent was started on (model, plan or price, estimate), for the agent tree; null if not routed. */
+  routeOf(sessionId) {
+    const record4 = this.records.bySession(sessionId);
+    const option = record4?.spawned ? record4.options[record4.spawned.option] : void 0;
+    if (!record4 || !option || record4.spawned.session !== sessionId.slice(0, 8)) return null;
+    return { model: option.model, identity: option.identity, kind: option.kind, label: option.label, costBasis: option.costBasis, estimate: option.estimateData ?? null };
   }
   launches(planId, windowMs) {
     const since = this.now() - windowMs;
@@ -15324,7 +15920,7 @@ var RouteService = class {
   }
   /** The decision for a task, without recording it (tests and the offline replay use it too). */
   async decideFor(caller, input) {
-    const task = clean3(input.task, 4e3);
+    const task = clean4(input.task, 4e3);
     if (!task) return { error: "Give the subagent's task in `task`." };
     let decision = null;
     try {
@@ -15334,7 +15930,10 @@ var RouteService = class {
     }
     const source = decision ? "jev" : "rules";
     const view = turnView(decision ?? { difficulty: ruleDifficulty(task), strong: false }, source, task, { role: "subagent" });
-    const { providers, accountRows } = this.inputsFor(caller.id, input);
+    const peers = await this.peerInputs();
+    const { providers, accountRows } = this.inputsFor(caller.id, input, peers);
+    const passedEnvironments = environmentsFrom(input.providers);
+    if (passedEnvironments.length) this.environments = { at: this.now(), offers: passedEnvironments };
     this.accountQuotaSeen(accountRows);
     if (accountRows.length) this.accountsSeen = { at: this.now(), rows: accountRows.map(({ launchOptions: _drop, ...row }) => row) };
     const cardClass = this.options.cardClass(caller.id);
@@ -15371,8 +15970,10 @@ var RouteService = class {
       },
       stats,
       launchesSinceRead: (cli) => this.launchesSinceRead(cli),
+      spentSinceRead: (cli) => this.measured.get(cli) ?? null,
+      pools: peers.pools,
       tokenFactor: (identity) => this.records.tokenFactor(identity, (level) => TASK_TOKENS[level].input + TASK_TOKENS[level].output),
-      prefer: clean3(input.prefer, 200) || null,
+      prefer: clean4(input.prefer, 200) || null,
       orchestrate: input.orchestrate === true,
       explore: { roll: this.random(), retired, highRisk: ruleDifficulty(task) === "hard" }
     });
@@ -15408,6 +16009,7 @@ var RouteService = class {
         return c && c.until > now ? c : null;
       },
       launchesSinceRead: (id) => this.launchesSinceRead(id),
+      spentSinceRead: (id) => this.measured.get(id) ?? null,
       stats: this.records.routeStats(),
       prefer: cli,
       orchestrate,
@@ -15420,29 +16022,36 @@ var RouteService = class {
       if (why) return { exhausted: why };
     }
     if (!best) return { model: null, effort: null, why: "no declared plan: the CLI's own default model" };
-    return { model: best.spawn.model ?? null, effort: best.spawn.effort ?? null, why: best.kind === "subscription" ? `${best.label}: ${best.model ?? "default"}${best.effort ? `@${best.effort}` : ""}` : "the CLI's own default model" };
+    return { model: best.spawn.model ?? null, effort: best.spawn.effort ?? null, ...best.kind === "subscription" ? { label: best.label } : {}, why: best.kind === "subscription" ? `${best.label}: ${best.model ?? "default"}${best.effort ? `@${best.effort}` : ""}` : "the CLI's own default model" };
   }
   /**
    * "Start with Auto (Jev)" (core B8): where a top-level orchestrator runs. The same engine as `route`, for a task
-   * that must orchestrate, among the routes the person declared (subscriptions and coding plans, by their CLI) and the
-   * model accounts an orchestrator's list_routes showed in the last day (Accounts' state as it was then; Accounts
-   * still checks the account at launch). `clis`: only these CLIs; `ownSignIn`: only a CLI's own sign-in (a server
-   * gets nothing from this computer). Best first, never an OpenRouter route (the engine drops those).
+   * that must orchestrate, among the routes the person declared (subscriptions and coding plans, by their CLI), the
+   * CLIs CanvasTTY lists as installed and signed in (`providers.list`), and Accounts' model accounts and pools as
+   * Accounts shares them now (`plugins.request`; Accounts still checks the account at launch). On a core without
+   * those reads: the declared plans and the accounts an orchestrator's list_routes showed in the last day.
+   * `clis`: only these CLIs; `ownSignIn`: only a CLI's own sign-in (a server gets nothing from this computer). Best
+   * first, never an OpenRouter route (the engine drops those).
    */
-  orchestratorRoutes(view, cardClass, limit2 = {}) {
-    const now = this.now();
+  async orchestratorRoutes(view, cardClass, limit2 = {}) {
     const allowed = (cli) => !limit2.clis || limit2.clis.includes(cli);
-    const rows = limit2.ownSignIn || !this.accountsSeen || now - this.accountsSeen.at > 24 * 36e5 ? [] : this.accountsSeen.rows.filter((row) => allowed(row.provider)).map((row) => ({ ...row, launchOptions: { "canvastty-accounts": { account: row.accountId, effort: "default", trustFolder: false } } }));
-    const clis = [.../* @__PURE__ */ new Set([...this.settings.plans.filter((plan3) => plan3.allow !== "never").map((plan3) => plan3.cli), ...rows.map((row) => row.provider), ...limit2.clis ?? []])].filter(allowed);
+    const peers = await this.peerInputs();
+    const now = this.now();
+    const fallbackRows = !this.accountsSeen || now - this.accountsSeen.at > 24 * 36e5 ? [] : this.accountsSeen.rows;
+    const rows = limit2.ownSignIn ? [] : (peers.rows ?? fallbackRows).filter((row) => allowed(row.provider) && row.provider !== void 0).map((row) => ({ ...row, launchOptions: row.launchOptions ?? { "canvastty-accounts": { account: row.accountId, effort: "default", trustFolder: false } } }));
+    const pools = limit2.ownSignIn ? [] : peers.pools.filter((pool) => allowed(pool.cli));
+    const listed = peers.providers?.filter((entry) => allowed(entry.id)) ?? null;
+    const clis = listed ? listed.map((entry) => entry.id) : [.../* @__PURE__ */ new Set([...this.settings.plans.filter((plan3) => plan3.allow !== "never").map((plan3) => plan3.cli), ...rows.map((row) => row.provider), ...pools.map((pool) => pool.cli), ...limit2.clis ?? []])].filter(allowed);
     if (!clis.length) return { candidates: [], dropped: [] };
     const { catalog, index } = this.options.catalog();
     const decision = decide({
       view,
       preference: this.options.preference(),
       settings: this.settings,
-      providers: clis.map((id) => ({ id, installed: true, available: true, subagent: true, orchestrator: true })),
+      providers: listed ?? clis.map((id) => ({ id, installed: true, available: true, subagent: true, orchestrator: true })),
       providersGiven: true,
       accountRows: rows,
+      pools,
       callerProvider: null,
       cardClass,
       mode: this.options.dataClassMode(),
@@ -15458,22 +16067,82 @@ var RouteService = class {
         return c && c.until > now ? c : null;
       },
       launchesSinceRead: (id) => this.launchesSinceRead(id),
+      spentSinceRead: (id) => this.measured.get(id) ?? null,
       stats: this.records.routeStats(),
       prefer: null,
       orchestrate: true,
       explore: { roll: 1, retired: /* @__PURE__ */ new Set(), highRisk: true }
     });
     const seen = /* @__PURE__ */ new Set();
-    const candidates = [decision.top, ...decision.alternatives, ...decision.groups.flat()].filter((c) => !!c && !seen.has(c.key) && !!seen.add(c.key)).filter((c) => !limit2.ownSignIn || c.kind === "subscription" || c.kind === "cli-default");
+    const candidates = [decision.top, ...decision.alternatives, ...decision.groups.flat()].filter((c) => !!c && !seen.has(c.key) && !!seen.add(c.key)).filter((c) => !limit2.ownSignIn || c.kind === "subscription" && !c.signIn.startsWith("pool:") || c.kind === "cli-default");
     const dropped = [...new Set(decision.dropped.map((entry) => `${entry.cli}${entry.model ? ` ${entry.model}` : ""}: ${entry.reason}`))].slice(0, 4);
     return { candidates, dropped };
+  }
+  /**
+   * What the Assistant reads itself before a decision (each where the core and the person allow it, within a short
+   * deadline, else the last answer): Accounts' routes and pools, CanvasTTY's provider list and environments, and the
+   * measured use of each CLI's own sign-in since its windows were read.
+   */
+  async peerInputs() {
+    const [accounts, listed] = await Promise.all([
+      this.options.accounts ? this.options.accounts.routes() : Promise.resolve(null),
+      this.options.providersFeed ? this.options.providersFeed.list() : Promise.resolve(null),
+      this.measureSpend()
+    ]);
+    if (accounts) {
+      this.poolsSeen = { at: accounts.at, pools: accounts.pools };
+      if (accounts.rows.length) this.accountsSeen = { at: accounts.at, rows: accounts.rows.map(({ launchOptions: _drop, ...row }) => row) };
+    }
+    if (listed) this.environments = { at: listed.at, offers: listed.environments };
+    return { rows: accounts ? accounts.rows : null, pools: accounts?.pools ?? [], providers: listed?.providers ?? null };
+  }
+  /**
+   * Measured tokens of this plugin's cards per CLI since that CLI's windows were read, as a share of its window (the
+   * person's expected share per medium task ÷ a medium task's tokens). Where the core does not measure usage the map
+   * stays empty and the per-launch estimate applies.
+   */
+  async measureSpend() {
+    const meter = this.options.usage;
+    if (!meter || !this.limits) {
+      this.measured.clear();
+      return;
+    }
+    const reads = /* @__PURE__ */ new Map();
+    for (const entry of this.limits.providers) {
+      if (entry.state !== "available" || entry.fetchedAt === null) continue;
+      reads.set(entry.fetchedAt, [...reads.get(entry.fetchedAt) ?? [], entry.provider]);
+    }
+    const perTask = TASK_TOKENS.medium.input + TASK_TOKENS.medium.output;
+    const share = this.settings.expectedShare.medium;
+    const next = /* @__PURE__ */ new Map();
+    let measuredAny = false;
+    for (const [since, clis] of [...reads].slice(0, 4)) {
+      const rows = await meter.byProviderSince(since);
+      if (!rows) continue;
+      measuredAny = true;
+      for (const cli of clis) {
+        const counts = rows.get(cli);
+        const tokens3 = counts ? effectiveTokens(counts) : 0;
+        next.set(cli, { tokens: tokens3, percent: Math.round(tokens3 * share / perTask * 1e3) / 1e3 });
+      }
+    }
+    if (!measuredAny && meter.mode !== "ready") {
+      this.measured.clear();
+      return;
+    }
+    this.measured.clear();
+    for (const [cli, spend] of next) this.measured.set(cli, spend);
+  }
+  /** Environments subagents may use now (names only), when the person turned servers on; [] otherwise. */
+  serverOffers() {
+    return this.settings.serversOn && this.environments ? this.environments.offers : [];
   }
   /**
    * What the orchestrator passed, or what it passed earlier: the full list_providers and list_routes are large, so a
    * card's last full lists are kept (memory, 30 min) and a later call may send only the task, or a `digest` such as
    * "claude:ok codex:signed_out opencode @glm-53" (CLIs with their sign-in, `@` a ready account id from list_routes).
    */
-  inputsFor(callerId, input) {
+  inputsFor(callerId, input, peers = { rows: null, providers: null }) {
     const now = this.now();
     for (const [id, kept2] of this.kept) if (now - kept2.at > KEEP_MS) this.kept.delete(id);
     const full = providersFrom(input.providers);
@@ -15485,15 +16154,15 @@ var RouteService = class {
       kept.at = now;
       this.kept.set(callerId, kept);
     }
-    let providers = full.given ? full : kept.providers ? { list: kept.providers, given: true } : { list: [], given: false };
-    let accountRows = rows.length ? rows : kept.rows ?? [];
+    let providers = full.given ? full : kept.providers ? { list: kept.providers, given: true } : peers.providers ? { list: peers.providers, given: true } : { list: [], given: false };
+    let accountRows = peers.rows ?? (rows.length ? rows : kept.rows ?? []);
     const digest = parseDigest(input.digest);
     if (digest) {
       if (digest.clis.length) {
         const known = new Map(providers.list.map((entry) => [entry.id, entry]));
         providers = { list: digest.clis.map(({ id, signIn }) => ({ ...known.get(id) ?? { id, installed: true, available: true, subagent: true }, ...signIn ? { signIn } : {} })), given: true };
       }
-      if (digest.accounts.length) {
+      if (digest.accounts.length && !peers.rows) {
         const pool = [...accountRows, ...this.accountsSeen && now - this.accountsSeen.at <= KEEP_MS ? this.accountsSeen.rows : []];
         accountRows = pool.filter((row, i) => digest.accounts.includes(row.accountId) && pool.findIndex((other) => other.accountId === row.accountId && other.provider === row.provider) === i).map((row) => ({ ...row, state: "ready", launchOptions: row.launchOptions ?? { "canvastty-accounts": { account: row.accountId, effort: "default", trustFolder: false } } }));
       }
@@ -15502,14 +16171,23 @@ var RouteService = class {
     return { providers, accountRows };
   }
   async route(caller, input, name = "route") {
-    if (!clean3(input.task, 4e3)) return { content: "Give the subagent's task in `task`.", isError: true };
+    if (!clean4(input.task, 4e3)) return { content: "Give the subagent's task in `task`.", isError: true };
     if (!this.options.enabled()) return { content: "Automatic routing is off in the Assistant settings: choose the provider and model yourself." };
     const decided = await this.decideFor(caller, input);
     if ("error" in decided) return { content: decided.error, isError: true };
     const { decision, view, source, providers, accountRows } = decided;
     const now = this.now();
+    const servers = input.orchestrate === true ? [] : this.serverPlacements(decision.top?.cli ?? null, caller.id);
+    for (const entry of servers) {
+      const bound = this.options.bindSpawn?.(caller.id, entry.spawn, randomUUID3().slice(0, 8), false);
+      if (bound) entry.spawn = bound;
+    }
+    const serverLines = servers.map((entry) => `On your server ${entry.server} (${entry.spawn.provider}, its own sign-in there): spawn_agent ${JSON.stringify(entry.spawn)}.`);
     if (!decision.top) {
       const reasons = [...new Set(decision.dropped.map((entry) => `${entry.cli}${entry.model ? ` ${entry.model}` : ""}: ${entry.reason}`))].slice(0, 6);
+      if (servers.length) return { content: `No route on this computer is usable now${reasons.length ? ` (${reasons.join("; ")})` : ""}.
+${serverLines.join("\n")}
+${JSON.stringify({ servers })}` };
       return { content: `No route is usable now${reasons.length ? `: ${reasons.join("; ")}` : ""}. Call list_providers and choose a provider yourself, or ask the person.` };
     }
     const options = [decision.top, ...decision.alternatives];
@@ -15538,8 +16216,8 @@ var RouteService = class {
     }
     const now2 = this.now();
     for (const [id, kept] of this.tasks) if (now2 - kept.at > MATCH_MS) this.tasks.delete(id);
-    const cwd = clean3(input.cwd, 4096);
-    this.tasks.set(record4.id, { text: clean3(input.task, 2e3), cwd: cwd ? trimSlash(cwd) : null, at: now2 });
+    const cwd = clean4(input.cwd, 4096);
+    this.tasks.set(record4.id, { text: clean4(input.task, 2e3), cwd: cwd ? trimSlash(cwd) : null, at: now2 });
     while (this.tasks.size > 64) this.tasks.delete(this.tasks.keys().next().value);
     const compact = input.compact === true || input.compact !== false && name === "pick_route";
     if (compact) {
@@ -15549,8 +16227,9 @@ var RouteService = class {
           `${short2(decision.top, 0)}${decision.explored ? " (exploring a new model)" : ""}.`,
           ...decision.alternatives.map((c, i) => `Or ${i + 1}: ${short2(c, i + 1)}.`),
           `Pass spawn to spawn_agent unchanged (add title, cwd, prompt). Then route_outcome {decisionId:"${record4.id}"}.`,
+          ...serverLines,
           ...Array.isArray(input.providers) || Array.isArray(input.accountRoutes) ? [`Next time send only task: your lists are kept for 30 min (or send digest "${digestOf(providers, accountRows)}").`] : [],
-          JSON.stringify({ decisionId: record4.id, spawn: decision.top.spawn, kind: decision.top.kind, alternatives: decision.alternatives.map((c) => ({ spawn: c.spawn, kind: c.kind })) })
+          JSON.stringify({ decisionId: record4.id, spawn: decision.top.spawn, kind: decision.top.kind, alternatives: decision.alternatives.map((c) => ({ spawn: c.spawn, kind: c.kind })), ...servers.length ? { servers } : {} })
         ].join("\n")
       };
     }
@@ -15561,6 +16240,7 @@ var RouteService = class {
       `Estimate: ${top.estimate}.${decision.explored ? " (A new model, tried on a small share of easy tasks; its outcome is counted.)" : ""}`,
       `Pass these to spawn_agent (with your own title, cwd and prompt; do not add a model or other launch options): ${JSON.stringify(decision.top.spawn)}.`,
       ...decision.alternatives.map((c, i) => `Alternative ${i + 1}: ${record4.options[i + 1].why}; spawn_agent ${JSON.stringify(c.spawn)}.`),
+      ...serverLines,
       `Task read as ${view.type}, ${view.level} (${source === "jev" ? "by the decision model" : "by word rules"}); strategy ${decision.strategy}.`,
       `When the subagent has ended, call route_outcome with decisionId "${record4.id}" and what wait_for_agent or get_agent_result said (status and exitLines).`
     ];
@@ -15576,16 +16256,45 @@ ${JSON.stringify({
         estimate: top.estimate,
         route: top.route,
         alternatives: decision.alternatives.map((c, i) => answer(c, i + 1)),
-        dropped: decision.dropped.length
+        dropped: decision.dropped.length,
+        ...servers.length ? { servers } : {}
       })}`
     };
   }
+  /**
+   * Servers for a subagent (autopilot, servers on): the person's declared servers that CanvasTTY offers subagents
+   * (list_providers' environments, by name only), with room under both caps, on a CLI signed in there (the top
+   * route's CLI first). Nothing from this computer reaches a server: the spawn uses that CLI's own sign-in there.
+   */
+  serverPlacements(preferCli, callerId) {
+    const offers = this.serverOffers();
+    if (!offers.length) return [];
+    void callerId;
+    const out = [];
+    for (const declared of this.settings.servers) {
+      for (const offer of offers) {
+        if (!offer.capBy) continue;
+        const listed = offer.servers.find((server) => server.name === declared.label);
+        if (!listed) continue;
+        const running = Math.max(listed.running, this.options.serverLoad?.(declared.label) ?? 0);
+        if (running >= Math.min(declared.maxParallel, offer.maxParallel)) continue;
+        const clis = declared.clis.filter((cli2) => !offer.providers || offer.providers.includes(cli2));
+        const cli = preferCli && clis.includes(preferCli) ? preferCli : clis[0];
+        if (!cli) continue;
+        const launchOptions = { "canvastty-assistant": { model: "off" } };
+        out.push({ server: declared.label, spawn: { provider: cli, launchOptions, environment: { pluginId: offer.pluginId, kind: offer.kind, options: { [offer.capBy]: declared.label } } } });
+        break;
+      }
+      if (out.length >= 2) break;
+    }
+    return out;
+  }
   outcome(caller, input) {
-    const id = clean3(input.decisionId, 40);
-    const session = clean3(input.sessionId, 80);
+    const id = clean4(input.decisionId, 40);
+    const session = clean4(input.sessionId, 80);
     const record4 = (id ? this.records.get(id) : void 0) ?? (session ? this.records.bySession(session) : void 0);
     if (!record4 || record4.card !== caller.id.slice(0, 8)) return { content: "No route decision of yours with that decisionId (or sessionId).", isError: true };
-    const status = clean3(input.status, 20).toLowerCase();
+    const status = clean4(input.status, 20).toLowerCase();
     if (!["done", "failed", "error", "cancelled", "canceled", "timeout", "idle", "exited"].includes(status)) return { content: "status must be done, failed, cancelled or timeout (from wait_for_agent / get_agent_result).", isError: true };
     const result = classifyOutcome(status === "timeout" ? "failed" : status, strings2(input.exitLines, 40, 400));
     const ok = typeof input.ok === "boolean" ? input.ok && result === "done" : void 0;
@@ -15607,12 +16316,39 @@ ${JSON.stringify({
    */
   cool(option, stated = null) {
     const now = this.now();
-    const quota = option.kind === "subscription" || option.kind === "cli-default" ? this.limits?.providers.find((entry) => entry.provider === option.cli) : void 0;
+    const quota = option.kind === "subscription" && !option.signIn.startsWith("pool:") || option.kind === "cli-default" ? this.limits?.providers.find((entry) => entry.provider === option.cli) : void 0;
     const windowReset = quota?.windows.map((window) => window.resetsAt).filter((at) => at !== null && at > now).sort((a, b) => a - b)[0];
     const reset = stated !== null && stated > now ? stated : windowReset;
     const until = reset !== void 0 && reset - now <= MAX_COOLDOWN_MS ? reset : now + QUOTA_COOLDOWN_MS;
     this.cooldowns.set(option.signIn, { until, at: now, reason: `it hit a usage limit; resting until ${new Date(until).toISOString().slice(11, 16)} UTC` });
     this.event({ at: now, provider: option.cli, kind: "limit-exit", note: `${option.label}: a child stopped at a usage limit; resting until ${new Date(until).toISOString().slice(11, 16)} UTC${stated !== null ? " (time from its message)" : ""}` });
+  }
+  /**
+   * CanvasTTY's `canvastty.activity` `limit.exhausted` (core: provider-wide, the default login, `accountId: "default"`,
+   * no card): that CLI's own sign-in routes (its default and the subscription plans declared on it) rest until the
+   * window's reset (when the event or a read names it; at most 24 h), else 5 min. Pools and model accounts are other
+   * sign-ins and keep running. A later read with room or a reset ends the rest, as for a limit exit.
+   */
+  limitExhausted(event) {
+    if (!isRecord12(event) || event.type !== "limit.exhausted" || typeof event.provider !== "string" || !/^[a-z0-9-]{1,40}$/u.test(event.provider)) return false;
+    if (event.accountId !== void 0 && event.accountId !== "default") return false;
+    const now = this.now();
+    const cli = event.provider;
+    const window = isRecord12(event.window) ? event.window : {};
+    const label2 = clean4(window.label, 40) || clean4(window.id, 60) || "a window";
+    const stated = typeof event.resetAt === "number" && Number.isFinite(event.resetAt) && event.resetAt > now ? event.resetAt : null;
+    const windowReset = this.limits?.providers.find((entry) => entry.provider === cli)?.windows.map((w) => w.resetsAt).filter((at) => at !== null && at > now).sort((a, b) => a - b)[0];
+    const reset = stated ?? windowReset;
+    const until = reset !== void 0 && reset - now <= MAX_COOLDOWN_MS ? reset : now + QUOTA_COOLDOWN_MS;
+    const keys = [`cli:${cli}`, ...this.settings.plans.filter((plan3) => plan3.cli === cli && plan3.kind === "subscription").map((plan3) => `plan:${plan3.id}`)];
+    const reason = `CanvasTTY saw its ${label2} limit used up; resting until ${new Date(until).toISOString().slice(11, 16)} UTC`;
+    for (const key of keys) {
+      const current = this.cooldowns.get(key);
+      if (current && current.until >= until) continue;
+      this.cooldowns.set(key, { until, at: now, reason });
+    }
+    this.event({ at: now, provider: cli, kind: "exhausted", note: `${cli}'s own sign-in: ${label2} used up (CanvasTTY); its routes rest until ${new Date(until).toISOString().slice(11, 16)} UTC${stated !== null ? "" : reset !== void 0 ? " (the window's reset)" : " (5 min: no reset time known)"}` });
+    return true;
   }
   /** Ends the rests of a CLI's own sign-in routes (its subscription plans and its default) after a reset. */
   endRests(cli, why) {
@@ -15750,13 +16486,14 @@ ${JSON.stringify({
       plans: this.settings.plans.map((plan3) => ({
         id: plan3.id,
         models: plan3.models.map((model) => ({ model, ...resolveModel(plan3.cli, model, this.settings.aliases, known) })),
-        quota: plan3.kind === "subscription" ? quotaOf(this.limits?.providers.find((entry) => entry.provider === plan3.cli), plan3.reserve, now, this.launchesSinceRead(plan3.cli)) : null,
+        quota: plan3.kind === "subscription" ? quotaOf(this.limits?.providers.find((entry) => entry.provider === plan3.cli), plan3.reserve, now, this.launchesSinceRead(plan3.cli), this.measured.get(plan3.cli) ?? null) : null,
         running: this.busy(`plan:${plan3.id}`),
         launches: plan3.kind === "coding-plan" ? this.launches(plan3.id, (plan3.windowHours ?? 5) * 36e5) : null
       })),
       limits: this.limits ? { receivedAt: this.limits.receivedAt, source: this.limits.source ?? "page", providers: this.limits.providers } : null,
       quotaEvents: this.quotaEvents.slice(-10),
       accounts: this.accountsSeen,
+      pools: this.poolsSeen ? { at: this.poolsSeen.at, pools: this.poolsSeen.pools.map(({ launchOptions: _drop, ...pool }) => pool) } : null,
       cooldowns: [...this.cooldowns].filter(([, value]) => value.until > now).map(([signIn, value]) => ({ signIn, ...value })),
       recent: this.records.recent(30),
       exploration: this.records.exploration()
@@ -15812,8 +16549,8 @@ var FEED = Object.freeze({
   reprobeMs: 30 * 6e4,
   jitter: 0.15
 });
-var isRecord11 = (value) => !!value && typeof value === "object" && !Array.isArray(value);
-var errorText = (error) => error instanceof Error ? error.message : String(error);
+var isRecord13 = (value) => !!value && typeof value === "object" && !Array.isArray(value);
+var errorText2 = (error) => error instanceof Error ? error.message : String(error);
 var LimitsFeed = class {
   mode = "probing";
   /** When the service's own read last succeeded, and the last failure (for the page). */
@@ -15863,7 +16600,7 @@ var LimitsFeed = class {
   }
   /** An older core (no such host method for services) or no permission: the page path stays the only one. */
   unsupported(error) {
-    if (!/unknown host method|not allowed|does not have the limits:read|permission/iu.test(errorText(error))) return false;
+    if (!/unknown host method|not allowed|does not have the limits:read|permission/iu.test(errorText2(error))) return false;
     if (this.mode !== "page-only") this.options.host.log("info", "limits: this CanvasTTY does not let services read limits; the settings page forwards them while it is open");
     this.mode = "page-only";
     this.subscribed = false;
@@ -15878,12 +16615,12 @@ var LimitsFeed = class {
       } catch (error) {
         if (this.unsupported(error)) return false;
         this.failures++;
-        this.lastError = errorText(error).slice(0, 160);
+        this.lastError = errorText2(error).slice(0, 160);
         return false;
       }
       this.subscribed = true;
       this.mode = "core";
-      if (isRecord11(last) && last.state === "ready" && last.snapshot) this.options.sink.receiveLimits(last, "core");
+      if (isRecord13(last) && last.state === "ready" && last.snapshot) this.options.sink.receiveLimits(last, "core");
     }
     let answer;
     try {
@@ -15891,10 +16628,10 @@ var LimitsFeed = class {
     } catch (error) {
       if (this.unsupported(error)) return false;
       this.failures++;
-      this.lastError = errorText(error).slice(0, 160);
+      this.lastError = errorText2(error).slice(0, 160);
       return false;
     }
-    const outer = isRecord11(answer) ? answer : null;
+    const outer = isRecord13(answer) ? answer : null;
     if (outer && outer.state !== void 0 && outer.state !== "ready" && !("snapshot" in outer)) {
       this.mode = "core";
       this.failures++;
@@ -15920,7 +16657,7 @@ var LimitsFeed = class {
    */
   changed(params) {
     if (this.stopped) return;
-    const value = isRecord11(params) ? params : {};
+    const value = isRecord13(params) ? params : {};
     if (value.home !== void 0) return;
     this.mode = "core";
     this.subscribed = true;
@@ -16051,6 +16788,9 @@ var Bindings = class {
   setPlan(sessionId, children) {
     const card = this.autoCards.get(sessionId);
     if (card) card.maxChildren = children;
+  }
+  planOf(sessionId) {
+    return this.autoCards.get(sessionId)?.maxChildren ?? null;
   }
   running(sessionId) {
     return this.autoCards.get(sessionId)?.children.size ?? 0;
@@ -16192,16 +16932,16 @@ function ruleShape(task) {
   return { shape, parts, from: "rules", confidence: null };
 }
 function planFor(view, shape, caps) {
-  const count2 = Math.min(MAX_CHILDREN, BUCKET_COUNT[shape.parts]);
+  const count3 = Math.min(MAX_CHILDREN, BUCKET_COUNT[shape.parts]);
   const strategy = view.level === "small" ? "single-cheap" : "single-strong";
   const budgetUsd = caps.perTaskUsd;
   if (shape.shape === "single_step" && view.level !== "large") return { mode: "solo", children: 0, deepChildren: 0, strategy, budgetUsd, why: "one piece of work: do it yourself" };
   if (shape.shape === "unclear_large" || shape.parts === "seven_plus") {
-    if (view.level === "large" && shape.from === "jev") return { mode: "deep", children: Math.min(3, count2), deepChildren: Math.min(3, count2), strategy: "single-strong", budgetUsd, why: "large, with many or unnamed parts: split it, and let each part split once more" };
+    if (view.level === "large" && shape.from === "jev") return { mode: "deep", children: Math.min(3, count3), deepChildren: Math.min(3, count3), strategy: "single-strong", budgetUsd, why: "large, with many or unnamed parts: split it, and let each part split once more" };
     return { mode: "orchestrate", children: 3, deepChildren: 0, strategy, budgetUsd, why: "large or unclear: split it into at most 3 parts" };
   }
   if (shape.shape === "single_step") return { mode: "orchestrate", children: 1, deepChildren: 0, strategy, budgetUsd, why: "one large piece of work: give it to one strong subagent" };
-  return { mode: "orchestrate", children: Math.max(2, count2), deepChildren: 0, strategy, budgetUsd, why: shape.shape === "pipeline" ? "parts in order: one subagent per step, each after the one before" : "independent parts: one subagent per part, at the same time" };
+  return { mode: "orchestrate", children: Math.max(2, count3), deepChildren: 0, strategy, budgetUsd, why: shape.shape === "pipeline" ? "parts in order: one subagent per step, each after the one before" : "independent parts: one subagent per part, at the same time" };
 }
 function planText(plan3) {
   const head = plan3.mode === "solo" ? "Do this task yourself; start no subagent." : plan3.mode === "deep" ? `Split the task into at most ${plan3.children} parts; each part may split once more (route it with pick_route {orchestrate: true}).` : `Split the task into at most ${plan3.children} part${plan3.children === 1 ? "" : "s"}.`;
@@ -16255,6 +16995,7 @@ var AUTOPILOT_PROMPT = "You were started by Auto (Jev): every subagent you start
 var planTask = (value) => typeof value === "string" ? value.replace(/[\u0000-\u0009\u000b-\u001f\u007f]+/gu, " ").trim().slice(0, 2e3) : "";
 function topTargetOf(spawn, onServer) {
   const account = spawn.launchOptions[ACCOUNTS_ID]?.account;
+  if (typeof account === "string" && account.startsWith("pool:")) return onServer ? null : isOwnSignInCli(spawn.provider) ? ownTarget(spawn.model ?? null, spawn.effort ?? null) : !spawn.model && !spawn.effort ? "off" : null;
   if (typeof account === "string" && account !== "none") return onServer ? null : "off";
   if (spawn.launchOptions[ASSISTANT_ID]?.model === "auto") return onServer ? null : "auto";
   if (spawn.provider === "opencode" && spawn.model && spawn.model.includes("/")) return onServer ? null : `plan:${spawn.model}`;
@@ -16286,12 +17027,20 @@ var Assistant = class {
   routing;
   /** Limit windows read by this service where the core allows it (else the page forwards them). */
   limitsFeed;
+  /** Accounts' shared reads (routes, pools, quota) through plugins.request, after the person approved the pair. */
+  accounts;
+  /** CanvasTTY's providers.list (providers:read). */
+  providers;
+  /** CanvasTTY's measured usage of this plugin's cards (usage:read). */
+  usage;
   /** Each card's effective data class, so a subagent's can be clamped to its parent's. */
   classes = /* @__PURE__ */ new Map();
   /** Each card's triage advice, so its badge can be written again in another language. */
   triaged = /* @__PURE__ */ new Map();
   /** Auto (Jev) autopilot: Auto cards and the single-use route values their subagents launch with. */
   bindings;
+  /** Auto cards on their CLI's own sign-in: the model chosen at launch and the plan it runs on (agent tree). */
+  autoTop = /* @__PURE__ */ new Map();
   /** Leaf cards this service started on servers: the orchestrator that asked, the server, the CLI. */
   leaves = /* @__PURE__ */ new Map();
   /** Orchestrators "Start with Auto (Jev)" started: where they run. */
@@ -16361,7 +17110,14 @@ var Assistant = class {
       ...options.autoTimeouts ? { timeouts: options.autoTimeouts } : {}
     });
     this.bindings = new Bindings(options.now);
+    this.accounts = new AccountsFeed(options.host, options.now);
+    this.providers = new ProvidersFeed(options.host, options.now);
+    this.usage = new UsageMeter(options.host, options.now);
     this.routing = new RouteService({
+      accounts: this.accounts,
+      providersFeed: this.providers,
+      usage: this.usage,
+      serverLoad: (label2) => [...this.leaves.values(), ...this.started.values()].filter((entry) => entry.server === label2).length,
       bindSpawn: (callerId, spawn, decisionId, orchestrate) => this.bindSpawn(callerId, spawn, decisionId, orchestrate),
       host: options.host,
       dataDir: options.dataDir,
@@ -16396,12 +17152,24 @@ var Assistant = class {
       trustChain: () => this.harness.settings.trustChain,
       ...options.git === null ? { git: null } : {},
       suggest: (sessionId, verdict, summary) => {
-        void this.harness.setBadge(sessionId, "review", suggestionBadge(verdict, summary, this.harness.strings));
+        void this.harness.setBadge(sessionId, "review", () => suggestionBadge(verdict, summary, this.harness.strings));
       }
     });
   }
   get pageLocale() {
     return this.locale;
+  }
+  /**
+   * `canvastty.activity`: `limit.exhausted` (CanvasTTY saw the default login's window of a CLI used up, provider-wide)
+   * rests that CLI's own sign-in routes until the reset; other activity is ignored.
+   */
+  activity(params) {
+    if (this.routing.limitExhausted(params)) void this.limitsFeed.read();
+  }
+  /** A card action: the toast in the language the person used when choosing it (CanvasTTY with the locale in invoke). */
+  cardAction(actionId, sessionId, session, locale) {
+    if (locale === "en" || locale === "ru") this.setLocale(locale);
+    return this.harness.cardAction(actionId, sessionId, session);
   }
   /**
    * The language the person's pages report (CanvasTTY tells a service its locale only at start; a page's context
@@ -16414,7 +17182,7 @@ var Assistant = class {
     this.harness.setLocale(locale);
     this.auto.setLocale(locale);
     this.review.setLocale(locale);
-    for (const [sessionId, advice] of this.triaged) void this.harness.setBadge(sessionId, "triage", triageBadge(advice, this.harness.strings));
+    void this.harness.relocalize();
     return locale;
   }
   /** A card's effective data class (its launch's, else the default). */
@@ -16459,8 +17227,13 @@ var Assistant = class {
     this.harness.sessionEvent(event);
     this.routing.sessionEvent(event);
     const ended = event.type === "closed" || event.type === "exited" || session.status === "exited";
-    if (ended) this.bindings.ended(session.id);
+    if (ended) {
+      this.bindings.ended(session.id);
+      this.usage.ended(session.id);
+    }
     if (event.type === "closed") {
+      this.usage.closed(session.id);
+      this.autoTop.delete(session.id);
       this.leaves.delete(session.id);
       this.started.delete(session.id);
       this.sessions.delete(session.id);
@@ -16556,6 +17329,8 @@ var Assistant = class {
       const choice2 = await this.topLevelChoice(context.provider, task, dataClass ?? this.settings.defaultDataClass, context.sessionId, context.role);
       if ("exhausted" in choice2) return { refuse: { reason: strings3.exhausted.replace("{why}", choice2.exhausted) } };
       this.bindings.markAuto(context.sessionId);
+      this.autoTop.set(context.sessionId, { model: choice2.model, label: choice2.label ?? context.provider });
+      while (this.autoTop.size > 1024) this.autoTop.delete(this.autoTop.keys().next().value);
       return { args: ownSignInArgs(context.provider, choice2) };
     }
     if (context.provider !== "opencode") return { refuse: { reason: strings3.provider } };
@@ -16685,7 +17460,7 @@ ${JSON.stringify({ ...plan3, type: view.type, level: view.level, shape: shaped.s
     const busy = (label3) => [...this.leaves.values(), ...this.started.values()].filter((entry) => entry.server === label3).length;
     const servers = onServer ? route.servers.filter((entry) => busy(entry.label) < entry.maxParallel) : [];
     if (onServer && !servers.length) return { started: false, code: "noServer" };
-    const { candidates, dropped } = this.routing.orchestratorRoutes(view, dataClass, onServer ? { clis: [...new Set(servers.flatMap((entry) => entry.clis))], ownSignIn: true } : {});
+    const { candidates, dropped } = await this.routing.orchestratorRoutes(view, dataClass, onServer ? { clis: [...new Set(servers.flatMap((entry) => entry.clis))], ownSignIn: true } : {});
     const chosen = candidates.map((candidate2) => ({ candidate: candidate2, target: topTargetOf(candidate2.spawn, onServer) })).find((entry) => entry.target !== null);
     if (!chosen) return { started: false, code: "noRoute", ...dropped.length ? { detail: dropped.join("; ") } : {} };
     const { candidate } = chosen;
@@ -16803,7 +17578,7 @@ ${JSON.stringify({ sessionId, server: server.label, provider })}` };
     this.triaged.delete(sessionId);
     this.triaged.set(sessionId, advice.advice);
     while (this.triaged.size > 512) this.triaged.delete(this.triaged.keys().next().value);
-    await this.harness.setBadge(sessionId, "triage", triageBadge(advice.advice, this.harness.strings));
+    await this.harness.setBadge(sessionId, "triage", () => triageBadge(advice.advice, this.harness.strings));
   }
   /** task.route + the policy. `kind` says why there is no advice (off, learning, no answer). */
   /** `requester`: who wrote the task text: the person (the launch form) or an agent (`recommend`, `route`). */
@@ -16892,6 +17667,48 @@ ${JSON.stringify({ ...a, model: answer.model })}` };
    * The harness page: its four controls (command review here, the rest in the harness) and nothing else. A command
    * review the levels do not describe exactly is `custom`, with what it is, shown read-only until a level is chosen.
    */
+  /**
+   * The Agent tree card: who started whom, with each card's model, status, task, route cost and times. Built on
+   * request from what the service already holds; nothing is stored for it.
+   */
+  async treeView() {
+    const cards = this.harness.cards();
+    await this.usage.refreshCards(cards.map((card) => card.id).slice(0, 64));
+    const { catalog } = (() => {
+      try {
+        return this.auto.routingIndex();
+      } catch {
+        return { catalog: null };
+      }
+    })();
+    const perTask = TASK_TOKENS.medium.input + TASK_TOKENS.medium.output;
+    const view = buildTree({
+      cards,
+      usage: (id) => {
+        const used = this.usage.peekCard(id);
+        if (!used) return null;
+        const route = this.routing.routeOf(id);
+        const identity = route?.identity ?? null;
+        const usd2 = route && route.costBasis === "api" && catalog ? measuredUsd(used.totals, apiPrice(catalog, identity)) : null;
+        const tokens3 = effectiveTokens(used.totals);
+        return {
+          tokens: Math.round(tokens3),
+          input: used.totals.input,
+          output: used.totals.output,
+          cached: used.totals.cached,
+          usd: usd2,
+          share: Math.round(tokens3 * this.routing.settings.expectedShare.medium / perTask * 100) / 100,
+          ...used.totals.providerCostEstimate !== void 0 ? { providerEstimate: Math.round(used.totals.providerCostEstimate * 1e4) / 1e4 } : {}
+        };
+      },
+      route: (id) => this.routing.routeOf(id),
+      task: (id) => this.review.taskOf(id),
+      planChildren: (id) => this.bindings.planOf(id),
+      endedAt: (id) => this.harness.finished(id),
+      autoTop: (id) => this.autoTop.get(id) ?? null
+    }, { focus: this.harness.treeFocus() });
+    return { ...view, focus: this.harness.treeFocus(), now: Date.now() };
+  }
   harnessState() {
     const level = commandReviewLevel(this.settings);
     return {
@@ -17116,6 +17933,14 @@ serve({
     // A newer core pushes changed limit windows (and early resets) to services that may read them.
     "canvastty.limits.changed": (params) => {
       assistant?.limitsFeed.changed(params);
+    },
+    // A newer core tells services when the person switches the app language: badges are written again in it.
+    "canvastty.locale.changed": (params) => {
+      assistant?.setLocale(params.locale);
+    },
+    // limit.exhausted (provider-wide, the default login): that CLI's own sign-in routes rest until the reset.
+    "canvastty.activity": (params) => {
+      assistant?.activity(params);
     }
   },
   methods: {
@@ -17125,7 +17950,7 @@ serve({
     // The model field lists only its own choices; route values come from pick_route, not from the launcher.
     "canvastty.launch.options": async () => ({ model: [] }),
     "canvastty.tools.call": async (params) => (await ready).tool(String(params.tool), params.caller, params.input ?? {}),
-    "canvastty.cards.invoke": async (params) => (await ready).harness.cardAction(str2(params.actionId), str2(params.sessionId), params.session),
+    "canvastty.cards.invoke": async (params) => (await ready).cardAction(str2(params.actionId), str2(params.sessionId), params.session, params.locale),
     // Any page: CanvasTTY's language as its context says (a service hears it only at start).
     locale: async (params) => (await ready).setLocale(params.locale),
     // The decision models page.
@@ -17150,7 +17975,17 @@ serve({
     // "Where agents run" on the decision models page (route v2).
     "route.state": async () => {
       const a = await ready;
-      return { ...a.routing.state(), feed: { mode: a.limitsFeed.mode, lastReadAt: a.limitsFeed.lastReadAt, lastError: a.limitsFeed.lastError } };
+      return {
+        ...a.routing.state(),
+        feed: { mode: a.limitsFeed.mode, lastReadAt: a.limitsFeed.lastReadAt, lastError: a.limitsFeed.lastError },
+        peers: { accounts: a.accounts.state(), providers: a.providers.mode, usage: a.usage.mode }
+      };
+    },
+    // Accounts' quota through plugins.request (after the person approved the pair), for the page.
+    "route.accountsQuota": async (params) => {
+      const a = await ready;
+      const quota = await a.accounts.quota(6e4, 3e3, params?.force === true);
+      return { ...a.accounts.state(), quota };
     },
     "route.save": async (params) => {
       const a = await ready;
@@ -17167,6 +18002,8 @@ serve({
     "autopilot.start": async (params) => (await ready).startAuto(params ?? {}),
     // The Flow preview and Task board cards.
     "harness.view": async () => (await ready).harness.view(),
+    // The Agent tree card.
+    "tree.view": async () => (await ready).treeView(),
     "flows.choices": async (params) => (await ready).harness.flowChoices(str2(params.orchestratorId)),
     "flows.create": async (params) => (await ready).harness.createPlan(str2(params.orchestratorId), str2(params.flowId), str2(params.goal)),
     "flows.decide": async (params) => (await ready).harness.decidePlan(str2(params.planId), params.decision)

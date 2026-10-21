@@ -76,6 +76,15 @@ Settings → Plugins → CanvasTTY Assistant.
 - **Task board**: `task_add` (orchestrator), `task_update` and `task_list` (orchestrator and its subagents; a subagent
   changes only its own tasks or claims a free one). The **Task board** card shows them by status; the orchestrator
   card shows `tasks 2/5`, and its menu action **Task board** points the card at it.
+- **Agent tree**: who started whom. The **Agent tree** card (Settings → Plugins → CanvasTTY Assistant → Agent tree, or
+  the settings page link) draws the orchestrator on top and the agents it started below, joined by lines. Each card
+  shows its name, model, status (Running, Waiting, Needs approval, Done, Failed), task, cost and time, and how many
+  agents it started (of how many the autopilot plan allows); a branch folds away. The header says `N agents · M running`
+  with the dollars of paid routes; a subscription, coding plan or flat-rate account shows as a plan with its share of
+  the window or its launches, never as money. Cost is the route's estimate for one task, not a bill. A click shows that
+  card on the canvas (CanvasTTY with `sessions.focus`; older versions say so). The menu action **Agent tree** on an
+  orchestrator or subagent points the card at its tree. The model comes from CanvasTTY when it sends the launch model,
+  else from the route the Assistant chose; a card the Assistant did not route says "cost unknown".
 - **Loop alerts**: every shell command reaches the plugin before it runs. The same command (spacing, numbers and a
   trailing `| tail -50`-style filter aside) five times in one turn with no file edit seen in between puts `loop?` on the
   card; it clears when the next turn starts (not on a brief status flicker). Edits made through the shell (`sed -i`,
@@ -214,7 +223,7 @@ Choose the role and **Model: Auto (Jev)** in the launcher; Jev decides the rest 
 - **Servers** (Decision models → Advanced → Where agents run; off by default): `start_leaf` runs an independent leaf task on a server you declared (its name as in the Environments plugin), on that server's own CLI sign-in, within its parallel cap; `leaf_status` reports it. A leaf cannot start subagents. Needs `sessions:launch` and `sessions:control` (install review).
 - **Phase 2, where CanvasTTY has it (checked at run time; older versions keep phase 1):**
   - **The launch matches its route.** The Assistant declares a scoped launch policy (`"policy": { "scope": "own-trees" }`): CanvasTTY asks it only before a subagent's launch inside a tree the Assistant contributed to or started, never before a launch you start yourself. Where CanvasTTY shows a launch service what the launch asks for (the model, the effort, the selected plugins, and the fields another plugin shares with it), a subagent of an Auto tree starts only with its route's CLI, model and effort, and with the Accounts account its route chose (once the Accounts plugin shares its `account` field with the Assistant). A subagent on another CLI that does not carry its route (also when the orchestrator runs Claude Code without a declared plan, so no model of the Assistant's) and a grandchild on another CLI are refused too, and so is a subagent of a child routed as one task (not with `orchestrate: true`). Every refusal tells the orchestrator to call `pick_route`. While the Assistant's service is down, only such subagents wait or are refused; your own launches never depend on it. A CanvasTTY without the scoped form gets the build without a policy (phase-1 checks, nothing new refused); the plugin never declares an unscoped policy. A subagent of a same-CLI leaf is refused wherever CanvasTTY shows what a launch asks for, since it inherits the Assistant's options.
-  - **Start with Auto (Jev)** (the Assistant's settings page, one action): write the task and the project folder; Jev reads the task and code chooses where an orchestrator runs: the CLI, your declared subscription or coding plan or a model account (the ones an orchestrator's `list_routes` showed in the last day), the model and effort, and with "On one of your servers" (only when servers are on) a server with room, on its own sign-in. The Assistant starts it, marked "Started by" the Assistant, bound to that decision once, with the plan's child count, and types the task and the plan as its first prompt. It needs your **May start orchestrators** for the Assistant (Settings, under Extension native code). Without it, or on a CanvasTTY that cannot start plugin orchestrators, nothing starts and the page says how: start an orchestrator yourself with Model: Auto (Jev). Never an OpenRouter route.
+  - **Start with Auto (Jev)** (the Assistant's settings page, one action): write the task and the project folder; Jev reads the task and code chooses where an orchestrator runs: the CLI, your declared subscription or coding plan a model account or an Accounts pool (as Accounts shares them once you allow it; else the ones an orchestrator's `list_routes` showed in the last day), among the CLIs CanvasTTY lists as installed, the model and effort, and with "On one of your servers" (only when servers are on) a server with room, on its own sign-in. The Assistant starts it, marked "Started by" the Assistant, bound to that decision once, with the plan's child count, and types the task and the plan as its first prompt. It needs your **May start orchestrators** for the Assistant (Settings, under Extension native code). Without it, or on a CanvasTTY that cannot start plugin orchestrators, nothing starts and the page says how: start an orchestrator yourself with Model: Auto (Jev). Never an OpenRouter route.
 - Not yet (CanvasTTY changes): subagents on servers, choosing the CLI of a card you start yourself.
 
 ## How Auto decides
@@ -256,7 +265,25 @@ The settings pages keep one plain sentence per control; the numbers live here.
   reported reset time and whether the old time was kept (the page shows the last ones).
 - A child that stops at a usage limit rests its route until the time its message names (Claude Code, Codex and Z.AI
   messages), else its window's reset, else 5 minutes; a later read with 20 % or more left, or a task finished on that
-  route, ends the rest early. Routed launches since the last read count as ~2 % of the window each until the next read.
+  route, ends the rest early. Between reads, what the Assistant's own cards used counts against the window: their tokens as CanvasTTY measured
+  them (`usage:read`, cache reads at a tenth) times your expected share per task; on a CanvasTTY without usage reads,
+  ~2 % of the window per routed launch.
+- **CanvasTTY's `limit.exhausted`** (a CLI's own sign-in used up, provider-wide): that CLI's own sign-in routes rest
+  until the reset the event or the last read names (else 5 minutes); pools and model accounts are other sign-ins.
+
+### What the Assistant reads itself (newer CanvasTTY; each detected, older ones keep the old path)
+
+- **Accounts' accounts, pools and quotas** through a shared read (`accounts.routes`, `accounts.quota`): only after you
+  allow the pair in Settings → Agents → Extension native code, under the Assistant; until then the "Where agents run"
+  page says so and orchestrators' `list_routes` rows are used as before. Accounts pools (`pool:<agent>`, your own
+  sign-ins) are subscription routes with the best free account's quota, for subagents and for "Start with Auto (Jev)".
+- **Installed and signed-in CLIs** from CanvasTTY's `providers.list` (`providers:read`): routing needs no list from the
+  orchestrator, and "Start with Auto (Jev)" offers only CLIs that are there.
+- **Measured tokens** of the cards it started or set options for (`usage:read`), also in the agent tree: paid routes at
+  the catalog price, plans as a share of the window, OpenCode's own estimate labelled as the agent's estimate.
+- **Language changes** (`canvastty.locale.changed`, and the language with each card action): badges and toasts follow.
+- **Servers for subagents**: with servers on, each route answer adds your declared servers that CanvasTTY offers
+  subagents (by name, with room), as a `spawn_agent` with `environment`, on that server's own sign-in.
 - Model accounts carry the quota the Accounts plugin reads for them (Z.AI / BigModel GLM Coding Plan): an account whose
   quota is used up is not offered, and an account rest ends when Accounts shows a newer read with room.
 

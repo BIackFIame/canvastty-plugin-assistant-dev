@@ -46,7 +46,11 @@ serve({
   notifications: {
     'canvastty.sessions.event': params => { assistant?.sessionEvent(params); },
     // A newer core pushes changed limit windows (and early resets) to services that may read them.
-    'canvastty.limits.changed': params => { assistant?.limitsFeed.changed(params); }
+    'canvastty.limits.changed': params => { assistant?.limitsFeed.changed(params); },
+    // A newer core tells services when the person switches the app language: badges are written again in it.
+    'canvastty.locale.changed': params => { assistant?.setLocale(params.locale); },
+    // limit.exhausted (provider-wide, the default login): that CLI's own sign-in routes rest until the reset.
+    'canvastty.activity': params => { assistant?.activity(params); }
   },
   methods: {
     // Host-only requests.
@@ -55,7 +59,7 @@ serve({
     // The model field lists only its own choices; route values come from pick_route, not from the launcher.
     'canvastty.launch.options': async () => ({ model: [] }),
     'canvastty.tools.call': async params => (await ready).tool(String(params.tool), params.caller as SessionSummary | undefined, (params.input ?? {}) as Record<string, unknown>),
-    'canvastty.cards.invoke': async params => (await ready).harness.cardAction(str(params.actionId), str(params.sessionId), params.session as SessionSummary | undefined),
+    'canvastty.cards.invoke': async params => (await ready).cardAction(str(params.actionId), str(params.sessionId), params.session as SessionSummary | undefined, params.locale),
     // Any page: CanvasTTY's language as its context says (a service hears it only at start).
     locale: async params => (await ready).setLocale(params.locale),
     // The decision models page.
@@ -75,7 +79,15 @@ serve({
     'auto.test': async params => (await ready).auto.test(str(params.upstreamId)),
     'auto.refreshCatalog': async () => (await ready).auto.refreshCatalog(),
     // "Where agents run" on the decision models page (route v2).
-    'route.state': async () => { const a = await ready; return { ...(a.routing.state() as Record<string, unknown>), feed: { mode: a.limitsFeed.mode, lastReadAt: a.limitsFeed.lastReadAt, lastError: a.limitsFeed.lastError } }; },
+    'route.state': async () => {
+      const a = await ready;
+      return {
+        ...(a.routing.state() as Record<string, unknown>), feed: { mode: a.limitsFeed.mode, lastReadAt: a.limitsFeed.lastReadAt, lastError: a.limitsFeed.lastError },
+        peers: { accounts: a.accounts.state(), providers: a.providers.mode, usage: a.usage.mode }
+      };
+    },
+    // Accounts' quota through plugins.request (after the person approved the pair), for the page.
+    'route.accountsQuota': async params => { const a = await ready; const quota = await a.accounts.quota(60_000, 3_000, params?.force === true); return { ...a.accounts.state(), quota }; },
     'route.save': async params => { const a = await ready; return a.routing.save(params.settings, a.pageLocale); },
     'route.limits': async params => { const a = await ready; const answer = a.routing.receiveLimits(params.snapshot, 'page'); return { ok: answer.ok, providers: answer.providers, feed: a.limitsFeed.mode }; },
     'route.feedback': async params => (await ready).routing.feedback(str(params.id), params.ok === true),
@@ -84,6 +96,8 @@ serve({
     'autopilot.start': async params => (await ready).startAuto(params ?? {}),
     // The Flow preview and Task board cards.
     'harness.view': async () => (await ready).harness.view(),
+    // The Agent tree card.
+    'tree.view': async () => (await ready).treeView(),
     'flows.choices': async params => (await ready).harness.flowChoices(str(params.orchestratorId)),
     'flows.create': async params => (await ready).harness.createPlan(str(params.orchestratorId), str(params.flowId), str(params.goal)),
     'flows.decide': async params => (await ready).harness.decidePlan(str(params.planId), params.decision)

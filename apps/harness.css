@@ -18,6 +18,7 @@
   --yellow: #efd084;
   --danger: #e3615e;
   --line: rgba(255, 255, 255, 0.1);
+  --line-strong: rgba(255, 255, 255, 0.24);
   --radius-sm: 0.69rem;
   --radius-md: 1.08rem;
 }
@@ -93,3 +94,41 @@ button, input, select, textarea { font: inherit; color: inherit; }
 .task__note { margin-top: 0.31rem; color: var(--text-muted); font-size: 0.92rem; }
 @media (max-width: 35em) { .columns { grid-template-columns: repeat(2, minmax(0, 1fr)); } .setting-row { align-items: flex-start; flex-direction: column; } }
 .notice { margin: 0; padding: 0.62rem 0.92rem; border-radius: var(--radius-sm); background: var(--surface-soft); color: var(--yellow); }
+
+/* Agent tree: cards joined by lines (left rule per level, a tick into each card). Status pills use the palette's
+   tokens only. */
+.tree-header { display: flex; flex-wrap: wrap; align-items: end; gap: 0.62rem 1.08rem; }
+.tree-pick { min-width: 14rem; flex: 0 1 22rem; }
+.tree-summary { display: grid; gap: 0.38rem; min-width: 0; }
+.tree-summary__line { font-size: 1.08rem; }
+.tree-summary__plans { display: flex; flex-wrap: wrap; gap: 0.31rem; }
+.tree-list { position: relative; margin: 0; padding: 0 0 0 1.54rem; list-style: none; }
+.tree-list--root { padding-left: 0; }
+.tree-item { position: relative; padding-top: 0.54rem; }
+.tree-list:not(.tree-list--root) > .tree-item::before { content: ""; position: absolute; left: -0.92rem; top: 0; bottom: 0; border-left: 1px solid var(--line-strong); }
+.tree-list:not(.tree-list--root) > .tree-item:last-child::before { bottom: auto; height: 1.85rem; }
+.tree-list:not(.tree-list--root) > .tree-item::after { content: ""; position: absolute; left: -0.92rem; top: 1.85rem; width: 0.92rem; border-top: 1px solid var(--line-strong); }
+.tree-node { display: grid; gap: 0.23rem; max-width: 36rem; padding: 0.54rem 0.77rem; border: 1px solid var(--line); border-radius: var(--radius-sm); background: var(--surface-soft); cursor: pointer; }
+.tree-node:hover { border-color: var(--primary); }
+.tree-node:focus-visible { outline: 0.15rem solid var(--secondary); outline-offset: 0.15rem; }
+.tree-node__head { display: flex; align-items: center; justify-content: space-between; gap: 0.62rem; min-width: 0; }
+.tree-node__title { overflow: hidden; font-weight: 700; text-overflow: ellipsis; white-space: nowrap; }
+.tree-node__model { color: var(--text-muted); font-size: 0.92rem; overflow-wrap: anywhere; }
+.tree-node__model strong { color: var(--text); font-weight: 600; }
+.tree-node__task { overflow: hidden; color: var(--text-muted); font-size: 0.92rem; text-overflow: ellipsis; white-space: nowrap; }
+.tree-node__meta { display: flex; flex-wrap: wrap; align-items: center; gap: 0.31rem 0.77rem; font-size: 0.92rem; }
+.tree-cost--plan { color: var(--secondary); }
+.tree-elapsed { color: var(--text-muted); font-variant-numeric: tabular-nums; }
+.tree-tokens, .tree-estimate { color: var(--text-muted); font-variant-numeric: tabular-nums; }
+.tree-toggle { display: inline-flex; align-items: center; gap: 0.38rem; min-height: 1.85rem; padding: 0.08rem 0.54rem; border: 0; border-radius: 0.54rem; background: var(--surface); color: var(--text); cursor: pointer; }
+.tree-toggle:focus-visible { outline: 0.15rem solid var(--secondary); outline-offset: 0.15rem; }
+.tree-chevron { width: 0.46rem; height: 0.46rem; border-right: 0.12rem solid currentColor; border-bottom: 0.12rem solid currentColor; transform: rotate(-45deg); transition: transform .12s; }
+.tree-chevron.is-open { transform: rotate(45deg); }
+.pill { flex: none; padding: 0.08rem 0.62rem; border-radius: 1rem; font-size: 0.85rem; font-weight: 700; white-space: nowrap; }
+.pill--running { background: var(--primary); color: var(--text-dark); }
+.pill--approval { background: var(--yellow); color: var(--text-dark); }
+.pill--failed { background: var(--danger); color: var(--text-dark); }
+.pill--waiting { background: var(--surface); color: var(--text-muted); }
+.pill--done { border: 1px solid var(--line-strong); color: var(--secondary); }
+.tree-node--approval { border-color: var(--yellow); }
+.tree-node--failed { border-color: var(--danger); }

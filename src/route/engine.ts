@@ -24,7 +24,8 @@ import type { AutoPreference, AutoTier } from '../auto/settings.ts';
 import { classRank, type DataClass, type DataClassMode } from '../shared/settings.ts';
 import { resolveModel, type Resolved } from './aliases.ts';
 import { modelTrafficForbidden } from '../auto/jevOnlyRule.ts';
-import { quotaOf, shadowPrice, type LimitsCache, type ShadowPrice, type SubscriptionQuota } from './limits.ts';
+import { quotaOf, shadowPrice, type LimitsCache, type MeasuredSpend, type ShadowPrice, type SubscriptionQuota } from './limits.ts';
+import type { PoolRoute } from './peers.ts';
 import { DEFAULT_MAX_PARALLEL, DEFAULT_RESERVE, SPEED_WEIGHT, trustRank, type PlanDecl, type RouteAllow, type RouteSettings, type TrustLevel } from './settings.ts';
 
 export const ASSISTANT_ID = 'canvastty-assistant';
@@ -116,6 +117,13 @@ export interface RouteContext {
   cooldown(signIn: string): { until: number; reason: string } | null;
   /** Routed launches on a CLI's own sign-in since its limits were read (own usage accounting between reads). */
   launchesSinceRead?(cli: string): number;
+  /**
+   * Measured use of a CLI's own sign-in by this plugin's cards since its limits were read (CanvasTTY's usage.summary),
+   * as a share of the window; when given it replaces the per-launch estimate.
+   */
+  spentSinceRead?(cli: string): MeasuredSpend | null;
+  /** Accounts' pools of the person's own sign-ins (`pool:<agent>`), read through plugins.request. */
+  pools?: readonly PoolRoute[];
   /** Outcomes per route key. */
   stats: ReadonlyMap<string, RouteStats>;
   /** Learned tokens per task of a model, as a factor of TASK_TOKENS (null: not enough outcomes with tokens). */
@@ -140,6 +148,8 @@ export interface Spawn {
   model?: string;
   effort?: string;
   launchOptions: Record<string, Record<string, string | boolean>>;
+  /** A plugin environment (one of the person's servers) as list_providers lists it; absent: this computer. */
+  environment?: { pluginId: string; kind: string; options: Record<string, string | boolean> };
 }
 
 export interface CandidateScore {
@@ -220,7 +230,8 @@ function effortVariants(index: BenchmarkIndex, identity: string | null, takes: r
 /** Every plugin that sets a model, named explicitly, so a subagent never inherits one by accident. */
 export function launchOptionsFor(cli: string, plugins: ReadonlySet<string>, route: { kind: RouteKind; account?: Record<string, string | boolean> | null }): Record<string, Record<string, string | boolean>> {
   const options: Record<string, Record<string, string | boolean>> = {};
-  if (plugins.has(ACCOUNTS_ID) || route.kind === 'account') options[ACCOUNTS_ID] = route.kind === 'account' && route.account ? { ...route.account } : { account: 'none' };
+  // An account or a pool names its own value; otherwise Accounts is named with the agent's own sign-in.
+  if (plugins.has(ACCOUNTS_ID) || route.account) options[ACCOUNTS_ID] = route.account ? { ...route.account } : { account: 'none' };
   if (plugins.has(ASSISTANT_ID) || route.kind === 'auto') options[ASSISTANT_ID] = { model: route.kind === 'auto' ? 'auto' : 'off' };
   void cli;
   return options;
@@ -265,7 +276,7 @@ const usdEstimate = (usd: number): Estimate => ({ kind: 'usd', low: Math.round(u
 interface Raw {
   cli: string; kind: RouteKind; signIn: string; label: string; planId?: string; accountId?: string; endpoint?: string;
   model: string | null; resolved: { identity: string | null; from: Candidate['resolvedFrom'] }; effort: string | null;
-  context: MatchContext; plan?: PlanDecl; row?: AccountRow; trust: TrustLevel | 'auto'; allow: RouteAllow;
+  context: MatchContext; plan?: PlanDecl; row?: AccountRow; pool?: PoolRoute; trust: TrustLevel | 'auto'; allow: RouteAllow;
   /** Effort goes to Accounts' launch option, not to spawn_agent.effort. */
   effortVia: 'spawn' | 'accounts' | 'none';
 }
@@ -323,6 +334,24 @@ function rawCandidates(ctx: RouteContext): Raw[] {
         trust: ctx.settings.trust[`host:${host}`] ?? (isLocalHost(host) ? 'D3' : 'unset'), allow: ctx.settings.allow[`host:${host}`] ?? 'allow',
         effortVia: takes.length ? 'accounts' : 'none'
       });
+    }
+  }
+  // Accounts' pools: the person's own sign-ins of a CLI, Accounts picks the member with the most room at launch. The
+  // models are the CLI's own: a declared subscription plan of that CLI names them, else its default model.
+  for (const pool of ctx.pools ?? []) {
+    const entry = ctx.providers.find(provider => provider.id === pool.cli);
+    const plan = ctx.settings.plans.find(p => p.cli === pool.cli && p.kind === 'subscription');
+    const models: Array<string | null> = plan && MODEL_CLIS.has(pool.cli) && plan.models.length && pool.cli !== 'opencode' ? plan.models : [null];
+    const takes = effortsOf(pool.cli, entry);
+    for (const model of models) {
+      const resolved = model ? resolve(pool.cli, model) : { identity: null, from: 'none' as const };
+      for (const effort of effortVariants(ctx.index, resolved.identity, takes)) {
+        raws.push({
+          cli: pool.cli, kind: 'subscription', signIn: `pool:${pool.cli}`, label: `${pool.label} (${pool.ready}/${pool.members} free)`, model, resolved, effort, pool,
+          context: OPENROUTER_CONTEXT, trust: (pool.trust === 'unset' ? 'unset' : pool.trust) as TrustLevel, allow: ctx.settings.allow[`pool:${pool.cli}`] ?? 'allow',
+          effortVia: takes.length ? 'spawn' : 'none'
+        });
+      }
     }
   }
   if (ctx.auto) {
@@ -448,11 +477,12 @@ export function decide(ctx: RouteContext): RouteDecision {
     if (ctx.providersGiven && !entry) { drop('not offered by list_providers'); continue; }
     if (entry && (entry.available === false || entry.installed === false)) { drop('its CLI is not installed or not available'); continue; }
     if (entry && entry.subagent === false) { drop('it cannot run as a subagent'); continue; }
-    if (raw.kind !== 'account' && raw.kind !== 'auto' && (entry?.signIn === 'signed_out' || entry?.signIn === 'expired')) { drop(`its sign-in is ${entry.signIn === 'expired' ? 'expired' : 'signed out'}`); continue; }
+    if (raw.kind !== 'account' && raw.kind !== 'auto' && !raw.pool && (entry?.signIn === 'signed_out' || entry?.signIn === 'expired')) { drop(`its sign-in is ${entry.signIn === 'expired' ? 'expired' : 'signed out'}`); continue; }
     if (ctx.orchestrate && !(entry?.orchestrator ?? ORCHESTRATOR_CLIS.has(raw.cli))) { drop('it cannot orchestrate'); continue; }
     if (raw.row && raw.row.state !== 'ready') { drop(`account ${raw.row.state}${raw.row.reason ? `: ${raw.row.reason}` : ''}`); continue; }
     const plugins = pluginsFor(raw.cli, ctx);
     if (raw.kind === 'account' && !plugins.has(ACCOUNTS_ID) && ctx.providersGiven) { drop('the Accounts plugin does not apply to this CLI here'); continue; }
+    if (raw.pool && !plugins.has(ACCOUNTS_ID) && ctx.providersGiven) { drop('the Accounts plugin does not apply to this CLI here'); continue; }
     if (raw.kind === 'auto' && !plugins.has(ASSISTANT_ID) && ctx.providersGiven) { drop('the Assistant\'s launch options do not apply to OpenCode here'); continue; }
     // 1.8.2: a subagent of another CLI is refused while a plugin the spawn cannot name set the orchestrator's model.
     if (ctx.callerProvider && raw.cli !== ctx.callerProvider) {
@@ -491,9 +521,24 @@ export function decide(ctx: RouteContext): RouteDecision {
     let estimate: Estimate = { kind: 'unknown', note: 'no price known' };
     let quota: SubscriptionQuota | null = null;
     let availability: Candidate['availability'] = { state: 'ready', reason: entry?.signIn === 'ok' ? 'signed in' : 'not checked' };
-    if (raw.kind === 'subscription' || raw.kind === 'cli-default') {
+    if (raw.pool) {
+      // A pool: its best free member's quota as Accounts read it (per account home), never the default login's.
+      const q = raw.pool.quota;
+      const reserve = raw.plan?.reserve ?? DEFAULT_RESERVE;
+      const left = q && q.remainingPercent !== null && q.state !== 'unknown' && q.state !== 'stale' ? q.remainingPercent - reserve : null;
+      quota = raw.pool.ready <= 0
+        ? { state: 'exhausted', headroom: 0, pace: null, window: null, readAt: q?.observedAt ?? null, note: 'no free account in the pool', code: 'no-headroom' }
+        : left === null ? { state: 'unknown', headroom: null, pace: null, window: null, readAt: q?.observedAt ?? null, note: q?.note || 'pool quota not read yet', code: 'unread' }
+          : left <= 0 ? { state: 'exhausted', headroom: 0, pace: null, window: null, readAt: q!.observedAt, note: 'no headroom above the reserve in any free account', code: 'no-headroom' }
+            : { state: 'known', headroom: Math.round(left * 1_000) / 1_000, pace: null, window: { label: raw.pool.window, usedPercent: 100 - q!.remainingPercent!, minutes: null }, readAt: q!.observedAt, note: '', code: '' };
+      const price = shadowPrice(quota, share, ref);
+      cost = price.usd; costBasis = price.basis;
+      if (price.basis === 'unavailable') availability = { state: 'exhausted', reason: `pool: ${quota.note}` };
+      else if (quota.state === 'unknown') availability = { state: 'unknown', reason: `pool quota unknown: ${quota.note}` };
+      estimate = quota.state === 'known' ? { kind: 'window', share, window: raw.pool.window, usedPercent: quota.window?.usedPercent ?? null } : { kind: 'unknown', note: `pool quota unknown (${quota.note})` };
+    } else if (raw.kind === 'subscription' || raw.kind === 'cli-default') {
       const limits = ctx.limits?.providers.find(provider => provider.provider === raw.cli);
-      quota = quotaOf(limits, raw.plan?.reserve ?? DEFAULT_RESERVE, ctx.now, ctx.launchesSinceRead?.(raw.cli) ?? 0);
+      quota = quotaOf(limits, raw.plan?.reserve ?? DEFAULT_RESERVE, ctx.now, ctx.launchesSinceRead?.(raw.cli) ?? 0, ctx.spentSinceRead?.(raw.cli) ?? null);
       const price = shadowPrice(quota, share, ref);
       cost = price.usd; costBasis = price.basis;
       if (price.basis === 'unavailable') availability = { state: 'exhausted', reason: quota.note };
@@ -529,7 +574,7 @@ export function decide(ctx: RouteContext): RouteDecision {
 
     // What spawn_agent gets.
     const spawn: Spawn = { provider: raw.cli, launchOptions: {} };
-    let accountOptions: Record<string, string | boolean> | null = null;
+    let accountOptions: Record<string, string | boolean> | null = raw.pool ? { ...raw.pool.launchOptions[ACCOUNTS_ID]! } : null;
     if (raw.kind === 'account') {
       accountOptions = { ...(raw.row?.launchOptions?.[ACCOUNTS_ID] ?? { account: raw.accountId!, trustFolder: false }) };
       accountOptions.effort = raw.effort && raw.effortVia === 'accounts' ? raw.effort : (typeof accountOptions.effort === 'string' ? accountOptions.effort : 'default');

@@ -6,6 +6,7 @@
  * Nothing is started here: the orchestrator passes the answer's spawn values to CanvasTTY's own `spawn_agent`, and
  * CanvasTTY checks every value. A recommendation never grants anything.
  */
+import type { TreeRoute } from '../tree/agentTree.ts';
 import { randomUUID } from 'node:crypto';
 import { readFileSync } from 'node:fs';
 import { mkdir, rename, writeFile } from 'node:fs/promises';
@@ -23,6 +24,9 @@ import { earlyNote, limitChanges, mergeLimits, parseLimits, quotaOf, resetFromTe
 import { classifyOutcome, RouteRecords, type OptionRecord, type OutcomeResult, type RouteRecord } from './records.ts';
 import { normalizeRouteSettings, validateRouteSettings, type RouteSettings } from './settings.ts';
 import type { Spawn } from './engine.ts';
+import { environmentsFrom, type AccountsFeed, type EnvironmentOffer, type PoolRoute, type ProvidersFeed } from './peers.ts';
+import { effectiveTokens, type UsageMeter } from './usage.ts';
+import type { MeasuredSpend } from './limits.ts';
 
 export const ROUTE_STORAGE_KEY = 'routing';
 export const ROUTE_TOOLS = ['route', 'pick_route', 'route_outcome'] as const;
@@ -90,6 +94,14 @@ export interface RouteServiceOptions {
    * (autopilot/binding.ts); null leaves the spawn as it is.
    */
   bindSpawn?(callerId: string, spawn: Spawn, decisionId: string, orchestrate: boolean): Spawn | null;
+  /** Accounts' shared reads (plugins.request), where the core and the person allow them. */
+  accounts?: AccountsFeed;
+  /** CanvasTTY's providers.list (providers:read). */
+  providersFeed?: ProvidersFeed;
+  /** CanvasTTY's measured usage of this plugin's cards (usage:read). */
+  usage?: UsageMeter;
+  /** Servers this service started cards on now, by label (leaves and Auto orchestrators). */
+  serverLoad?(label: string): number;
   now?: () => number;
   random?: () => number;
 }
@@ -183,6 +195,12 @@ export class RouteService {
   limits: LimitsCache | null = null;
   /** The last list_routes rows an orchestrator passed (for the page), without keys or paths. */
   accountsSeen: { at: number; rows: AccountRow[] } | null = null;
+  /** Accounts' pools as last read through plugins.request. */
+  poolsSeen: { at: number; pools: PoolRoute[] } | null = null;
+  /** Measured use per CLI since its windows were read (filled before each decision). */
+  private readonly measured = new Map<string, MeasuredSpend>();
+  /** Environments subagents may use (list_providers / providers.list), by name only. */
+  private environments: { at: number; offers: EnvironmentOffer[] } | null = null;
   private readonly options: RouteServiceOptions;
   private readonly now: () => number;
   private readonly random: () => number;
@@ -278,8 +296,16 @@ export class RouteService {
     if (!read) return 0;
     return this.records.all().filter(record => {
       const option = record.spawned ? record.options[record.spawned.option] : undefined;
-      return !!option && record.spawned!.at >= read && option.cli === cli && (option.kind === 'subscription' || option.kind === 'cli-default');
+      return !!option && record.spawned!.at >= read && option.cli === cli && ((option.kind === 'subscription' && !option.signIn.startsWith('pool:')) || option.kind === 'cli-default');
     }).length;
+  }
+
+  /** The route a subagent was started on (model, plan or price, estimate), for the agent tree; null if not routed. */
+  routeOf(sessionId: string): TreeRoute | null {
+    const record = this.records.bySession(sessionId);
+    const option = record?.spawned ? record.options[record.spawned.option] : undefined;
+    if (!record || !option || record.spawned!.session !== sessionId.slice(0, 8)) return null;
+    return { model: option.model, identity: option.identity, kind: option.kind, label: option.label, costBasis: option.costBasis, estimate: option.estimateData ?? null };
   }
 
   private launches(planId: string, windowMs: number): number {
@@ -305,7 +331,10 @@ export class RouteService {
     const source = decision ? 'jev' : 'rules';
     // The task is a subagent's: the caller being an orchestrator does not make it medium.
     const view = turnView(decision ?? { difficulty: ruleDifficulty(task), strong: false }, source, task, { role: 'subagent' });
-    const { providers, accountRows } = this.inputsFor(caller.id, input);
+    const peers = await this.peerInputs();
+    const { providers, accountRows } = this.inputsFor(caller.id, input, peers);
+    const passedEnvironments = environmentsFrom(input.providers);
+    if (passedEnvironments.length) this.environments = { at: this.now(), offers: passedEnvironments };
     this.accountQuotaSeen(accountRows);
     if (accountRows.length) this.accountsSeen = { at: this.now(), rows: accountRows.map(({ launchOptions: _drop, ...row }) => row) };
     const cardClass = this.options.cardClass(caller.id);
@@ -320,6 +349,7 @@ export class RouteService {
       callerProvider: typeof caller.provider === 'string' ? caller.provider : null, cardClass, mode: this.options.dataClassMode(), limits: this.limits,
       catalog, index, auto, now, busy: key => this.busy(key), launches: (id, ms) => this.launches(id, ms),
       cooldown: key => { const c = this.cooldowns.get(key); return c && c.until > now ? c : null; }, stats, launchesSinceRead: cli => this.launchesSinceRead(cli),
+      spentSinceRead: cli => this.measured.get(cli) ?? null, pools: peers.pools,
       tokenFactor: identity => this.records.tokenFactor(identity, level => TASK_TOKENS[level].input + TASK_TOKENS[level].output),
       prefer: clean(input.prefer, 200) || null, orchestrate: input.orchestrate === true,
       explore: { roll: this.random(), retired, highRisk: ruleDifficulty(task) === 'hard' }
@@ -332,7 +362,7 @@ export class RouteService {
    * by the same engine as `route`, among that CLI's own sign-in routes only (never a paid route). A declared plan
    * with no room left gives `exhausted` with the reason; no declared plan gives the CLI's own default model.
    */
-  topLevelChoice(cli: string, view: TurnView, cardClass: DataClass, orchestrate: boolean): { model: string | null; effort: string | null; why: string } | { exhausted: string } {
+  topLevelChoice(cli: string, view: TurnView, cardClass: DataClass, orchestrate: boolean): { model: string | null; effort: string | null; why: string; label?: string } | { exhausted: string } {
     const { catalog, index } = this.options.catalog();
     const now = this.now();
     const result = decide({
@@ -340,7 +370,8 @@ export class RouteService {
       providers: [{ id: cli, installed: true, available: true, subagent: true, orchestrator: true }], providersGiven: true, accountRows: [],
       callerProvider: cli, cardClass, mode: this.options.dataClassMode(), limits: this.limits, catalog, index, auto: null, now,
       busy: () => 0, launches: (id, ms) => this.launches(id, ms), cooldown: key => { const c = this.cooldowns.get(key); return c && c.until > now ? c : null; },
-      launchesSinceRead: id => this.launchesSinceRead(id), stats: this.records.routeStats(), prefer: cli, orchestrate, explore: { roll: 1, retired: new Set(), highRisk: false }
+      launchesSinceRead: id => this.launchesSinceRead(id), spentSinceRead: id => this.measured.get(id) ?? null,
+      stats: this.records.routeStats(), prefer: cli, orchestrate, explore: { roll: 1, retired: new Set(), highRisk: false }
     });
     const own = [result.top, ...result.groups.flat()].filter((c): c is NonNullable<typeof c> => !!c && c.cli === cli && (c.kind === 'subscription' || c.kind === 'cli-default'));
     const best = own.find(c => c.kind === 'subscription') ?? own[0];
@@ -349,46 +380,109 @@ export class RouteService {
       if (why) return { exhausted: why };
     }
     if (!best) return { model: null, effort: null, why: 'no declared plan: the CLI\'s own default model' };
-    return { model: best.spawn.model ?? null, effort: best.spawn.effort ?? null, why: best.kind === 'subscription' ? `${best.label}: ${best.model ?? 'default'}${best.effort ? `@${best.effort}` : ''}` : 'the CLI\'s own default model' };
+    return { model: best.spawn.model ?? null, effort: best.spawn.effort ?? null, ...(best.kind === 'subscription' ? { label: best.label } : {}), why: best.kind === 'subscription' ? `${best.label}: ${best.model ?? 'default'}${best.effort ? `@${best.effort}` : ''}` : 'the CLI\'s own default model' };
   }
 
   /**
    * "Start with Auto (Jev)" (core B8): where a top-level orchestrator runs. The same engine as `route`, for a task
-   * that must orchestrate, among the routes the person declared (subscriptions and coding plans, by their CLI) and the
-   * model accounts an orchestrator's list_routes showed in the last day (Accounts' state as it was then; Accounts
-   * still checks the account at launch). `clis`: only these CLIs; `ownSignIn`: only a CLI's own sign-in (a server
-   * gets nothing from this computer). Best first, never an OpenRouter route (the engine drops those).
+   * that must orchestrate, among the routes the person declared (subscriptions and coding plans, by their CLI), the
+   * CLIs CanvasTTY lists as installed and signed in (`providers.list`), and Accounts' model accounts and pools as
+   * Accounts shares them now (`plugins.request`; Accounts still checks the account at launch). On a core without
+   * those reads: the declared plans and the accounts an orchestrator's list_routes showed in the last day.
+   * `clis`: only these CLIs; `ownSignIn`: only a CLI's own sign-in (a server gets nothing from this computer). Best
+   * first, never an OpenRouter route (the engine drops those).
    */
-  orchestratorRoutes(view: TurnView, cardClass: DataClass, limit: { clis?: readonly string[]; ownSignIn?: boolean } = {}): { candidates: Candidate[]; dropped: string[] } {
-    const now = this.now();
+  async orchestratorRoutes(view: TurnView, cardClass: DataClass, limit: { clis?: readonly string[]; ownSignIn?: boolean } = {}): Promise<{ candidates: Candidate[]; dropped: string[] }> {
     const allowed = (cli: string): boolean => !limit.clis || limit.clis.includes(cli);
-    const rows: AccountRow[] = limit.ownSignIn || !this.accountsSeen || now - this.accountsSeen.at > 24 * 3_600_000 ? []
-      : this.accountsSeen.rows.filter(row => allowed(row.provider)).map(row => ({ ...row, launchOptions: { 'canvastty-accounts': { account: row.accountId, effort: 'default', trustFolder: false } } }));
-    const clis = [...new Set([...this.settings.plans.filter(plan => plan.allow !== 'never').map(plan => plan.cli), ...rows.map(row => row.provider), ...(limit.clis ?? [])])].filter(allowed);
+    const peers = await this.peerInputs();
+    const now = this.now();
+    const fallbackRows = !this.accountsSeen || now - this.accountsSeen.at > 24 * 3_600_000 ? [] : this.accountsSeen.rows;
+    const rows: AccountRow[] = limit.ownSignIn ? [] : (peers.rows ?? fallbackRows).filter(row => allowed(row.provider) && row.provider !== undefined)
+      .map(row => ({ ...row, launchOptions: row.launchOptions ?? { 'canvastty-accounts': { account: row.accountId, effort: 'default', trustFolder: false } } }));
+    const pools = limit.ownSignIn ? [] : peers.pools.filter(pool => allowed(pool.cli));
+    // CanvasTTY's own list when it gives one: a CLI that is not installed or is signed out is not offered.
+    const listed = peers.providers?.filter(entry => allowed(entry.id)) ?? null;
+    const clis = listed
+      ? listed.map(entry => entry.id)
+      : [...new Set([...this.settings.plans.filter(plan => plan.allow !== 'never').map(plan => plan.cli), ...rows.map(row => row.provider), ...pools.map(pool => pool.cli), ...(limit.clis ?? [])])].filter(allowed);
     if (!clis.length) return { candidates: [], dropped: [] };
     const { catalog, index } = this.options.catalog();
     const decision = decide({
       view, preference: this.options.preference(), settings: this.settings,
-      providers: clis.map(id => ({ id, installed: true, available: true, subagent: true, orchestrator: true })), providersGiven: true, accountRows: rows,
+      providers: listed ?? clis.map(id => ({ id, installed: true, available: true, subagent: true, orchestrator: true })), providersGiven: true, accountRows: rows, pools,
       callerProvider: null, cardClass, mode: this.options.dataClassMode(), limits: this.limits, catalog, index, auto: null, now,
       busy: key => this.busy(key), launches: (id, ms) => this.launches(id, ms), cooldown: key => { const c = this.cooldowns.get(key); return c && c.until > now ? c : null; },
-      launchesSinceRead: id => this.launchesSinceRead(id), stats: this.records.routeStats(), prefer: null, orchestrate: true,
+      launchesSinceRead: id => this.launchesSinceRead(id), spentSinceRead: id => this.measured.get(id) ?? null, stats: this.records.routeStats(), prefer: null, orchestrate: true,
       explore: { roll: 1, retired: new Set(), highRisk: true }
     });
     const seen = new Set<string>();
     const candidates = [decision.top, ...decision.alternatives, ...decision.groups.flat()]
       .filter((c): c is Candidate => !!c && !seen.has(c.key) && !!seen.add(c.key))
-      .filter(c => !limit.ownSignIn || c.kind === 'subscription' || c.kind === 'cli-default');
+      .filter(c => !limit.ownSignIn || (c.kind === 'subscription' && !c.signIn.startsWith('pool:')) || c.kind === 'cli-default');
     const dropped = [...new Set(decision.dropped.map(entry => `${entry.cli}${entry.model ? ` ${entry.model}` : ''}: ${entry.reason}`))].slice(0, 4);
     return { candidates, dropped };
   }
+
+  /**
+   * What the Assistant reads itself before a decision (each where the core and the person allow it, within a short
+   * deadline, else the last answer): Accounts' routes and pools, CanvasTTY's provider list and environments, and the
+   * measured use of each CLI's own sign-in since its windows were read.
+   */
+  private async peerInputs(): Promise<{ rows: AccountRow[] | null; pools: PoolRoute[]; providers: ProviderInfo[] | null }> {
+    const [accounts, listed] = await Promise.all([
+      this.options.accounts ? this.options.accounts.routes() : Promise.resolve(null),
+      this.options.providersFeed ? this.options.providersFeed.list() : Promise.resolve(null),
+      this.measureSpend()
+    ]);
+    if (accounts) {
+      this.poolsSeen = { at: accounts.at, pools: accounts.pools };
+      if (accounts.rows.length) this.accountsSeen = { at: accounts.at, rows: accounts.rows.map(({ launchOptions: _drop, ...row }) => row) };
+    }
+    if (listed) this.environments = { at: listed.at, offers: listed.environments };
+    return { rows: accounts ? accounts.rows : null, pools: accounts?.pools ?? [], providers: listed?.providers ?? null };
+  }
+
+  /**
+   * Measured tokens of this plugin's cards per CLI since that CLI's windows were read, as a share of its window (the
+   * person's expected share per medium task ÷ a medium task's tokens). Where the core does not measure usage the map
+   * stays empty and the per-launch estimate applies.
+   */
+  private async measureSpend(): Promise<void> {
+    const meter = this.options.usage;
+    if (!meter || !this.limits) { this.measured.clear(); return; }
+    const reads = new Map<number, string[]>();
+    for (const entry of this.limits.providers) {
+      if (entry.state !== 'available' || entry.fetchedAt === null) continue;
+      reads.set(entry.fetchedAt, [...reads.get(entry.fetchedAt) ?? [], entry.provider]);
+    }
+    const perTask = TASK_TOKENS.medium.input + TASK_TOKENS.medium.output;
+    const share = this.settings.expectedShare.medium;
+    const next = new Map<string, MeasuredSpend>();
+    let measuredAny = false;
+    for (const [since, clis] of [...reads].slice(0, 4)) {
+      const rows = await meter.byProviderSince(since);
+      if (!rows) continue;
+      measuredAny = true;
+      for (const cli of clis) {
+        const counts = rows.get(cli);
+        const tokens = counts ? effectiveTokens(counts) : 0;
+        next.set(cli, { tokens, percent: Math.round((tokens * share / perTask) * 1_000) / 1_000 });
+      }
+    }
+    if (!measuredAny && meter.mode !== 'ready') { this.measured.clear(); return; }
+    this.measured.clear();
+    for (const [cli, spend] of next) this.measured.set(cli, spend);
+  }
+
+  /** Environments subagents may use now (names only), when the person turned servers on; [] otherwise. */
+  serverOffers(): EnvironmentOffer[] { return this.settings.serversOn && this.environments ? this.environments.offers : []; }
 
   /**
    * What the orchestrator passed, or what it passed earlier: the full list_providers and list_routes are large, so a
    * card's last full lists are kept (memory, 30 min) and a later call may send only the task, or a `digest` such as
    * "claude:ok codex:signed_out opencode @glm-53" (CLIs with their sign-in, `@` a ready account id from list_routes).
    */
-  private inputsFor(callerId: string, input: Record<string, unknown>): { providers: { list: ProviderInfo[]; given: boolean }; accountRows: AccountRow[] } {
+  private inputsFor(callerId: string, input: Record<string, unknown>, peers: { rows: AccountRow[] | null; providers: ProviderInfo[] | null } = { rows: null, providers: null }): { providers: { list: ProviderInfo[]; given: boolean }; accountRows: AccountRow[] } {
     const now = this.now();
     for (const [id, kept] of this.kept) if (now - kept.at > KEEP_MS) this.kept.delete(id);
     const full = providersFrom(input.providers);
@@ -397,8 +491,9 @@ export class RouteService {
     if (full.given) kept.providers = full.list;
     if (Array.isArray(input.accountRoutes) && rows.length) kept.rows = rows;
     if (full.given || rows.length) { kept.at = now; this.kept.set(callerId, kept); }
-    let providers = full.given ? full : kept.providers ? { list: kept.providers, given: true } : { list: [], given: false };
-    let accountRows = rows.length ? rows : kept.rows ?? [];
+    let providers = full.given ? full : kept.providers ? { list: kept.providers, given: true } : peers.providers ? { list: peers.providers, given: true } : { list: [], given: false };
+    // Accounts' own answer (plugins.request) replaces rows an orchestrator passed: fresher, and no model copies them.
+    let accountRows = peers.rows ?? (rows.length ? rows : kept.rows ?? []);
     const digest = parseDigest(input.digest);
     if (digest) {
       if (digest.clis.length) {
@@ -406,7 +501,7 @@ export class RouteService {
         // A CLI in the digest: the kept entry with its new sign-in, or a bare entry (its plugins are then assumed).
         providers = { list: digest.clis.map(({ id, signIn }) => ({ ...(known.get(id) ?? { id, installed: true, available: true, subagent: true }), ...(signIn ? { signIn } : {}) })), given: true };
       }
-      if (digest.accounts.length) {
+      if (digest.accounts.length && !peers.rows) {
         const pool = [...accountRows, ...(this.accountsSeen && now - this.accountsSeen.at <= KEEP_MS ? this.accountsSeen.rows : [])];
         accountRows = pool.filter((row, i) => digest.accounts.includes(row.accountId) && pool.findIndex(other => other.accountId === row.accountId && other.provider === row.provider) === i)
           .map(row => ({ ...row, state: 'ready', launchOptions: row.launchOptions ?? { 'canvastty-accounts': { account: row.accountId, effort: 'default', trustFolder: false } } }));
@@ -423,8 +518,14 @@ export class RouteService {
     if ('error' in decided) return { content: decided.error, isError: true };
     const { decision, view, source, providers, accountRows } = decided;
     const now = this.now();
+    // The person's servers (when they turned servers on), by the names CanvasTTY lists: a place, not a route.
+    const servers = input.orchestrate === true ? [] : this.serverPlacements(decision.top?.cli ?? null, caller.id);
+    // In an Auto tree a server spawn carries a bound route value too (its own single-use decision).
+    for (const entry of servers) { const bound = this.options.bindSpawn?.(caller.id, entry.spawn, randomUUID().slice(0, 8), false); if (bound) entry.spawn = bound; }
+    const serverLines = servers.map(entry => `On your server ${entry.server} (${entry.spawn.provider}, its own sign-in there): spawn_agent ${JSON.stringify(entry.spawn)}.`);
     if (!decision.top) {
       const reasons = [...new Set(decision.dropped.map(entry => `${entry.cli}${entry.model ? ` ${entry.model}` : ''}: ${entry.reason}`))].slice(0, 6);
+      if (servers.length) return { content: `No route on this computer is usable now${reasons.length ? ` (${reasons.join('; ')})` : ''}.\n${serverLines.join('\n')}\n${JSON.stringify({ servers })}` };
       return { content: `No route is usable now${reasons.length ? `: ${reasons.join('; ')}` : ''}. Call list_providers and choose a provider yourself, or ask the person.` };
     }
     const options = [decision.top, ...decision.alternatives];
@@ -454,8 +555,9 @@ export class RouteService {
           `${short(decision.top, 0)}${decision.explored ? ' (exploring a new model)' : ''}.`,
           ...decision.alternatives.map((c, i) => `Or ${i + 1}: ${short(c, i + 1)}.`),
           `Pass spawn to spawn_agent unchanged (add title, cwd, prompt). Then route_outcome {decisionId:"${record.id}"}.`,
+          ...serverLines,
           ...(Array.isArray(input.providers) || Array.isArray(input.accountRoutes) ? [`Next time send only task: your lists are kept for 30 min (or send digest "${digestOf(providers, accountRows)}").`] : []),
-          JSON.stringify({ decisionId: record.id, spawn: decision.top.spawn, kind: decision.top.kind, alternatives: decision.alternatives.map(c => ({ spawn: c.spawn, kind: c.kind })) })
+          JSON.stringify({ decisionId: record.id, spawn: decision.top.spawn, kind: decision.top.kind, alternatives: decision.alternatives.map(c => ({ spawn: c.spawn, kind: c.kind })), ...(servers.length ? { servers } : {}) })
         ].join('\n')
       };
     }
@@ -466,15 +568,45 @@ export class RouteService {
       `Estimate: ${top.estimate}.${decision.explored ? ' (A new model, tried on a small share of easy tasks; its outcome is counted.)' : ''}`,
       `Pass these to spawn_agent (with your own title, cwd and prompt; do not add a model or other launch options): ${JSON.stringify(decision.top.spawn)}.`,
       ...decision.alternatives.map((c, i) => `Alternative ${i + 1}: ${record.options[i + 1]!.why}; spawn_agent ${JSON.stringify(c.spawn)}.`),
+      ...serverLines,
       `Task read as ${view.type}, ${view.level} (${source === 'jev' ? 'by the decision model' : 'by word rules'}); strategy ${decision.strategy}.`,
       `When the subagent has ended, call route_outcome with decisionId "${record.id}" and what wait_for_agent or get_agent_result said (status and exitLines).`
     ];
     return {
       content: `${lines.join('\n')}\n${JSON.stringify({
         decisionId: record.id, type: view.type, level: view.level, strategy: decision.strategy, spawn: top.spawn, why: top.why, estimate: top.estimate, route: top.route,
-        alternatives: decision.alternatives.map((c, i) => answer(c, i + 1)), dropped: decision.dropped.length
+        alternatives: decision.alternatives.map((c, i) => answer(c, i + 1)), dropped: decision.dropped.length, ...(servers.length ? { servers } : {})
       })}`
     };
+  }
+
+  /**
+   * Servers for a subagent (autopilot, servers on): the person's declared servers that CanvasTTY offers subagents
+   * (list_providers' environments, by name only), with room under both caps, on a CLI signed in there (the top
+   * route's CLI first). Nothing from this computer reaches a server: the spawn uses that CLI's own sign-in there.
+   */
+  serverPlacements(preferCli: string | null, callerId: string): Array<{ server: string; spawn: Spawn }> {
+    const offers = this.serverOffers();
+    if (!offers.length) return [];
+    void callerId;
+    const out: Array<{ server: string; spawn: Spawn }> = [];
+    for (const declared of this.settings.servers) {
+      for (const offer of offers) {
+        if (!offer.capBy) continue;
+        const listed = offer.servers.find(server => server.name === declared.label);
+        if (!listed) continue;
+        const running = Math.max(listed.running, this.options.serverLoad?.(declared.label) ?? 0);
+        if (running >= Math.min(declared.maxParallel, offer.maxParallel)) continue;
+        const clis = declared.clis.filter(cli => !offer.providers || offer.providers.includes(cli));
+        const cli = preferCli && clis.includes(preferCli) ? preferCli : clis[0];
+        if (!cli) continue;
+        const launchOptions: Spawn['launchOptions'] = { 'canvastty-assistant': { model: 'off' } };
+        out.push({ server: declared.label, spawn: { provider: cli, launchOptions, environment: { pluginId: offer.pluginId, kind: offer.kind, options: { [offer.capBy]: declared.label } } } });
+        break;
+      }
+      if (out.length >= 2) break;
+    }
+    return out;
   }
 
   private outcome(caller: CallerCard, input: Record<string, unknown>): ToolAnswer {
@@ -508,12 +640,41 @@ export class RouteService {
    */
   private cool(option: OptionRecord, stated: number | null = null): void {
     const now = this.now();
-    const quota = option.kind === 'subscription' || option.kind === 'cli-default' ? this.limits?.providers.find(entry => entry.provider === option.cli) : undefined;
+    // A pool's member is another sign-in than the default login whose windows CanvasTTY reads.
+    const quota = (option.kind === 'subscription' && !option.signIn.startsWith('pool:')) || option.kind === 'cli-default' ? this.limits?.providers.find(entry => entry.provider === option.cli) : undefined;
     const windowReset = quota?.windows.map(window => window.resetsAt).filter((at): at is number => at !== null && at > now).sort((a, b) => a - b)[0];
     const reset = stated !== null && stated > now ? stated : windowReset;
     const until = reset !== undefined && reset - now <= MAX_COOLDOWN_MS ? reset : now + QUOTA_COOLDOWN_MS;
     this.cooldowns.set(option.signIn, { until, at: now, reason: `it hit a usage limit; resting until ${new Date(until).toISOString().slice(11, 16)} UTC` });
     this.event({ at: now, provider: option.cli, kind: 'limit-exit', note: `${option.label}: a child stopped at a usage limit; resting until ${new Date(until).toISOString().slice(11, 16)} UTC${stated !== null ? ' (time from its message)' : ''}` });
+  }
+
+  /**
+   * CanvasTTY's `canvastty.activity` `limit.exhausted` (core: provider-wide, the default login, `accountId: "default"`,
+   * no card): that CLI's own sign-in routes (its default and the subscription plans declared on it) rest until the
+   * window's reset (when the event or a read names it; at most 24 h), else 5 min. Pools and model accounts are other
+   * sign-ins and keep running. A later read with room or a reset ends the rest, as for a limit exit.
+   */
+  limitExhausted(event: unknown): boolean {
+    if (!isRecord(event) || event.type !== 'limit.exhausted' || typeof event.provider !== 'string' || !/^[a-z0-9-]{1,40}$/u.test(event.provider)) return false;
+    if (event.accountId !== undefined && event.accountId !== 'default') return false;
+    const now = this.now();
+    const cli = event.provider;
+    const window = isRecord(event.window) ? event.window : {};
+    const label = clean(window.label, 40) || clean(window.id, 60) || 'a window';
+    const stated = typeof event.resetAt === 'number' && Number.isFinite(event.resetAt) && event.resetAt > now ? event.resetAt : null;
+    const windowReset = this.limits?.providers.find(entry => entry.provider === cli)?.windows.map(w => w.resetsAt).filter((at): at is number => at !== null && at > now).sort((a, b) => a - b)[0];
+    const reset = stated ?? windowReset;
+    const until = reset !== undefined && reset - now <= MAX_COOLDOWN_MS ? reset : now + QUOTA_COOLDOWN_MS;
+    const keys = [`cli:${cli}`, ...this.settings.plans.filter(plan => plan.cli === cli && plan.kind === 'subscription').map(plan => `plan:${plan.id}`)];
+    const reason = `CanvasTTY saw its ${label} limit used up; resting until ${new Date(until).toISOString().slice(11, 16)} UTC`;
+    for (const key of keys) {
+      const current = this.cooldowns.get(key);
+      if (current && current.until >= until) continue;
+      this.cooldowns.set(key, { until, at: now, reason });
+    }
+    this.event({ at: now, provider: cli, kind: 'exhausted', note: `${cli}'s own sign-in: ${label} used up (CanvasTTY); its routes rest until ${new Date(until).toISOString().slice(11, 16)} UTC${stated !== null ? '' : reset !== undefined ? ' (the window\'s reset)' : ' (5 min: no reset time known)'}` });
+    return true;
   }
 
   /** Ends the rests of a CLI's own sign-in routes (its subscription plans and its default) after a reset. */
@@ -654,13 +815,14 @@ export class RouteService {
       plans: this.settings.plans.map(plan => ({
         id: plan.id,
         models: plan.models.map(model => ({ model, ...resolveModel(plan.cli, model, this.settings.aliases, known) })),
-        quota: plan.kind === 'subscription' ? quotaOf(this.limits?.providers.find(entry => entry.provider === plan.cli), plan.reserve, now, this.launchesSinceRead(plan.cli)) : null,
+        quota: plan.kind === 'subscription' ? quotaOf(this.limits?.providers.find(entry => entry.provider === plan.cli), plan.reserve, now, this.launchesSinceRead(plan.cli), this.measured.get(plan.cli) ?? null) : null,
         running: this.busy(`plan:${plan.id}`),
         launches: plan.kind === 'coding-plan' ? this.launches(plan.id, (plan.windowHours ?? 5) * 3_600_000) : null
       })),
       limits: this.limits ? { receivedAt: this.limits.receivedAt, source: this.limits.source ?? 'page', providers: this.limits.providers } : null,
       quotaEvents: this.quotaEvents.slice(-10),
       accounts: this.accountsSeen,
+      pools: this.poolsSeen ? { at: this.poolsSeen.at, pools: this.poolsSeen.pools.map(({ launchOptions: _drop, ...pool }) => pool) } : null,
       cooldowns: [...this.cooldowns].filter(([, value]) => value.until > now).map(([signIn, value]) => ({ signIn, ...value })),
       recent: this.records.recent(30),
       exploration: this.records.exploration()

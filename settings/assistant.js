@@ -955,6 +955,12 @@
       accounts: "Model accounts (CanvasTTY Accounts)",
       accountsSeen: (age) => `As the orchestrator last passed them, ${age}.`,
       accountsNone: "Not passed by an orchestrator since the Assistant started.",
+      accountsShared: (age) => `Read from CanvasTTY Accounts itself, ${age}.`,
+      accountsApprove: "CanvasTTY Accounts can share its accounts, pools and their quota with the Assistant: allow it in Settings \u2192 Agents \u2192 Extension native code, under the Assistant.",
+      accountsChanged: "Accounts changed what it shares since you allowed it: allow it again in Settings \u2192 Agents \u2192 Extension native code.",
+      accountsUnreadable: (reason) => `Accounts' data cannot be read now (${reason}).`,
+      pools: (label, ready, members, left) => `${label}: ${ready} of ${members} free${left}`,
+      poolLeft: (percent) => ` \xB7 ${percent}% left`,
       flatRate: "flat-rate plan",
       servers: "Servers",
       serversOn: "Let orchestrators run independent leaf tasks on these servers",
@@ -1044,6 +1050,12 @@
       accounts: "\u0410\u043A\u043A\u0430\u0443\u043D\u0442\u044B \u043C\u043E\u0434\u0435\u043B\u0435\u0439 (CanvasTTY Accounts)",
       accountsSeen: (age) => `\u041A\u0430\u043A \u0438\u0445 \u043F\u043E\u0441\u043B\u0435\u0434\u043D\u0438\u0439 \u0440\u0430\u0437 \u043F\u0435\u0440\u0435\u0434\u0430\u043B \u043E\u0440\u043A\u0435\u0441\u0442\u0440\u0430\u0442\u043E\u0440, ${age}.`,
       accountsNone: "\u0421 \u0437\u0430\u043F\u0443\u0441\u043A\u0430 \u0410\u0441\u0441\u0438\u0441\u0442\u0435\u043D\u0442\u0430 \u043E\u0440\u043A\u0435\u0441\u0442\u0440\u0430\u0442\u043E\u0440 \u0438\u0445 \u043D\u0435 \u043F\u0435\u0440\u0435\u0434\u0430\u0432\u0430\u043B.",
+      accountsShared: (age) => `\u041F\u0440\u043E\u0447\u0438\u0442\u0430\u043D\u043E \u0443 CanvasTTY Accounts \u043D\u0430\u043F\u0440\u044F\u043C\u0443\u044E, ${age}.`,
+      accountsApprove: "CanvasTTY Accounts \u043C\u043E\u0436\u0435\u0442 \u043F\u0435\u0440\u0435\u0434\u0430\u0432\u0430\u0442\u044C \u0410\u0441\u0441\u0438\u0441\u0442\u0435\u043D\u0442\u0443 \u0441\u0432\u043E\u0438 \u0430\u043A\u043A\u0430\u0443\u043D\u0442\u044B, \u043F\u0443\u043B\u044B \u0438 \u0438\u0445 \u043A\u0432\u043E\u0442\u044B: \u0440\u0430\u0437\u0440\u0435\u0448\u0438\u0442\u0435 \u044D\u0442\u043E \u0432 \u041D\u0430\u0441\u0442\u0440\u043E\u0439\u043A\u0438 \u2192 \u0410\u0433\u0435\u043D\u0442\u044B \u2192 \u041D\u0430\u0442\u0438\u0432\u043D\u044B\u0439 \u043A\u043E\u0434 \u0440\u0430\u0441\u0448\u0438\u0440\u0435\u043D\u0438\u0439, \u0443 \u0410\u0441\u0441\u0438\u0441\u0442\u0435\u043D\u0442\u0430.",
+      accountsChanged: "Accounts \u0438\u0437\u043C\u0435\u043D\u0438\u043B \u0442\u043E, \u0447\u0435\u043C \u0434\u0435\u043B\u0438\u0442\u0441\u044F, \u043F\u043E\u0441\u043B\u0435 \u0432\u0430\u0448\u0435\u0433\u043E \u0440\u0430\u0437\u0440\u0435\u0448\u0435\u043D\u0438\u044F: \u0440\u0430\u0437\u0440\u0435\u0448\u0438\u0442\u0435 \u0441\u043D\u043E\u0432\u0430 \u0432 \u041D\u0430\u0441\u0442\u0440\u043E\u0439\u043A\u0438 \u2192 \u0410\u0433\u0435\u043D\u0442\u044B \u2192 \u041D\u0430\u0442\u0438\u0432\u043D\u044B\u0439 \u043A\u043E\u0434 \u0440\u0430\u0441\u0448\u0438\u0440\u0435\u043D\u0438\u0439.",
+      accountsUnreadable: (reason) => `\u0414\u0430\u043D\u043D\u044B\u0435 Accounts \u0441\u0435\u0439\u0447\u0430\u0441 \u043D\u0435 \u0447\u0438\u0442\u0430\u044E\u0442\u0441\u044F (${reason}).`,
+      pools: (label, ready, members, left) => `${label}: \u0441\u0432\u043E\u0431\u043E\u0434\u043D\u043E ${ready} \u0438\u0437 ${members}${left}`,
+      poolLeft: (percent) => ` \xB7 \u043E\u0441\u0442\u0430\u043B\u043E\u0441\u044C ${percent}%`,
       flatRate: "\u0444\u0438\u043A\u0441\u0438\u0440\u043E\u0432\u0430\u043D\u043D\u044B\u0439 \u0442\u0430\u0440\u0438\u0444",
       servers: "\u0421\u0435\u0440\u0432\u0435\u0440\u044B",
       serversOn: "\u0420\u0430\u0437\u0440\u0435\u0448\u0438\u0442\u044C \u043E\u0440\u043A\u0435\u0441\u0442\u0440\u0430\u0442\u043E\u0440\u0430\u043C \u0437\u0430\u043F\u0443\u0441\u043A\u0430\u0442\u044C \u043D\u0435\u0437\u0430\u0432\u0438\u0441\u0438\u043C\u044B\u0435 \u043B\u0438\u0441\u0442\u043E\u0432\u044B\u0435 \u0437\u0430\u0434\u0430\u0447\u0438 \u043D\u0430 \u044D\u0442\u0438\u0445 \u0441\u0435\u0440\u0432\u0435\u0440\u0430\u0445",
@@ -1144,9 +1156,18 @@
     for (const plan of settings.plans) list.append(planRow(plan, state2, t2, save2, ago, trustOptions, allowOptions));
     section.append(list, addPlan(settings, t2, save2));
     section.append(el("h2", { textContent: t2.accounts }));
+    const shared = state2.peers?.accounts;
+    if (shared?.mode === "refused") {
+      section.append(el("p", { className: "muted", dataset: { route: "accounts-share" }, textContent: shared.reason === "not_approved" ? t2.accountsApprove : shared.reason === "approval_changed" ? t2.accountsChanged : t2.accountsUnreadable(shared.reason ?? "?") }));
+    }
+    if (state2.pools?.pools.length) {
+      const pools = el("ul", { className: "recent", dataset: { route: "pools" } });
+      for (const pool of state2.pools.pools) pools.append(el("li", { textContent: t2.pools(pool.label, pool.ready, pool.members, pool.quota?.remainingPercent != null ? t2.poolLeft(Math.round(pool.quota.remainingPercent)) : "") }));
+      section.append(pools);
+    }
     if (!state2.accounts) section.append(el("p", { className: "muted", textContent: t2.accountsNone }));
     else {
-      section.append(el("p", { className: "muted", textContent: t2.accountsSeen(ago(state2.accounts.at)) }));
+      section.append(el("p", { className: "muted", textContent: shared?.mode === "ready" ? t2.accountsShared(ago(state2.accounts.at)) : t2.accountsSeen(ago(state2.accounts.at)) }));
       const rows = el("ul", { className: "recent", dataset: { route: "accounts" } });
       for (const host3 of [...new Set(state2.accounts.rows.map((row2) => row2.endpoint))]) {
         const of = state2.accounts.rows.filter((row2) => row2.endpoint === host3);
