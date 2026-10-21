@@ -278,7 +278,9 @@ test('through CanvasTTY\'s own launch pipeline: the contribution passes its chec
   const both = pipeline.normalizeOptions('opencode', { 'canvastty-assistant': { model: 'auto' }, 'canvastty-accounts': { account: 'a' } });
   const refused = await pipeline.prepare({ ...context, sessionId: 'card-pipe-2', options: both });
   assert.equal(refused.ok, false);
-  assert.match(refused.reason, /CanvasTTY Accounts and CanvasTTY Assistant both set OPENCODE_CONFIG/u);
+  // CanvasTTY 1.8.1 names the first clashing key (OPENCODE_CONFIG); 1.8.2 checks the model first (both contributions
+  // set it: the account's thirdPartyModel config and Auto's --model). Either way the launch is refused naming both.
+  assert.match(refused.reason, /^CanvasTTY Accounts and CanvasTTY Assistant both set (?:OPENCODE_CONFIG|the model of this launch)\b/u);
   // Codex on Auto: its own sign-in, the vendor endpoint pinned; the core accepts the arguments.
   const codex = await pipeline.prepare({ ...context, provider: 'codex', sessionId: 'card-pipe-3', options: pipeline.normalizeOptions('codex', { 'canvastty-assistant': { model: 'auto' } }) });
   assert.equal(codex.ok, true, codex.reason);
