@@ -22,13 +22,13 @@
   "coreFiles": [
     {
       "path": "README.md",
-      "bytes": 30655,
-      "sha256": "94abcf97df99625f55f6125f5ac20f2c419bd9b67cff9076507c32bf8152a081"
+      "bytes": 30961,
+      "sha256": "d3e4c18d255a2dbfc3ad81015c3a29b9ed81666f2a8b1411d30fb1118afabe08"
     },
     {
       "path": "README.ru.md",
-      "bytes": 54325,
-      "sha256": "c7f75a042f06dade8a02c993caae172d41b8feccd74400f6fcdb0089e2203dab"
+      "bytes": 54950,
+      "sha256": "b038be5847fb28bb69242308ec5708842306469f0602d7dc2e84bf9933f22e78"
     },
     {
       "path": "services/assistant.mjs",
@@ -99,7 +99,9 @@
         "timeoutMs": 45000
       },
       "launch": {
-        "policy": true,
+        "policy": {
+          "scope": "own-trees"
+        },
         "delegable": true,
         "fields": [
           {

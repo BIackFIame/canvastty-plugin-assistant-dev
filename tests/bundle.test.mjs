@@ -34,10 +34,13 @@ test('the manifest\'s coreFiles match the package bytes, and the service and pag
 
 test('the manifest passes CanvasTTY\'s own validator (when CANVASTTY_REPO points at a checkout)', { skip: !process.env.CANVASTTY_REPO }, async () => {
   const { validatePluginManifest } = await import(join(process.env.CANVASTTY_REPO, 'src/main/services/PluginManager.ts'));
-  const { manifest: accepted, localized } = manifestForCore(validatePluginManifest, manifest);
+  const { manifest: accepted, localized, policy } = manifestForCore(validatePluginManifest, manifest);
   const checked = validatePluginManifest(accepted);
   assert.deepEqual(checked.services[0].decide, { events: ['pre-tool'], timeoutMs: 45_000 });
-  assert.equal(checked.services[0].launch.policy, true, 'a launch policy, together with its fields and delegable');
+  // Only the scoped policy (own trees: never a launch the person starts); a core without it gets none at all.
+  assert.deepEqual(manifest.services[0].launch.policy, { scope: 'own-trees' });
+  if (policy) assert.notEqual(checked.services[0].launch.policy, true, 'never unscoped');
+  else assert.equal(checked.services[0].launch.policy, undefined, 'a core without the scoped form: no policy, phase-1 checks');
   assert.equal(checked.services[0].launch.delegable, true);
   assert.deepEqual(checked.services[0].tools.map(tool => tool.name), ['recommend', 'review_status', 'route', 'pick_route', 'route_outcome', 'autopilot_plan', 'start_leaf', 'leaf_status', 'flows_list', 'flow_plan', 'flow_status', 'task_add', 'task_update', 'task_list']);
   assert.deepEqual(checked.services[0].cardActions.map(action => action.id), ['flow-preview', 'task-board', 'report']);
