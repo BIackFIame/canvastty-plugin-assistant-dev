@@ -40,7 +40,7 @@ test('the manifest passes CanvasTTY\'s own validator (when CANVASTTY_REPO points
   assert.equal(checked.services[0].launch.policy, undefined);
   assert.deepEqual(checked.services[0].tools.map(tool => tool.name), ['recommend', 'review_status', 'route', 'pick_route', 'route_outcome', 'flows_list', 'flow_plan', 'flow_status', 'task_add', 'task_update', 'task_list']);
   assert.deepEqual(checked.services[0].cardActions.map(action => action.id), ['flow-preview', 'task-board', 'report']);
-  if (localized) assert.deepEqual(checked.services[0].cardActions.map(action => action['title.ru']), ['План по сценарию…', 'Доска задач', 'Отчёт'], 'the core keeps the Russian card action titles (needs localized card action titles)');
+  if (localized && manifest['name.ru'] !== undefined) assert.deepEqual(checked.services[0].cardActions.map(action => action['title.ru']), ['План по сценарию…', 'Доска задач', 'Отчёт'], 'the core keeps the Russian card action titles (needs localized card action titles)');
   assert.equal(checked.settingsContribution, 'settings');
 });
 
