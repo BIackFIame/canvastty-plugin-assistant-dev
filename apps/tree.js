@@ -279,7 +279,7 @@
     );
   }
   function tick() {
-    for (const span of root.querySelectorAll?.(".tree-elapsed[data-started]") ?? []) {
+    for (const span of Array.from(root.querySelectorAll?.(".tree-elapsed[data-started]") ?? [])) {
       const node = span;
       if (node.dataset.ended) continue;
       node.textContent = t.elapsed(Date.now() + offset - Number(node.dataset.started));

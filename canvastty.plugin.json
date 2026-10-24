@@ -95,8 +95,8 @@
     },
     {
       "path": "apps/tree.js",
-      "bytes": 22963,
-      "sha256": "0c76664649ca56a83bfcd399151ce3c8f5eb5a1bb596891c6aeed1b175cf3dee"
+      "bytes": 22975,
+      "sha256": "375bc652b1b92d3daac232e89af6606cab017a7841b7d835f0a18327eab8b408"
     }
   ],
   "services": [

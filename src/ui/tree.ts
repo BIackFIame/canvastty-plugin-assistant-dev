@@ -213,7 +213,7 @@ function render(): void {
 
 /** Elapsed times tick once a second while the card is visible; only their text changes. */
 function tick(): void {
-  for (const span of (root as Element).querySelectorAll?.('.tree-elapsed[data-started]') ?? []) {
+  for (const span of Array.from((root as Element).querySelectorAll?.('.tree-elapsed[data-started]') ?? [])) {
     const node = span as HTMLElement;
     if (node.dataset.ended) continue;
     node.textContent = t.elapsed(Date.now() + offset - Number(node.dataset.started));
