@@ -95,12 +95,12 @@ test('costs: paid routes in dollars; subscriptions, coding plans and flat-rate a
   const route = (estimate, extra = {}) => ({ model: 'm', kind: 'account', label: 'L', costBasis: 'api', estimate, ...extra });
   assert.deepEqual(costOf(route({ kind: 'usd', low: 0.1, high: 0.3 })), { kind: 'usd', low: 0.1, high: 0.3 });
   assert.deepEqual(costOf(route({ kind: 'window', share: 4.5, window: '5 h', usedPercent: 30 }, { kind: 'subscription', label: 'Claude Max', costBasis: 'shadow' })),
-    { kind: 'plan', label: 'Claude Max', share: 4.5, window: '5 h' });
+    { kind: 'plan', label: 'Claude Max', share: 4.5, window: '5 h', subscription: true });
   assert.deepEqual(costOf(route({ kind: 'launches', used: 3, allowance: 100, windowHours: 5 }, { kind: 'coding-plan', label: 'GLM Coding Plan', costBasis: 'plan' })),
     { kind: 'launch', label: 'GLM Coding Plan', used: 3, allowance: 100, windowHours: 5 });
   assert.deepEqual(costOf(route({ kind: 'flat' }, { costBasis: 'flat' })), { kind: 'flat', label: 'L' });
   assert.deepEqual(costOf(route({ kind: 'usd', low: 0, high: 0 }, { costBasis: 'plan' })), { kind: 'flat', label: 'L' }, 'a plan priced at $0 is still a plan');
-  assert.deepEqual(costOf(route({ kind: 'unknown', note: 'quota unknown' }, { kind: 'subscription', label: 'Pro' })), { kind: 'plan', label: 'Pro', share: null, window: null });
+  assert.deepEqual(costOf(route({ kind: 'unknown', note: 'quota unknown' }, { kind: 'subscription', label: 'Pro' })), { kind: 'plan', label: 'Pro', share: null, window: null, subscription: true });
   assert.equal(costOf(route({ kind: 'unknown', note: 'no price known' })), null);
   assert.equal(costOf(null), null);
 });
@@ -141,7 +141,7 @@ test('model labels: the names people use; the launch model from CanvasTTY wins o
     autoTop: id => id === 'lead' ? { model: 'sonnet', label: 'Claude Max' } : null
   })).trees[0].root;
   assert.equal(view.model, 'Opus 5.5', 'what CanvasTTY says the card was launched with');
-  assert.deepEqual(view.cost, { kind: 'plan', label: 'Claude Max', share: null, window: null }, 'an Auto card on its own sign-in runs on a plan');
+  assert.deepEqual(view.cost, { kind: 'plan', label: 'Claude Max', share: null, window: null, subscription: true }, 'an Auto card on its own sign-in runs on a plan');
   assert.equal(view.children[0].model, 'GPT-5.5');
 });
 
@@ -281,13 +281,15 @@ test('page: the header, statuses, models, costs and times in English and Russian
   assert.equal(ui.html.lang, 'en');
   assert.equal(ui.html.props['--ui-scale'], '0.85');
   const en = ui.app.text();
-  assert.match(en, /5 agents · 2 running · \$0\.12–0\.40 · \+ plan/u);
-  assert.match(en, /Claude Max: ≈4% of 5 h/u);
+  assert.match(en, /^Agent tree 5 agents/u, 'the page\'s own heading');
+  assert.match(en, /5 agents · 2 running · \$0\.12–0\.40 · \+ subscription/u);
+  assert.match(en, /Claude Max: ~4% of 5 h window/u);
   assert.match(en, /GLM Coding Plan: 1 launch\b/u);
   assert.match(en, /Release lead Running Opus 5\.5 · Claude Code · orchestrator/u);
-  assert.match(en, /API docs Running Opus 5\.5 · Claude Code · subagent Document the plugin API plan · ≈4% of 5 h/u);
+  assert.match(en, /API docs Running Opus 5\.5 · Claude Code · subagent Document the plugin API subscription · ~4% of 5 h window/u);
   assert.match(en, /Tests Needs approval GLM-5\.3-flash/u);
-  assert.match(en, /plan · 1 launch \(7\/100 in 5 h\)/u);
+  assert.match(en, /coding plan · 1 launch \(7\/100 in 5 h\)/u);
+  assert.doesNotMatch(en, /flat rate|plan · ≈/u, 'no "plan · flat rate" wording any more');
   assert.match(en, /Bench Failed GPT-5\.4 .* \$0\.12–0\.40 1m 00s/u, 'a finished card keeps its time');
   assert.match(en, /Fixtures Waiting Claude Code, default model · Claude Code · subagent|Fixtures Waiting Claude Code, default model/u);
   assert.match(en, /1h 02m/u);
@@ -296,14 +298,17 @@ test('page: the header, statuses, models, costs and times in English and Russian
   ui.context('ru', 'night', { uiScale: 1.25 });
   assert.equal(ui.html.dataset.palette, 'night');
   const ru = ui.app.text();
-  assert.match(ru, /5 агентов · 2 работают · \$0\.12–0\.40 · \+ план/u);
-  assert.match(ru, /Claude Max: ≈4% окна 5 ч/u);
+  assert.match(ru, /^Дерево агентов 5 агентов/u, 'the heading in Russian (a 1.8.x core shows the English card title)');
+  assert.match(ru, /5 агентов · 2 работают · \$0\.12–0\.40 · \+ подписка/u);
+  assert.match(ru, /Claude Max: ~4% окна 5 ч/u);
+  assert.match(ru, /подписка · ~4% окна 5 ч/u);
   assert.match(ru, /GLM Coding Plan: 1 запуск /u);
   assert.match(ru, /Release lead Работает Opus 5\.5 · Claude Code · оркестратор/u);
   assert.match(ru, /Нужно одобрение/u);
   assert.match(ru, /Ошибка/u);
   assert.match(ru, /Ждёт Claude Code, модель по умолчанию/u);
-  assert.match(ru, /план · 1 запуск \(7\/100 за 5 ч\)/u);
+  assert.match(ru, /план для кода · 1 запуск \(7\/100 за 5 ч\)/u);
+  assert.doesNotMatch(ru, /без лимита по цене/u);
   assert.match(ru, /1 ч 02 мин/u);
   assert.match(ru, /3 из 4 по плану/u);
   // No English words left in the Russian page apart from names, models and plan labels.
@@ -367,7 +372,7 @@ test('page (live run 17): a refused launch is not an agent and not a planned par
   ui.context('en', 'sage');
   const en = ui.app.text();
   assert.match(en, /3 agents · 1 running · 1 refused/u);
-  assert.match(en, /Auto \(Jev\) Running GLM-5\.3 · OpenCode · orchestrator plan · flat rate/u);
+  assert.match(en, /Auto \(Jev\) Running GLM-5\.3 · OpenCode · orchestrator subscription /u);
   assert.match(en, /2 of 3 planned/u);
   assert.doesNotMatch(en, /extra/u, 'the refused card is not a node');
   assert.doesNotMatch(en.split('Part C')[0], /default model|cost unknown/u, 'the orchestrator: its route, not the defaults');
@@ -377,5 +382,63 @@ test('page (live run 17): a refused launch is not an agent and not a planned par
   const ru = ui.app.text();
   assert.match(ru, /3 агента · 1 работает · 1 запуск отклонён/u);
   assert.match(ru, /2 из 3 по плану/u);
-  assert.match(ru, /план · без лимита по цене/u);
+  assert.match(ru, /Дерево агентов 3 агента/u);
+  assert.match(ru, /оркестратор подписка /u);
+});
+
+test('live run 18: a person-started OpenCode card on Model: Auto (Jev) shows Auto (Jev), the models its calls used and the plan they ran on', async () => {
+  const { AutoService } = await import('../src/auto/service.ts');
+  // The service's view from the router's per-card tally: a flat-rate brokered account is a plan (its label), never dollars.
+  const service = Object.create(AutoService.prototype);
+  Object.assign(service, {
+    router: { sessionTurns: id => id === 'orch' ? [
+      { upstream: 'acc-glm-53', model: 'glm-5.3', turns: 10, tokensIn: 20_000, tokensOut: 1_500, usd: 0 },
+      { upstream: 'acc-glm-flash', model: 'glm-5.3-flash', turns: 2, tokensIn: 3_000, tokensOut: 200, usd: 0 }
+    ] : id === 'paid' ? [{ upstream: 'direct', model: 'vendor/medium', turns: 3, tokensIn: 900, tokensOut: 90, usd: 0.0123 }] : [] },
+    settings: { upstreams: [
+      { id: 'acc-glm-53', preset: 'account', account: 'canvastty-accounts:glm-53', flatRate: true },
+      { id: 'acc-glm-flash', preset: 'account', account: 'canvastty-accounts:glm-flash', flatRate: true },
+      { id: 'direct', preset: 'openai-compatible' }
+    ] },
+    broker: { known: ref => ref === 'canvastty-accounts:glm-53' ? { label: 'GLM 5.3 · Z.AI Coding Plan' } : null }
+  });
+  assert.deepEqual(service.treeAuto('orch'), { models: [{ model: 'glm-5.3', calls: 10 }, { model: 'glm-5.3-flash', calls: 2 }], plan: 'GLM 5.3 · Z.AI Coding Plan', usd: null, tokens: 24_700 });
+  assert.deepEqual(service.treeAuto('paid'), { models: [{ model: 'vendor/medium', calls: 3 }], plan: null, usd: 0.0123, tokens: 990 });
+  assert.equal(service.treeAuto('none'), null);
+
+  const now = 10_000_000;
+  const cards = [
+    card('orch', { provider: 'opencode', role: 'orchestrator', title: 'Lead', status: 'idle', startedAt: now - 10_000 }),
+    card('kid', { provider: 'opencode', parentSessionId: 'orch', title: 'Part C', status: 'idle', startedAt: now - 60_000 }),
+    card('paid', { provider: 'opencode', role: 'orchestrator', title: 'Paid lead', status: 'idle', startedAt: now - 30_000 }),
+    card('paidkid', { provider: 'opencode', parentSessionId: 'paid', title: 'x', status: 'idle', startedAt: now - 20_000 })
+  ];
+  const auto = id => id === 'orch' ? { models: service.treeAuto('orch').models, plan: 'GLM 5.3 · Z.AI Coding Plan', usd: null, share: 3.2 }
+    : id === 'paid' ? { models: [{ model: 'vendor/medium', calls: 3 }], plan: null, usd: 0.0123, share: null } : null;
+  const built = buildTree(inputs(cards, { auto }));
+  const root = built.trees.find(tree => tree.root.id === 'orch').root;
+  assert.equal(root.model, null);
+  assert.deepEqual(root.auto, [{ model: 'GLM-5.3', calls: 10 }, { model: 'GLM-5.3-flash', calls: 2 }]);
+  assert.deepEqual(root.cost, { kind: 'plan', label: 'GLM 5.3 · Z.AI Coding Plan', share: 3.2, window: null, subscription: true, measured: true });
+  const paidUi = page({ trees: built.trees.filter(tree => tree.root.id === 'paid'), focus: null, now });
+  await settle();
+  paidUi.context('en', 'sage');
+  assert.match(paidUi.app.text(), /Paid lead Waiting Auto \(Jev\) · medium ×3 calls · OpenCode · orchestrator \$0\.01/u);
+  assert.deepEqual(built.trees.find(tree => tree.root.id === 'paid').root.cost, { kind: 'usd', low: 0.0123, high: 0.0123, measured: true });
+  // A routed card keeps its route: the Auto line is only for cards nothing else describes.
+  const routed = buildTree(inputs(cards, { auto, route: id => id === 'orch' ? { model: 'glm-5.3', kind: 'account', label: 'GLM', costBasis: 'flat', estimate: { kind: 'flat' } } : null })).trees.find(tree => tree.root.id === 'orch').root;
+  assert.equal(routed.auto, null);
+
+  const ui = page({ ...built, focus: null, now });
+  await settle();
+  ui.context('en', 'sage');
+  const en = ui.app.text();
+  assert.match(en, /Lead Waiting Auto \(Jev\) · GLM-5\.3 ×10 calls, GLM-5\.3-flash ×2 calls · OpenCode · orchestrator subscription · ~3% of its window/u);
+  assert.doesNotMatch(en.split('Part C')[0], /default model|cost unknown/u);
+  const strong = ui.app.all().find(node => node.tagName === 'STRONG' && node.textContent === 'Auto (Jev)');
+  assert.match(strong.title, /models its answered calls used/u);
+  ui.context('ru', 'night', { uiScale: 1.25 });
+  const ru = ui.app.text();
+  assert.match(ru, /Lead Ждёт Авто \(Jev\) · GLM-5\.3 ×10 вызовов, GLM-5\.3-flash ×2 вызова · OpenCode · оркестратор подписка · ~3% окна/u);
+  assert.doesNotMatch(ru.split('Part C')[0], /модель по умолчанию|цена неизвестна/u);
 });

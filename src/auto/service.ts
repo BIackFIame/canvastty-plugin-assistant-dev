@@ -128,8 +128,10 @@ export class AutoService {
       broker: {
         send: (upstream, path, init) => this.broker.send(upstream.account ?? '', path, init as Parameters<AccountBroker['send']>[2]),
         ready: upstream => this.accountReady(upstream),
-        refresh: async () => { await this.broker.list(); }
+        refresh: async () => { await this.broker.list(); },
+        withdrawn: upstream => !!upstream.account && this.broker.withdrawn(upstream.account)
       },
+      withdrawnMessage: () => AUTO_STRINGS[this.options.locale].grantWithdrawn,
       noProviderMessage: () => AUTO_STRINGS[this.options.locale].noProvider,
       ...(options.jevOnly ? { jevOnly: options.jevOnly } : {}),
       ...(options.transport ? { transport: options.transport } : {}),
@@ -244,6 +246,30 @@ export class AutoService {
   /** For `route`: the launch options that give a subagent Auto too, when the caller itself runs on it. */
   launchOptionsFor(sessionId: string): Record<string, Record<string, string>> | null {
     return this.router.tokens.forSession(sessionId) ? { [PLUGIN_ID]: { model: 'auto' } } : null;
+  }
+
+  /**
+   * A card on Model: Auto (Jev), for the agent tree: the models its answered calls used through the router (most
+   * used first) and what they cost. A flat-rate upstream (a brokered plan account) is a plan, never dollars; a paid
+   * one sums the router's own cost per call. Null: the router answered nothing for this card.
+   */
+  treeAuto(sessionId: string): { models: Array<{ model: string; calls: number }>; plan: string | null; usd: number | null; tokens: number } | null {
+    const turns = this.router.sessionTurns(sessionId);
+    if (!turns.length) return null;
+    const models = new Map<string, number>();
+    for (const turn of turns) models.set(turn.model, (models.get(turn.model) ?? 0) + turn.turns);
+    const upstreams = new Map(this.settings.upstreams.map(upstream => [upstream.id, upstream]));
+    const flat = turns.filter(turn => { const upstream = upstreams.get(turn.upstream); return !!upstream && upstream.preset === 'account' && upstream.flatRate === true; });
+    const top = [...flat].sort((a, b) => b.turns - a.turns)[0];
+    const account = top ? upstreams.get(top.upstream)?.account ?? null : null;
+    const label = account ? this.broker.known(account)?.label : undefined;
+    const plan = top ? label ?? top.upstream : null;
+    const paid = turns.filter(turn => !flat.includes(turn) && turn.usd !== null);
+    return {
+      models: [...models].sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0])).map(([model, calls]) => ({ model, calls })),
+      plan, usd: paid.length ? Math.round(paid.reduce((sum, turn) => sum + (turn.usd ?? 0), 0) * 1e6) / 1e6 : null,
+      tokens: turns.reduce((sum, turn) => sum + turn.tokensIn + turn.tokensOut, 0)
+    };
   }
 
   sessionClosed(sessionId: string): void { this.router.closeSession(sessionId); }

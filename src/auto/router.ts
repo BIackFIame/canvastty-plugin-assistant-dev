@@ -12,6 +12,7 @@ import { plan, turnView, type Level, type SelectionReason, type TurnDecision, ty
 import { DEFAULT_OUTPUT, type AutoRoutingSettings, type AutoTier, type AutoUpstream } from './settings.ts';
 import { hashToken, TokenStore, type LaunchGrant } from './tokens.ts';
 import { JevOnlyHosts, modelTrafficForbidden } from './jevOnly.ts';
+import { WITHDRAWN_HEADER } from './broker.ts';
 
 /**
  * The Auto (Jev) router: an OpenAI Chat Completions endpoint on 127.0.0.1 for agent CLIs started with "Model: Auto
@@ -61,7 +62,9 @@ export interface RouterDeps {
    * An `account` upstream (another extension's account): the call goes through CanvasTTY's broker, which adds the
    * key itself; the answer is a Response like fetch's. `ready` says whether CanvasTTY lists the account now.
    */
-  broker?: { send(upstream: AutoUpstream, path: string, init: RequestInit): Promise<Response>; ready(upstream: AutoUpstream): boolean; refresh(): Promise<void> };
+  broker?: { send(upstream: AutoUpstream, path: string, init: RequestInit): Promise<Response>; ready(upstream: AutoUpstream): boolean; refresh(): Promise<void>; withdrawn?(upstream: AutoUpstream): boolean };
+  /** What the CLI reads when the only accounts Auto could use had their grant withdrawn (the person's language). */
+  withdrawnMessage?(): string;
   transport?: typeof fetch;
   now?: () => number;
   timeouts?: Partial<RouterTimeouts>;
@@ -89,9 +92,13 @@ export interface FanOutRecord {
   outcome: FanOutOutcome | null;
 }
 
+const GRANT_WITHDRAWN = 'Auto (Jev): access to accounts was withdrawn in Settings — allow it again or choose another model.';
 const NO_PROVIDER = 'Auto (Jev): no model provider is allowed for this card. OpenRouter is used only for Jev\'s own decisions. Add another provider on the Decision models page, or start this card on its agent\'s own model.';
 
 const COOLDOWN_MS = Object.freeze({ transient: 30_000, quota: 300_000, missing: 900_000, auth: 900_000, maxRetryAfter: 24 * 3_600_000 });
+
+/** One model a card's answered calls used through the router (the agent tree's Auto line). */
+export interface SessionTurn { upstream: string; model: string; turns: number; tokensIn: number; tokensOut: number; usd: number | null }
 
 export interface DecisionRecord {
   at: number;
@@ -303,6 +310,7 @@ export class AutoRouter {
   /** Each card's first conversation (keyed hash): the one its new user turns are reported from. */
   private readonly mainConversation = new Map<string, string>();
   private readonly recentRecords: DecisionRecord[] = [];
+  private readonly turnsBySession = new Map<string, Map<string, SessionTurn>>();
   private readonly hosts = new Set<string>();
   /** Conversations (keyed hashes) where a fan-out met a tool call: their turns stay single. */
   private readonly agentic = new Set<string>();
@@ -451,6 +459,30 @@ export class AutoRouter {
     this.mainConversation.delete(sessionId);
     this.spend.forget(sessionId);
     this.outputs.delete(sessionId);
+    this.turnsBySession.delete(sessionId);
+  }
+
+  /**
+   * The models a card's answered calls used through this router, by full session id (for the agent tree): calls,
+   * the upstream, tokens and dollars where known. Memory only, until the card closes.
+   */
+  sessionTurns(sessionId: string): SessionTurn[] { return [...(this.turnsBySession.get(sessionId)?.values() ?? [])].map(entry => ({ ...entry })); }
+
+  private tally(sessionId: string, record: DecisionRecord): void {
+    if (record.status !== 200 || !record.model || !record.upstream) return;
+    let byModel = this.turnsBySession.get(sessionId);
+    if (!byModel) {
+      byModel = new Map();
+      this.turnsBySession.set(sessionId, byModel);
+      while (this.turnsBySession.size > ROUTER_LIMITS.conversations) this.turnsBySession.delete(this.turnsBySession.keys().next().value!);
+    }
+    const key = `${record.upstream}|${record.model}`;
+    const entry = byModel.get(key) ?? { upstream: record.upstream, model: record.model, turns: 0, tokensIn: 0, tokensOut: 0, usd: null };
+    entry.turns++;
+    entry.tokensIn += record.tokensIn ?? 0;
+    entry.tokensOut += record.tokensOut ?? 0;
+    if (record.costUsd !== null) entry.usd = Math.round(((entry.usd ?? 0) + record.costUsd) * 1e6) / 1e6;
+    byModel.set(key, entry);
   }
 
   /** Cards CanvasTTY no longer lists lose their keys (after a restart of the service). */
@@ -546,6 +578,20 @@ export class AutoRouter {
     return rules(settings.decider === 'rules' ? 'rules_only' : 'no_text');
   }
 
+  /**
+   * No model is usable, and an enabled account upstream is out because its grant was withdrawn while nothing else
+   * enabled could take the call: the person's own switch, not a failure.
+   */
+  private onlyWithdrawn(): boolean {
+    const withdrawn = this.deps.broker?.withdrawn;
+    if (!withdrawn) return false;
+    const enabled = this.deps.inventory().entries.filter(entry => entry.upstream.enabled && !entry.excluded && !modelTrafficForbidden(entry.upstream.baseUrl));
+    return enabled.some(entry => entry.upstream.preset === 'account' && withdrawn(entry.upstream))
+      && enabled.every(entry => entry.upstream.preset === 'account' && (withdrawn(entry.upstream) || !this.reachable(entry.upstream)));
+  }
+
+  private withdrawnText(): string { return this.deps.withdrawnMessage?.() ?? GRANT_WITHDRAWN; }
+
   /** An account upstream only while CanvasTTY's broker lists it (granted and offered); every other one always. */
   private reachable(upstream: AutoUpstream): boolean {
     return upstream.preset !== 'account' || (this.deps.broker?.ready(upstream) ?? false);
@@ -637,6 +683,7 @@ export class AutoRouter {
       }
       record.tier = request.kind === 'small' ? 'small' : request.view.level;
       const list = chosen.list;
+      if (!list.length && this.onlyWithdrawn()) throw new HttpError(503, 'grant_withdrawn', this.withdrawnText());
       if (!list.length) throw new HttpError(503, 'no_model', this.deps.inventory().entries.some(entry => entry.upstream.enabled && !entry.excluded && !modelTrafficForbidden(entry.upstream.baseUrl))
         ? 'Auto (Jev): no allowed model is available now (all are off, excluded, cooling down or not allowed for this card\'s data class).'
         : this.deps.noProviderMessage?.() ?? NO_PROVIDER);
@@ -672,6 +719,7 @@ export class AutoRouter {
       if (!sessionSet.size) this.active.delete(grant.sessionId);
       record.totalMs = this.now() - started;
       this.remember(record);
+      this.tally(grant.sessionId, record);
       this.idle();
     }
   }
@@ -717,13 +765,14 @@ export class AutoRouter {
     let lastCode = 'no_upstream';
     let capped: HttpError | null = null;
     let jevOnlySkipped = false;
+    let withdrawnFailovers = 0;
     for (const entry of list) {
       const candidate = { upstream: entry.upstream, model: { id: entry.model } };
       if (controller.signal.aborted) throw new HttpError(499, 'aborted', 'The call was cancelled.');
       if (this.coolingDown(candidate.upstream.id, candidate.model.id)) continue;
       record.attempts++;
       const failover = (status: number | 'error' | 'timeout', cooldownKey: string, ms: number, code: string): void => {
-        this.cool(cooldownKey, ms);
+        if (ms > 0) this.cool(cooldownKey, ms);
         record.failovers.push({ upstream: candidate.upstream.id, model: candidate.model.id, status });
         this.stats.failovers++;
         lastStatus = typeof status === 'number' ? status : 504;
@@ -772,6 +821,8 @@ export class AutoRouter {
           const status = upstream.status;
           const detail = await upstream.text().then(text => upstreamMessage(text), () => '');
           reservation.release();
+          // A grant the person withdrew: that account is unavailable (the broker says so), not failing: no cooldown.
+          if (status === 403 && candidate.upstream.preset === 'account' && upstream.headers.get(WITHDRAWN_HEADER)) { failover(status, candidate.upstream.id, 0, 'grant_withdrawn'); withdrawnFailovers++; continue; }
           if (status === 401 || status === 403) { failover(status, candidate.upstream.id, COOLDOWN_MS.auth, 'auth'); continue; }
           // OpenRouter answers an unknown model id with 400 ("<id> is not a valid model ID"), not 404: that is this
           // model missing, not a bad payload, so the next candidate is tried and this one cools down like a 404.
@@ -869,6 +920,8 @@ export class AutoRouter {
     }
     if (capped && record.attempts === 0) throw capped;
     if (jevOnlySkipped && record.attempts === 0) throw new HttpError(503, 'no_provider', this.deps.noProviderMessage?.() ?? NO_PROVIDER);
+    // Every model that was tried sits on an account whose grant was withdrawn: say that, not "try again".
+    if (withdrawnFailovers > 0 && withdrawnFailovers === record.failovers.length) throw new HttpError(503, 'grant_withdrawn', this.withdrawnText());
     throw new HttpError(lastStatus === 429 ? 429 : 503, lastCode, `Auto (Jev): no allowed model answered (last: ${lastCode}). It tries again on the next call.`);
   }
 
@@ -878,8 +931,10 @@ export class AutoRouter {
   }
 
   /** The cooldown an upstream answer earns (the same classes as `forward`). */
-  private coolFor(entry: InventoryEntry, status: number, retryAfter: string | null, detail: string): void {
+  private coolFor(entry: InventoryEntry, status: number, retryAfter: string | null, detail: string, withdrawn = false): void {
     const model = `${entry.upstream.id}|${entry.model}`;
+    // A withdrawn grant is no failure of the account: it stays out until allowed again (the broker), never cools down.
+    if (withdrawn && entry.upstream.preset === 'account') return;
     if (status === 401 || status === 403) this.cool(entry.upstream.id, COOLDOWN_MS.auth);
     else if (status === 400 && UNKNOWN_MODEL.test(detail)) this.cool(model, COOLDOWN_MS.missing);
     else if (status === 429) this.cool(model, retryAfterMs(retryAfter, this.now()) ?? COOLDOWN_MS.quota);
@@ -927,7 +982,7 @@ export class AutoRouter {
       record.http = upstream.status;
       if (!upstream.ok) {
         const detail = await upstream.text().then(text => upstreamMessage(text), () => '');
-        this.coolFor(entry, upstream.status, upstream.headers.get('retry-after'), detail);
+        this.coolFor(entry, upstream.status, upstream.headers.get('retry-after'), detail, !!upstream.headers.get(WITHDRAWN_HEADER));
         return done('failed');
       }
       const reader = upstream.body?.getReader();

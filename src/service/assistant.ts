@@ -800,6 +800,13 @@ export class Assistant {
       },
       route: id => this.routing.routeOf(id) ?? this.started.get(id)?.route ?? null,
       refused: id => this.refused.has(id),
+      // Model: Auto (Jev): the models its calls used through the router, and what they cost there.
+      auto: id => {
+        const used = this.auto.treeAuto(id);
+        if (!used) return null;
+        const share = used.plan ? Math.round((used.tokens * this.routing.settings.expectedShare.medium / perTask) * 100) / 100 : null;
+        return { models: used.models, plan: used.plan, usd: used.usd, share };
+      },
       task: id => this.review.taskOf(id),
       planChildren: id => this.bindings.planOf(id),
       endedAt: id => this.harness.finished(id),

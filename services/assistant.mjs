@@ -10132,19 +10132,20 @@ function costOf(route) {
     case "usd":
       return route.costBasis === "plan" || route.costBasis === "flat" ? { kind: "flat", label: route.label } : { kind: "usd", low: estimate2.low, high: estimate2.high };
     case "window":
-      return { kind: "plan", label: route.label, share: Number.isFinite(estimate2.share) ? estimate2.share : null, window: estimate2.window };
+      return { kind: "plan", label: route.label, share: Number.isFinite(estimate2.share) ? estimate2.share : null, window: estimate2.window, subscription: route.kind !== "coding-plan" };
     case "launches":
       return { kind: "launch", label: route.label, used: estimate2.used, allowance: estimate2.allowance, windowHours: estimate2.windowHours };
     case "flat":
       return { kind: "flat", label: route.label };
     default:
-      return route.kind === "subscription" || route.kind === "coding-plan" || route.kind === "cli-default" ? { kind: "plan", label: route.label, share: null, window: null } : null;
+      return route.kind === "subscription" || route.kind === "coding-plan" || route.kind === "cli-default" ? { kind: "plan", label: route.label, share: null, window: null, subscription: route.kind !== "coding-plan" } : null;
   }
 }
 function measuredCost(cost, usage) {
   if (!cost || !usage) return cost;
   if (cost.kind === "usd" && usage.usd !== null) return { kind: "usd", low: usage.usd, high: usage.usd, measured: true };
   if (cost.kind === "plan") return { ...cost, share: usage.share, measured: true };
+  if (cost.kind === "flat") return { kind: "plan", label: cost.label, share: usage.share, window: null, measured: true, subscription: true };
   return cost;
 }
 function modelLabel2(model) {
@@ -10219,13 +10220,16 @@ function buildTree(input, options = {}) {
     for (const child of refused) placed.add(child.id);
     const children = depth >= TREE_LIMITS.depth ? [] : below.filter((child) => !refused.includes(child)).sort((a, b) => (a.startedAt ?? 0) - (b.startedAt ?? 0) || a.id.localeCompare(b.id)).map((child) => node(child, depth + 1));
     const usage = input.usage?.(card.id) ?? null;
-    const cost = measuredCost(costOf(route) ?? (top ? { kind: "plan", label: top.label, share: null, window: null } : null), usage);
+    const auto = !route && !top ? input.auto?.(card.id) ?? null : null;
+    const autoCost = !auto ? null : auto.plan ? { kind: "plan", label: auto.plan, share: auto.share, window: null, subscription: true, ...auto.share !== null ? { measured: true } : {} } : auto.usd !== null ? { kind: "usd", low: auto.usd, high: auto.usd, measured: true } : null;
+    const cost = measuredCost(costOf(route) ?? (top ? { kind: "plan", label: top.label, share: null, window: null, subscription: true } : autoCost), usage);
     return {
       id: card.id,
       title: oneLine(card.title, TREE_LIMITS.title) ?? card.id.slice(0, 8),
       role: card.role,
       provider: card.provider,
       model: modelLabel2(card.model ?? route?.model ?? top?.model ?? null),
+      auto: auto && auto.models.length ? auto.models.slice(0, 3).map((entry) => ({ model: modelLabel2(entry.model) ?? entry.model, calls: entry.calls })) : null,
       status: statusOf(card),
       task: oneLine(input.task(card.id), TREE_LIMITS.task),
       cost,
@@ -12218,6 +12222,7 @@ var EN2 = {
   projectUnreadable: "This project's OpenCode config could not be read, so Auto (Jev) cannot check where prompts go. Choose Off, or fix the file.",
   noUpstream: "Auto (Jev) has no model provider (OpenRouter serves only Jev). Add one on the Decision models page, or start this card on its agent's own model.",
   noProvider: "Auto (Jev): no allowed model provider (OpenRouter serves only Jev). Add one on the Decision models page, or start this card on its agent's own model.",
+  grantWithdrawn: "Auto (Jev): access to accounts was withdrawn in Settings \u2014 allow it again or choose another model.",
   jevOnly: "OpenRouter serves only Jev's own decisions: Auto cannot send model calls there. Use another provider.",
   listLoading: "Auto (Jev) is still loading OpenRouter's model list (prices and limits from openrouter.ai). Try again in a few seconds; the Decision models page shows its state.",
   dataClass: "No Auto (Jev) upstream is trusted with this card's data class. Raise an upstream's trust on the Decision models page, or lower the card's class.",
@@ -12234,6 +12239,7 @@ var RU2 = {
   projectUnreadable: "\u041A\u043E\u043D\u0444\u0438\u0433 OpenCode \u044D\u0442\u043E\u0433\u043E \u043F\u0440\u043E\u0435\u043A\u0442\u0430 \u043D\u0435 \u0447\u0438\u0442\u0430\u0435\u0442\u0441\u044F, \u043F\u043E\u044D\u0442\u043E\u043C\u0443 \xAB\u0410\u0432\u0442\u043E (Jev)\xBB \u043D\u0435 \u043C\u043E\u0436\u0435\u0442 \u043F\u0440\u043E\u0432\u0435\u0440\u0438\u0442\u044C, \u043A\u0443\u0434\u0430 \u0443\u0439\u0434\u0443\u0442 \u0437\u0430\u043F\u0440\u043E\u0441\u044B. \u0412\u044B\u0431\u0435\u0440\u0438\u0442\u0435 \xAB\u0412\u044B\u043A\u043B\xBB \u0438\u043B\u0438 \u0438\u0441\u043F\u0440\u0430\u0432\u044C\u0442\u0435 \u0444\u0430\u0439\u043B.",
   noUpstream: "\u0423 \xAB\u0410\u0432\u0442\u043E (Jev)\xBB \u043D\u0435\u0442 \u043F\u043E\u0441\u0442\u0430\u0432\u0449\u0438\u043A\u0430 \u043C\u043E\u0434\u0435\u043B\u0435\u0439 (OpenRouter \u2014 \u0442\u043E\u043B\u044C\u043A\u043E \u0434\u043B\u044F Jev). \u0414\u043E\u0431\u0430\u0432\u044C\u0442\u0435 \u0435\u0433\u043E \u043D\u0430 \u0441\u0442\u0440\u0430\u043D\u0438\u0446\u0435 \xAB\u041C\u043E\u0434\u0435\u043B\u0438 \u0440\u0435\u0448\u0435\u043D\u0438\u0439\xBB \u0438\u043B\u0438 \u0437\u0430\u043F\u0443\u0441\u0442\u0438\u0442\u0435 \u043E\u043A\u043D\u043E \u043D\u0430 \u043C\u043E\u0434\u0435\u043B\u0438 \u0430\u0433\u0435\u043D\u0442\u0430.",
   noProvider: "\xAB\u0410\u0432\u0442\u043E (Jev)\xBB: \u043D\u0435\u0442 \u0440\u0430\u0437\u0440\u0435\u0448\u0451\u043D\u043D\u043E\u0433\u043E \u043F\u043E\u0441\u0442\u0430\u0432\u0449\u0438\u043A\u0430 \u043C\u043E\u0434\u0435\u043B\u0435\u0439 (OpenRouter \u2014 \u0442\u043E\u043B\u044C\u043A\u043E \u0434\u043B\u044F Jev). \u0414\u043E\u0431\u0430\u0432\u044C\u0442\u0435 \u0435\u0433\u043E \u043D\u0430 \u0441\u0442\u0440\u0430\u043D\u0438\u0446\u0435 \xAB\u041C\u043E\u0434\u0435\u043B\u0438 \u0440\u0435\u0448\u0435\u043D\u0438\u0439\xBB \u0438\u043B\u0438 \u0437\u0430\u043F\u0443\u0441\u0442\u0438\u0442\u0435 \u043E\u043A\u043D\u043E \u043D\u0430 \u043C\u043E\u0434\u0435\u043B\u0438 \u0430\u0433\u0435\u043D\u0442\u0430.",
+  grantWithdrawn: "\xAB\u0410\u0432\u0442\u043E (Jev)\xBB: \u0434\u043E\u0441\u0442\u0443\u043F \u043A \u0430\u043A\u043A\u0430\u0443\u043D\u0442\u0430\u043C \u043E\u0442\u043E\u0437\u0432\u0430\u043D \u0432 \u043D\u0430\u0441\u0442\u0440\u043E\u0439\u043A\u0430\u0445 \u2014 \u0440\u0430\u0437\u0440\u0435\u0448\u0438\u0442\u0435 \u0435\u0433\u043E \u0441\u043D\u043E\u0432\u0430 \u0438\u043B\u0438 \u0432\u044B\u0431\u0435\u0440\u0438\u0442\u0435 \u0434\u0440\u0443\u0433\u0443\u044E \u043C\u043E\u0434\u0435\u043B\u044C.",
   jevOnly: "OpenRouter \u0441\u043B\u0443\u0436\u0438\u0442 \u0442\u043E\u043B\u044C\u043A\u043E \u0434\u043B\u044F \u0440\u0435\u0448\u0435\u043D\u0438\u0439 \u0441\u0430\u043C\u043E\u0433\u043E Jev: \xAB\u0410\u0432\u0442\u043E\xBB \u043D\u0435 \u043C\u043E\u0436\u0435\u0442 \u043E\u0442\u043F\u0440\u0430\u0432\u043B\u044F\u0442\u044C \u0442\u0443\u0434\u0430 \u0432\u044B\u0437\u043E\u0432\u044B \u043C\u043E\u0434\u0435\u043B\u0435\u0439. \u0412\u044B\u0431\u0435\u0440\u0438\u0442\u0435 \u0434\u0440\u0443\u0433\u043E\u0433\u043E \u043F\u043E\u0441\u0442\u0430\u0432\u0449\u0438\u043A\u0430.",
   listLoading: "\xAB\u0410\u0432\u0442\u043E (Jev)\xBB \u0435\u0449\u0451 \u0437\u0430\u0433\u0440\u0443\u0436\u0430\u0435\u0442 \u0441\u043F\u0438\u0441\u043E\u043A \u043C\u043E\u0434\u0435\u043B\u0435\u0439 OpenRouter (\u0446\u0435\u043D\u044B \u0438 \u043F\u0440\u0435\u0434\u0435\u043B\u044B \u0441 openrouter.ai). \u041F\u043E\u0432\u0442\u043E\u0440\u0438\u0442\u0435 \u0447\u0435\u0440\u0435\u0437 \u043D\u0435\u0441\u043A\u043E\u043B\u044C\u043A\u043E \u0441\u0435\u043A\u0443\u043D\u0434; \u0441\u043E\u0441\u0442\u043E\u044F\u043D\u0438\u0435 \u0432\u0438\u0434\u043D\u043E \u043D\u0430 \u0441\u0442\u0440\u0430\u043D\u0438\u0446\u0435 \xAB\u041C\u043E\u0434\u0435\u043B\u0438 \u0440\u0435\u0448\u0435\u043D\u0438\u0439\xBB.",
   dataClass: "\u041D\u0438 \u043E\u0434\u043D\u043E\u043C\u0443 \u043F\u043E\u0441\u0442\u0430\u0432\u0449\u0438\u043A\u0443 \xAB\u0410\u0432\u0442\u043E (Jev)\xBB \u043D\u0435 \u0434\u043E\u0432\u0435\u0440\u0435\u043D \u043A\u043B\u0430\u0441\u0441 \u0434\u0430\u043D\u043D\u044B\u0445 \u044D\u0442\u043E\u0433\u043E \u043E\u043A\u043D\u0430. \u041F\u043E\u0432\u044B\u0441\u044C\u0442\u0435 \u0434\u043E\u0432\u0435\u0440\u0438\u0435 \u043F\u043E\u0441\u0442\u0430\u0432\u0449\u0438\u043A\u0443 \u043D\u0430 \u0441\u0442\u0440\u0430\u043D\u0438\u0446\u0435 \xAB\u041C\u043E\u0434\u0435\u043B\u0438 \u0440\u0435\u0448\u0435\u043D\u0438\u0439\xBB \u0438\u043B\u0438 \u043F\u043E\u043D\u0438\u0437\u044C\u0442\u0435 \u043A\u043B\u0430\u0441\u0441 \u043E\u043A\u043D\u0430.",
@@ -12647,11 +12653,291 @@ var defaultLookup = async (host) => {
   return (await lookup(host, { all: true })).map((entry) => entry.address);
 };
 
+// src/auto/broker.ts
+var WITHDRAWN_HEADER = "x-canvastty-grant-withdrawn";
+var LIST_FRESH_MS = 15e3;
+var UNSUPPORTED_REST_MS = 30 * 6e4;
+var FAILING_REST_MS = 6e4;
+var INLINE_BODY_CHARS = 512 * 1024;
+var PART_CHARS = 512 * 1024;
+var isRecord8 = (value) => !!value && typeof value === "object" && !Array.isArray(value);
+var unsupportedError = (error) => isRecord8(error) && error.code === -32601 || /unknown host method|does not have the [a-z:]+ permission/iu.test(error instanceof Error ? error.message : String(error));
+var sharedReadReason = (error) => {
+  const data = isRecord8(error) ? error.data : void 0;
+  return isRecord8(data) && typeof data.reason === "string" && /^[a-z_]{1,40}$/u.test(data.reason) ? data.reason : null;
+};
+var clean2 = (value, max) => typeof value === "string" ? value.replace(/[\u0000-\u001f\u007f]+/gu, " ").trim().slice(0, max) : "";
+function brokeredAccountOf(value) {
+  if (!isRecord8(value) || !validBrokerRef(value.ref)) return null;
+  if (value.protocol !== "openai" && value.protocol !== "anthropic") return null;
+  let origin;
+  try {
+    origin = new URL(String(value.origin)).origin;
+  } catch {
+    return null;
+  }
+  if (origin !== value.origin || !/^https:|^http:\/\/(?:127\.0\.0\.1|\[::1\])(?::\d+)?$/u.test(origin)) return null;
+  const strings3 = (list, max) => Array.isArray(list) ? list.filter((item) => typeof item === "string" && item.length > 0 && item.length <= 200).slice(0, max) : [];
+  const models = strings3(value.models, 64);
+  if (!models.length) return null;
+  return {
+    ref: value.ref,
+    owner: clean2(value.owner, 80),
+    ownerName: clean2(value.ownerName, 80) || clean2(value.owner, 80),
+    id: clean2(value.id, 64),
+    label: clean2(value.label, 80) || clean2(value.id, 64),
+    protocol: value.protocol,
+    origin,
+    paths: strings3(value.paths, 8),
+    models,
+    flatRate: value.flatRate === true
+  };
+}
+var AccountBroker = class {
+  host;
+  now;
+  log;
+  status = "unknown";
+  restUntil = 0;
+  cached = null;
+  listing = null;
+  pending = /* @__PURE__ */ new Map();
+  next = 1;
+  prefix = `auto-${Math.random().toString(36).slice(2, 10)}`;
+  encoder = new TextEncoder();
+  /**
+   * Accounts whose grant CanvasTTY refused (withdrawn or changed), with when: unavailable, not "failing", until a
+   * list read that began after that lists them again (CanvasTTY lists only accounts the person allowed) or a grant
+   * change notice from CanvasTTY.
+   */
+  withdrawnRefs = /* @__PURE__ */ new Map();
+  constructor(host, options = {}) {
+    this.host = host;
+    this.now = options.now ?? Date.now;
+    this.log = options.log ?? ((level, message) => host.log(level, message));
+  }
+  get mode() {
+    return this.status;
+  }
+  /** The granted, offered accounts (cached for 15 s); empty on a core without brokered requests. */
+  list() {
+    const now = this.now();
+    if (this.cached && now - this.cached.at < LIST_FRESH_MS) return Promise.resolve(this.cached.accounts);
+    if (now < this.restUntil) return Promise.resolve(this.cached?.accounts ?? []);
+    const startedAt = now;
+    this.listing ??= this.host.callHost("accounts.list", {}).then((answer) => {
+      const raw = isRecord8(answer) && Array.isArray(answer.accounts) ? answer.accounts : [];
+      const accounts = raw.map(brokeredAccountOf).filter((entry) => entry !== null);
+      for (const [ref, at] of this.withdrawnRefs) if (startedAt > at && accounts.some((account) => account.ref === ref)) this.withdrawnRefs.delete(ref);
+      this.status = "ready";
+      this.cached = { at: this.now(), accounts };
+      return accounts;
+    }, (error) => {
+      const reason = sharedReadReason(error);
+      if (!reason && unsupportedError(error)) {
+        this.status = "unsupported";
+        this.restUntil = this.now() + UNSUPPORTED_REST_MS;
+      } else {
+        this.status = "failing";
+        this.restUntil = this.now() + FAILING_REST_MS;
+      }
+      this.cached = { at: this.now(), accounts: [] };
+      return [];
+    }).finally(() => {
+      this.listing = null;
+    });
+    return this.listing;
+  }
+  /** The last list without waiting (for synchronous checks such as which upstreams are usable now). */
+  known(ref) {
+    if (this.withdrawnRefs.has(ref)) return null;
+    return this.cached?.accounts.find((account) => account.ref === ref) ?? null;
+  }
+  /** CanvasTTY refused this account's grant (the person withdrew or must renew it): unavailable until allowed again. */
+  withdrawn(ref) {
+    return this.withdrawnRefs.has(ref);
+  }
+  /** A grant changed (CanvasTTY's notice, where a core sends one): every account is asked about again. */
+  grantsChanged() {
+    this.withdrawnRefs.clear();
+    this.invalidate();
+  }
+  /** The list changed (a grant, an owner change): the next call asks again. */
+  invalidate() {
+    this.cached = null;
+    this.restUntil = 0;
+  }
+  /**
+   * A fetch-like call through the broker. `path` is the account's path (`/chat/completions`, `/models`); the body is
+   * the JSON the router would send. Resolves with the provider's answer as a Response.
+   */
+  async send(ref, path, init) {
+    if (this.status === "unsupported") return this.refusal(503, "This CanvasTTY cannot send requests through other extensions' accounts.");
+    const requestId = `${this.prefix}-${this.next++}`;
+    const text6 = init.body === void 0 || init.body === null ? null : typeof init.body === "string" ? init.body : Buffer.from(init.body).toString("utf8");
+    let body;
+    if (text6 !== null && text6.length <= INLINE_BODY_CHARS) {
+      try {
+        const parsed = JSON.parse(text6);
+        if (isRecord8(parsed)) body = parsed;
+      } catch {
+      }
+    }
+    const stream = body ? body.stream === true : text6 !== null && /"stream"\s*:\s*true/u.test(text6.slice(0, 4096));
+    const signal = init.signal ?? null;
+    if (signal?.aborted) throw abortError();
+    return new Promise((resolve9, reject) => {
+      const entry = { ref, resolve: resolve9, reject, controller: null, headed: false, done: false };
+      this.pending.set(requestId, entry);
+      const onAbort = () => {
+        if (entry.done) return;
+        void this.host.callHost("accounts.cancel", { requestId }).catch(() => void 0);
+        this.finish(requestId, abortError());
+      };
+      signal?.addEventListener("abort", onAbort, { once: true });
+      const start = async () => {
+        if (text6 !== null && !body) {
+          for (let at = 0; at < text6.length; at += PART_CHARS) {
+            await this.host.callHost("accounts.body", { requestId, data: text6.slice(at, at + PART_CHARS) });
+          }
+        }
+        await this.host.callHost("accounts.request", { requestId, ref, path, ...body ? { body } : {}, stream });
+      };
+      start().catch((error) => {
+        signal?.removeEventListener("abort", onAbort);
+        if (entry.done) return;
+        const reason = sharedReadReason(error);
+        if (!reason && unsupportedError(error)) {
+          this.status = "unsupported";
+          this.restUntil = this.now() + UNSUPPORTED_REST_MS;
+        }
+        this.pending.delete(requestId);
+        entry.done = true;
+        const message = clean2(error instanceof Error ? error.message : String(error), 300);
+        resolve9(this.refusalFor(reason, message, ref));
+      });
+    });
+  }
+  /** `canvastty.accounts.head|chunk|end` from CanvasTTY. */
+  notification(kind, params) {
+    const requestId = typeof params.requestId === "string" ? params.requestId : "";
+    const entry = this.pending.get(requestId);
+    if (!entry || entry.done) return;
+    if (kind === "head") {
+      if (entry.headed) return;
+      entry.headed = true;
+      const headers = new Headers();
+      const contentType = clean2(params.contentType, 120);
+      if (contentType) headers.set("content-type", contentType);
+      if (typeof params.retryAfter === "number") headers.set("retry-after", String(params.retryAfter));
+      const status = typeof params.status === "number" && params.status >= 200 && params.status < 600 ? params.status : 200;
+      const body = new ReadableStream({ start: (controller) => {
+        entry.controller = controller;
+      } });
+      entry.resolve(new Response(body, { status, headers }));
+      return;
+    }
+    if (kind === "chunk") {
+      if (entry.headed && entry.controller && typeof params.data === "string") {
+        try {
+          entry.controller.enqueue(this.encoder.encode(params.data));
+        } catch {
+        }
+      }
+      return;
+    }
+    const error = isRecord8(params.error) ? params.error : null;
+    if (!entry.headed) {
+      this.pending.delete(requestId);
+      entry.done = true;
+      if (!error) {
+        entry.resolve(new Response("", { status: typeof params.status === "number" && params.status >= 200 && params.status < 600 ? params.status : 200 }));
+        return;
+      }
+      const reason = typeof error.reason === "string" ? error.reason : "network";
+      if (reason === "upstream" && typeof error.status === "number" && error.status >= 400 && error.status < 600) {
+        const headers = new Headers({ "content-type": "application/json" });
+        if (typeof error.retryAfter === "number") headers.set("retry-after", String(error.retryAfter));
+        entry.resolve(new Response(JSON.stringify({ error: { message: clean2(error.message, 300) } }), { status: error.status, headers }));
+        return;
+      }
+      if (reason === "network" || reason === "timeout" || reason === "cancelled") {
+        entry.reject(new Error(`brokered request: ${reason}`));
+        return;
+      }
+      entry.resolve(this.refusalFor(reason, clean2(error.message, 300), entry.ref));
+      return;
+    }
+    if (error) this.finish(requestId, new Error(`brokered request ended: ${clean2(error.reason, 40)}`));
+    else this.finish(requestId, null);
+  }
+  /** Every open request ends (the service stops). */
+  close() {
+    for (const requestId of [...this.pending.keys()]) this.finish(requestId, new Error("The service stopped."));
+  }
+  finish(requestId, error) {
+    const entry = this.pending.get(requestId);
+    if (!entry || entry.done) return;
+    entry.done = true;
+    this.pending.delete(requestId);
+    if (!entry.headed) {
+      entry.reject(error ?? new Error("brokered request ended"));
+      return;
+    }
+    try {
+      if (error) entry.controller?.error(error);
+      else entry.controller?.close();
+    } catch {
+    }
+  }
+  refusalFor(reason, message, ref = null) {
+    switch (reason) {
+      // A plan used up (the owner said so) or the local per-account rate: the router's quota cooldown.
+      case "budget_refused":
+        return this.refusal(429, message || "The account's plan is used up.");
+      case "rate_limited":
+        return this.refusal(429, message, 60);
+      case "model_refused":
+      case "path_refused":
+        return this.refusal(404, message);
+      case "owner_unavailable":
+        return this.refusal(503, message);
+      case "too_large":
+        return this.refusal(413, message);
+      case "not_granted":
+      case "grant_changed": {
+        this.invalidate();
+        if (ref) this.withdrawnRefs.set(ref, this.now());
+        const answer = this.refusal(403, message);
+        answer.headers.set(WITHDRAWN_HEADER, reason);
+        return answer;
+      }
+      case "caller_unavailable":
+      case "account_unknown":
+        this.invalidate();
+        return this.refusal(403, message);
+      default:
+        return this.refusal(503, message || "The brokered request failed.");
+    }
+  }
+  refusal(status, message, retryAfter) {
+    const headers = new Headers({ "content-type": "application/json" });
+    if (retryAfter !== void 0) headers.set("retry-after", String(retryAfter));
+    return new Response(JSON.stringify({ error: { message } }), { status, headers });
+  }
+};
+function abortError() {
+  const error = new Error("The operation was aborted.");
+  error.name = "AbortError";
+  return error;
+}
+
 // src/auto/router.ts
 var ROUTER_TIMEOUTS = { jevMs: 2500, headersMs: 6e4, firstChunkMs: 6e4, idleMs: 9e4, totalMs: 15 * 6e4, memberMs: 18e4, turnMs: 12e4, turnXhighMs: 24e4 };
 var LONG_EFFORTS = /* @__PURE__ */ new Set(["xhigh", "max", "ultra"]);
 var meaningful = (text6) => text6.split("\n").some((line) => line.trim() !== "" && !line.startsWith(":"));
 var ROUTER_LIMITS = Object.freeze({ bodyBytes: 32 * 1048576, perCard: 16, total: 64, attempts: 6, conversations: 1024, leaseMs: 30 * 6e4, recent: 50, logBytes: 512 * 1024, outcomes: 512 });
+var GRANT_WITHDRAWN = "Auto (Jev): access to accounts was withdrawn in Settings \u2014 allow it again or choose another model.";
 var NO_PROVIDER = "Auto (Jev): no model provider is allowed for this card. OpenRouter is used only for Jev's own decisions. Add another provider on the Decision models page, or start this card on its agent's own model.";
 var COOLDOWN_MS = Object.freeze({ transient: 3e4, quota: 3e5, missing: 9e5, auth: 9e5, maxRetryAfter: 24 * 36e5 });
 var HttpError = class extends Error {
@@ -12665,7 +12951,7 @@ var HttpError = class extends Error {
 };
 var RETRYABLE = /* @__PURE__ */ new Set([404, 408, 409, 425, 429, 500, 502, 503, 504]);
 var UNKNOWN_MODEL = /\bis not a valid model id\b|\bmodel\b.{0,80}\b(?:does not exist|not found)\b|\bno endpoints found\b/iu;
-var clean2 = (value, max) => value.replace(/[\u0000-\u001f\u007f]+/gu, " ").replace(/\s+/gu, " ").trim().slice(0, max);
+var clean3 = (value, max) => value.replace(/[\u0000-\u001f\u007f]+/gu, " ").replace(/\s+/gu, " ").trim().slice(0, max);
 function retryAfterMs2(header, now) {
   if (!header) return null;
   const seconds = Number(header);
@@ -12850,6 +13136,7 @@ var AutoRouter = class {
   /** Each card's first conversation (keyed hash): the one its new user turns are reported from. */
   mainConversation = /* @__PURE__ */ new Map();
   recentRecords = [];
+  turnsBySession = /* @__PURE__ */ new Map();
   hosts = /* @__PURE__ */ new Set();
   /** Conversations (keyed hashes) where a fan-out met a tool call: their turns stay single. */
   agentic = /* @__PURE__ */ new Set();
@@ -13037,6 +13324,30 @@ var AutoRouter = class {
     this.mainConversation.delete(sessionId);
     this.spend.forget(sessionId);
     this.outputs.delete(sessionId);
+    this.turnsBySession.delete(sessionId);
+  }
+  /**
+   * The models a card's answered calls used through this router, by full session id (for the agent tree): calls,
+   * the upstream, tokens and dollars where known. Memory only, until the card closes.
+   */
+  sessionTurns(sessionId) {
+    return [...this.turnsBySession.get(sessionId)?.values() ?? []].map((entry) => ({ ...entry }));
+  }
+  tally(sessionId, record4) {
+    if (record4.status !== 200 || !record4.model || !record4.upstream) return;
+    let byModel = this.turnsBySession.get(sessionId);
+    if (!byModel) {
+      byModel = /* @__PURE__ */ new Map();
+      this.turnsBySession.set(sessionId, byModel);
+      while (this.turnsBySession.size > ROUTER_LIMITS.conversations) this.turnsBySession.delete(this.turnsBySession.keys().next().value);
+    }
+    const key = `${record4.upstream}|${record4.model}`;
+    const entry = byModel.get(key) ?? { upstream: record4.upstream, model: record4.model, turns: 0, tokensIn: 0, tokensOut: 0, usd: null };
+    entry.turns++;
+    entry.tokensIn += record4.tokensIn ?? 0;
+    entry.tokensOut += record4.tokensOut ?? 0;
+    if (record4.costUsd !== null) entry.usd = Math.round(((entry.usd ?? 0) + record4.costUsd) * 1e6) / 1e6;
+    byModel.set(key, entry);
   }
   /** Cards CanvasTTY no longer lists lose their keys (after a restart of the service). */
   retainSessions(known) {
@@ -13154,6 +13465,19 @@ var AutoRouter = class {
       }
     }
     return rules(settings.decider === "rules" ? "rules_only" : "no_text");
+  }
+  /**
+   * No model is usable, and an enabled account upstream is out because its grant was withdrawn while nothing else
+   * enabled could take the call: the person's own switch, not a failure.
+   */
+  onlyWithdrawn() {
+    const withdrawn = this.deps.broker?.withdrawn;
+    if (!withdrawn) return false;
+    const enabled = this.deps.inventory().entries.filter((entry) => entry.upstream.enabled && !entry.excluded && !modelTrafficForbidden(entry.upstream.baseUrl));
+    return enabled.some((entry) => entry.upstream.preset === "account" && withdrawn(entry.upstream)) && enabled.every((entry) => entry.upstream.preset === "account" && (withdrawn(entry.upstream) || !this.reachable(entry.upstream)));
+  }
+  withdrawnText() {
+    return this.deps.withdrawnMessage?.() ?? GRANT_WITHDRAWN;
   }
   /** An account upstream only while CanvasTTY's broker lists it (granted and offered); every other one always. */
   reachable(upstream) {
@@ -13283,6 +13607,7 @@ var AutoRouter = class {
       }
       record4.tier = request2.kind === "small" ? "small" : request2.view.level;
       const list = chosen.list;
+      if (!list.length && this.onlyWithdrawn()) throw new HttpError(503, "grant_withdrawn", this.withdrawnText());
       if (!list.length) throw new HttpError(503, "no_model", this.deps.inventory().entries.some((entry) => entry.upstream.enabled && !entry.excluded && !modelTrafficForbidden(entry.upstream.baseUrl)) ? "Auto (Jev): no allowed model is available now (all are off, excluded, cooling down or not allowed for this card's data class)." : this.deps.noProviderMessage?.() ?? NO_PROVIDER);
       if (request2.kind === "turn" && kind === "turn") {
         const typical = this.typicalOutput(grant.sessionId, body.max_tokens);
@@ -13325,6 +13650,7 @@ var AutoRouter = class {
       if (!sessionSet.size) this.active.delete(grant.sessionId);
       record4.totalMs = this.now() - started;
       this.remember(record4);
+      this.tally(grant.sessionId, record4);
       this.idle();
     }
   }
@@ -13365,13 +13691,14 @@ var AutoRouter = class {
     let lastCode = "no_upstream";
     let capped = null;
     let jevOnlySkipped = false;
+    let withdrawnFailovers = 0;
     for (const entry of list) {
       const candidate = { upstream: entry.upstream, model: { id: entry.model } };
       if (controller.signal.aborted) throw new HttpError(499, "aborted", "The call was cancelled.");
       if (this.coolingDown(candidate.upstream.id, candidate.model.id)) continue;
       record4.attempts++;
       const failover = (status, cooldownKey, ms, code) => {
-        this.cool(cooldownKey, ms);
+        if (ms > 0) this.cool(cooldownKey, ms);
         record4.failovers.push({ upstream: candidate.upstream.id, model: candidate.model.id, status });
         this.stats.failovers++;
         lastStatus = typeof status === "number" ? status : 504;
@@ -13430,6 +13757,11 @@ var AutoRouter = class {
           const status = upstream.status;
           const detail = await upstream.text().then((text6) => upstreamMessage(text6), () => "");
           reservation.release();
+          if (status === 403 && candidate.upstream.preset === "account" && upstream.headers.get(WITHDRAWN_HEADER)) {
+            failover(status, candidate.upstream.id, 0, "grant_withdrawn");
+            withdrawnFailovers++;
+            continue;
+          }
           if (status === 401 || status === 403) {
             failover(status, candidate.upstream.id, COOLDOWN_MS.auth, "auth");
             continue;
@@ -13577,6 +13909,7 @@ data: [DONE]
     }
     if (capped && record4.attempts === 0) throw capped;
     if (jevOnlySkipped && record4.attempts === 0) throw new HttpError(503, "no_provider", this.deps.noProviderMessage?.() ?? NO_PROVIDER);
+    if (withdrawnFailovers > 0 && withdrawnFailovers === record4.failovers.length) throw new HttpError(503, "grant_withdrawn", this.withdrawnText());
     throw new HttpError(lastStatus === 429 ? 429 : 503, lastCode, `Auto (Jev): no allowed model answered (last: ${lastCode}). It tries again on the next call.`);
   }
   busyUpstream(id, delta) {
@@ -13585,8 +13918,9 @@ data: [DONE]
     else this.upstreamActive.delete(id);
   }
   /** The cooldown an upstream answer earns (the same classes as `forward`). */
-  coolFor(entry, status, retryAfter, detail) {
+  coolFor(entry, status, retryAfter, detail, withdrawn = false) {
     const model = `${entry.upstream.id}|${entry.model}`;
+    if (withdrawn && entry.upstream.preset === "account") return;
     if (status === 401 || status === 403) this.cool(entry.upstream.id, COOLDOWN_MS.auth);
     else if (status === 400 && UNKNOWN_MODEL.test(detail)) this.cool(model, COOLDOWN_MS.missing);
     else if (status === 429) this.cool(model, retryAfterMs2(retryAfter, this.now()) ?? COOLDOWN_MS.quota);
@@ -13648,7 +13982,7 @@ data: [DONE]
       record4.http = upstream.status;
       if (!upstream.ok) {
         const detail = await upstream.text().then((text6) => upstreamMessage(text6), () => "");
-        this.coolFor(entry, upstream.status, upstream.headers.get("retry-after"), detail);
+        this.coolFor(entry, upstream.status, upstream.headers.get("retry-after"), detail, !!upstream.headers.get(WITHDRAWN_HEADER));
         return done("failed");
       }
       const reader = upstream.body?.getReader();
@@ -13881,264 +14215,10 @@ function upstreamMessage(text6) {
   try {
     const parsed = JSON.parse(text6);
     const message = typeof parsed.error === "string" ? parsed.error : typeof parsed.error?.message === "string" ? parsed.error.message : typeof parsed.message === "string" ? parsed.message : "";
-    return clean2(message, 240);
+    return clean3(message, 240);
   } catch {
     return "";
   }
-}
-
-// src/auto/broker.ts
-var LIST_FRESH_MS = 15e3;
-var UNSUPPORTED_REST_MS = 30 * 6e4;
-var FAILING_REST_MS = 6e4;
-var INLINE_BODY_CHARS = 512 * 1024;
-var PART_CHARS = 512 * 1024;
-var isRecord8 = (value) => !!value && typeof value === "object" && !Array.isArray(value);
-var unsupportedError = (error) => isRecord8(error) && error.code === -32601 || /unknown host method|does not have the [a-z:]+ permission/iu.test(error instanceof Error ? error.message : String(error));
-var sharedReadReason = (error) => {
-  const data = isRecord8(error) ? error.data : void 0;
-  return isRecord8(data) && typeof data.reason === "string" && /^[a-z_]{1,40}$/u.test(data.reason) ? data.reason : null;
-};
-var clean3 = (value, max) => typeof value === "string" ? value.replace(/[\u0000-\u001f\u007f]+/gu, " ").trim().slice(0, max) : "";
-function brokeredAccountOf(value) {
-  if (!isRecord8(value) || !validBrokerRef(value.ref)) return null;
-  if (value.protocol !== "openai" && value.protocol !== "anthropic") return null;
-  let origin;
-  try {
-    origin = new URL(String(value.origin)).origin;
-  } catch {
-    return null;
-  }
-  if (origin !== value.origin || !/^https:|^http:\/\/(?:127\.0\.0\.1|\[::1\])(?::\d+)?$/u.test(origin)) return null;
-  const strings3 = (list, max) => Array.isArray(list) ? list.filter((item) => typeof item === "string" && item.length > 0 && item.length <= 200).slice(0, max) : [];
-  const models = strings3(value.models, 64);
-  if (!models.length) return null;
-  return {
-    ref: value.ref,
-    owner: clean3(value.owner, 80),
-    ownerName: clean3(value.ownerName, 80) || clean3(value.owner, 80),
-    id: clean3(value.id, 64),
-    label: clean3(value.label, 80) || clean3(value.id, 64),
-    protocol: value.protocol,
-    origin,
-    paths: strings3(value.paths, 8),
-    models,
-    flatRate: value.flatRate === true
-  };
-}
-var AccountBroker = class {
-  host;
-  now;
-  log;
-  status = "unknown";
-  restUntil = 0;
-  cached = null;
-  listing = null;
-  pending = /* @__PURE__ */ new Map();
-  next = 1;
-  prefix = `auto-${Math.random().toString(36).slice(2, 10)}`;
-  encoder = new TextEncoder();
-  constructor(host, options = {}) {
-    this.host = host;
-    this.now = options.now ?? Date.now;
-    this.log = options.log ?? ((level, message) => host.log(level, message));
-  }
-  get mode() {
-    return this.status;
-  }
-  /** The granted, offered accounts (cached for 15 s); empty on a core without brokered requests. */
-  list() {
-    const now = this.now();
-    if (this.cached && now - this.cached.at < LIST_FRESH_MS) return Promise.resolve(this.cached.accounts);
-    if (now < this.restUntil) return Promise.resolve(this.cached?.accounts ?? []);
-    this.listing ??= this.host.callHost("accounts.list", {}).then((answer) => {
-      const raw = isRecord8(answer) && Array.isArray(answer.accounts) ? answer.accounts : [];
-      const accounts = raw.map(brokeredAccountOf).filter((entry) => entry !== null);
-      this.status = "ready";
-      this.cached = { at: this.now(), accounts };
-      return accounts;
-    }, (error) => {
-      const reason = sharedReadReason(error);
-      if (!reason && unsupportedError(error)) {
-        this.status = "unsupported";
-        this.restUntil = this.now() + UNSUPPORTED_REST_MS;
-      } else {
-        this.status = "failing";
-        this.restUntil = this.now() + FAILING_REST_MS;
-      }
-      this.cached = { at: this.now(), accounts: [] };
-      return [];
-    }).finally(() => {
-      this.listing = null;
-    });
-    return this.listing;
-  }
-  /** The last list without waiting (for synchronous checks such as which upstreams are usable now). */
-  known(ref) {
-    return this.cached?.accounts.find((account) => account.ref === ref) ?? null;
-  }
-  /** The list changed (a grant, an owner change): the next call asks again. */
-  invalidate() {
-    this.cached = null;
-    this.restUntil = 0;
-  }
-  /**
-   * A fetch-like call through the broker. `path` is the account's path (`/chat/completions`, `/models`); the body is
-   * the JSON the router would send. Resolves with the provider's answer as a Response.
-   */
-  async send(ref, path, init) {
-    if (this.status === "unsupported") return this.refusal(503, "This CanvasTTY cannot send requests through other extensions' accounts.");
-    const requestId = `${this.prefix}-${this.next++}`;
-    const text6 = init.body === void 0 || init.body === null ? null : typeof init.body === "string" ? init.body : Buffer.from(init.body).toString("utf8");
-    let body;
-    if (text6 !== null && text6.length <= INLINE_BODY_CHARS) {
-      try {
-        const parsed = JSON.parse(text6);
-        if (isRecord8(parsed)) body = parsed;
-      } catch {
-      }
-    }
-    const stream = body ? body.stream === true : text6 !== null && /"stream"\s*:\s*true/u.test(text6.slice(0, 4096));
-    const signal = init.signal ?? null;
-    if (signal?.aborted) throw abortError();
-    return new Promise((resolve9, reject) => {
-      const entry = { resolve: resolve9, reject, controller: null, headed: false, done: false };
-      this.pending.set(requestId, entry);
-      const onAbort = () => {
-        if (entry.done) return;
-        void this.host.callHost("accounts.cancel", { requestId }).catch(() => void 0);
-        this.finish(requestId, abortError());
-      };
-      signal?.addEventListener("abort", onAbort, { once: true });
-      const start = async () => {
-        if (text6 !== null && !body) {
-          for (let at = 0; at < text6.length; at += PART_CHARS) {
-            await this.host.callHost("accounts.body", { requestId, data: text6.slice(at, at + PART_CHARS) });
-          }
-        }
-        await this.host.callHost("accounts.request", { requestId, ref, path, ...body ? { body } : {}, stream });
-      };
-      start().catch((error) => {
-        signal?.removeEventListener("abort", onAbort);
-        if (entry.done) return;
-        const reason = sharedReadReason(error);
-        if (!reason && unsupportedError(error)) {
-          this.status = "unsupported";
-          this.restUntil = this.now() + UNSUPPORTED_REST_MS;
-        }
-        this.pending.delete(requestId);
-        entry.done = true;
-        const message = clean3(error instanceof Error ? error.message : String(error), 300);
-        resolve9(this.refusalFor(reason, message));
-      });
-    });
-  }
-  /** `canvastty.accounts.head|chunk|end` from CanvasTTY. */
-  notification(kind, params) {
-    const requestId = typeof params.requestId === "string" ? params.requestId : "";
-    const entry = this.pending.get(requestId);
-    if (!entry || entry.done) return;
-    if (kind === "head") {
-      if (entry.headed) return;
-      entry.headed = true;
-      const headers = new Headers();
-      const contentType = clean3(params.contentType, 120);
-      if (contentType) headers.set("content-type", contentType);
-      if (typeof params.retryAfter === "number") headers.set("retry-after", String(params.retryAfter));
-      const status = typeof params.status === "number" && params.status >= 200 && params.status < 600 ? params.status : 200;
-      const body = new ReadableStream({ start: (controller) => {
-        entry.controller = controller;
-      } });
-      entry.resolve(new Response(body, { status, headers }));
-      return;
-    }
-    if (kind === "chunk") {
-      if (entry.headed && entry.controller && typeof params.data === "string") {
-        try {
-          entry.controller.enqueue(this.encoder.encode(params.data));
-        } catch {
-        }
-      }
-      return;
-    }
-    const error = isRecord8(params.error) ? params.error : null;
-    if (!entry.headed) {
-      this.pending.delete(requestId);
-      entry.done = true;
-      if (!error) {
-        entry.resolve(new Response("", { status: typeof params.status === "number" && params.status >= 200 && params.status < 600 ? params.status : 200 }));
-        return;
-      }
-      const reason = typeof error.reason === "string" ? error.reason : "network";
-      if (reason === "upstream" && typeof error.status === "number" && error.status >= 400 && error.status < 600) {
-        const headers = new Headers({ "content-type": "application/json" });
-        if (typeof error.retryAfter === "number") headers.set("retry-after", String(error.retryAfter));
-        entry.resolve(new Response(JSON.stringify({ error: { message: clean3(error.message, 300) } }), { status: error.status, headers }));
-        return;
-      }
-      if (reason === "network" || reason === "timeout" || reason === "cancelled") {
-        entry.reject(new Error(`brokered request: ${reason}`));
-        return;
-      }
-      entry.resolve(this.refusalFor(reason, clean3(error.message, 300)));
-      return;
-    }
-    if (error) this.finish(requestId, new Error(`brokered request ended: ${clean3(error.reason, 40)}`));
-    else this.finish(requestId, null);
-  }
-  /** Every open request ends (the service stops). */
-  close() {
-    for (const requestId of [...this.pending.keys()]) this.finish(requestId, new Error("The service stopped."));
-  }
-  finish(requestId, error) {
-    const entry = this.pending.get(requestId);
-    if (!entry || entry.done) return;
-    entry.done = true;
-    this.pending.delete(requestId);
-    if (!entry.headed) {
-      entry.reject(error ?? new Error("brokered request ended"));
-      return;
-    }
-    try {
-      if (error) entry.controller?.error(error);
-      else entry.controller?.close();
-    } catch {
-    }
-  }
-  refusalFor(reason, message) {
-    switch (reason) {
-      // A plan used up (the owner said so) or the local per-account rate: the router's quota cooldown.
-      case "budget_refused":
-        return this.refusal(429, message || "The account's plan is used up.");
-      case "rate_limited":
-        return this.refusal(429, message, 60);
-      case "model_refused":
-      case "path_refused":
-        return this.refusal(404, message);
-      case "owner_unavailable":
-        return this.refusal(503, message);
-      case "too_large":
-        return this.refusal(413, message);
-      case "not_granted":
-      case "grant_changed":
-      case "caller_unavailable":
-      case "account_unknown":
-        this.invalidate();
-        return this.refusal(403, message);
-      default:
-        return this.refusal(503, message || "The brokered request failed.");
-    }
-  }
-  refusal(status, message, retryAfter) {
-    const headers = new Headers({ "content-type": "application/json" });
-    if (retryAfter !== void 0) headers.set("retry-after", String(retryAfter));
-    return new Response(JSON.stringify({ error: { message } }), { status, headers });
-  }
-};
-function abortError() {
-  const error = new Error("The operation was aborted.");
-  error.name = "AbortError";
-  return error;
 }
 
 // src/auto/service.ts
@@ -14190,8 +14270,10 @@ var AutoService = class {
         ready: (upstream) => this.accountReady(upstream),
         refresh: async () => {
           await this.broker.list();
-        }
+        },
+        withdrawn: (upstream) => !!upstream.account && this.broker.withdrawn(upstream.account)
       },
+      withdrawnMessage: () => AUTO_STRINGS[this.options.locale].grantWithdrawn,
       noProviderMessage: () => AUTO_STRINGS[this.options.locale].noProvider,
       ...options.jevOnly ? { jevOnly: options.jevOnly } : {},
       ...options.transport ? { transport: options.transport } : {},
@@ -14298,6 +14380,33 @@ var AutoService = class {
   /** For `route`: the launch options that give a subagent Auto too, when the caller itself runs on it. */
   launchOptionsFor(sessionId) {
     return this.router.tokens.forSession(sessionId) ? { [PLUGIN_ID]: { model: "auto" } } : null;
+  }
+  /**
+   * A card on Model: Auto (Jev), for the agent tree: the models its answered calls used through the router (most
+   * used first) and what they cost. A flat-rate upstream (a brokered plan account) is a plan, never dollars; a paid
+   * one sums the router's own cost per call. Null: the router answered nothing for this card.
+   */
+  treeAuto(sessionId) {
+    const turns = this.router.sessionTurns(sessionId);
+    if (!turns.length) return null;
+    const models = /* @__PURE__ */ new Map();
+    for (const turn of turns) models.set(turn.model, (models.get(turn.model) ?? 0) + turn.turns);
+    const upstreams = new Map(this.settings.upstreams.map((upstream) => [upstream.id, upstream]));
+    const flat = turns.filter((turn) => {
+      const upstream = upstreams.get(turn.upstream);
+      return !!upstream && upstream.preset === "account" && upstream.flatRate === true;
+    });
+    const top = [...flat].sort((a, b) => b.turns - a.turns)[0];
+    const account = top ? upstreams.get(top.upstream)?.account ?? null : null;
+    const label2 = account ? this.broker.known(account)?.label : void 0;
+    const plan3 = top ? label2 ?? top.upstream : null;
+    const paid = turns.filter((turn) => !flat.includes(turn) && turn.usd !== null);
+    return {
+      models: [...models].sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0])).map(([model, calls]) => ({ model, calls })),
+      plan: plan3,
+      usd: paid.length ? Math.round(paid.reduce((sum, turn) => sum + (turn.usd ?? 0), 0) * 1e6) / 1e6 : null,
+      tokens: turns.reduce((sum, turn) => sum + turn.tokensIn + turn.tokensOut, 0)
+    };
   }
   sessionClosed(sessionId) {
     this.router.closeSession(sessionId);
@@ -18213,6 +18322,13 @@ ${JSON.stringify({ ...a, model: answer.model })}` };
       },
       route: (id) => this.routing.routeOf(id) ?? this.started.get(id)?.route ?? null,
       refused: (id) => this.refused.has(id),
+      // Model: Auto (Jev): the models its calls used through the router, and what they cost there.
+      auto: (id) => {
+        const used = this.auto.treeAuto(id);
+        if (!used) return null;
+        const share = used.plan ? Math.round(used.tokens * this.routing.settings.expectedShare.medium / perTask * 100) / 100 : null;
+        return { models: used.models, plan: used.plan, usd: used.usd, share };
+      },
       task: (id) => this.review.taskOf(id),
       planChildren: (id) => this.bindings.planOf(id),
       endedAt: (id) => this.harness.finished(id),
@@ -18463,6 +18579,11 @@ serve({
     },
     "canvastty.accounts.end": (params) => {
       assistant?.auto.broker.notification("end", params);
+    },
+    // A core that tells callers about grant changes: withdrawn accounts are asked about again (older cores: the next
+    // list read that lists them again does the same).
+    "canvastty.accounts.grantsChanged": () => {
+      assistant?.auto.broker.grantsChanged();
     }
   },
   methods: {

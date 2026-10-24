@@ -6,11 +6,11 @@ import { el, errorText, host, onContext, SERVICE, type PageLocale } from './comm
 type Status = 'running' | 'waiting' | 'approval' | 'done' | 'failed';
 type Cost =
   | { kind: 'usd'; low: number; high: number; measured?: boolean }
-  | { kind: 'plan'; label: string; share: number | null; window: string | null; measured?: boolean }
+  | { kind: 'plan'; label: string; share: number | null; window: string | null; measured?: boolean; subscription?: boolean }
   | { kind: 'launch'; label: string; used: number; allowance: number; windowHours: number }
   | { kind: 'flat'; label: string };
 interface TreeNode {
-  id: string; title: string; role: string; provider: string; model: string | null; status: Status; task: string | null;
+  id: string; title: string; role: string; provider: string; model: string | null; auto?: Array<{ model: string; calls: number }> | null; status: Status; task: string | null;
   cost: Cost | null; usage?: { tokens: number; providerEstimate?: number } | null; startedAt: number | null; endedAt: number | null; planChildren: number | null; descendants: number; refused?: number; children: TreeNode[];
 }
 interface Totals { agents: number; refused?: number; running: number; usd: { low: number; high: number } | null; plans: Array<{ label: string; share: number | null; window: string | null; cards: number; launches: number }>; unpriced: number; tokens?: number | null; providerEstimate?: number | null }
@@ -37,18 +37,21 @@ const STRINGS = {
     title: 'Agent tree', tree: 'Tree',
     none: 'No agent tree yet. It appears when an orchestrator starts subagents, or when you mark an orchestrator in the card menu → Agent tree.',
     agents: (n: number) => `${n} ${n === 1 ? 'agent' : 'agents'}`, running: (n: number) => `${n} running`,
-    plan: 'plan', planShare: (plan: Totals['plans'][number]) => plan.share !== null ? `${plan.label}: ≈${share(plan.share)}% of ${plan.window ?? 'the window'}` : plan.launches ? `${plan.label}: ${plan.launches} ${plan.launches === 1 ? 'launch' : 'launches'}` : `${plan.label}: plan`,
+    plan: 'subscription', planShare: (plan: Totals['plans'][number]) => plan.share !== null ? `${plan.label}: ~${share(plan.share)}% of ${plan.window ? `${plan.window} window` : 'its window'}` : plan.launches ? `${plan.label}: ${plan.launches} ${plan.launches === 1 ? 'launch' : 'launches'}` : `${plan.label}: subscription`,
     status: { running: 'Running', waiting: 'Waiting', approval: 'Needs approval', done: 'Done', failed: 'Failed' } as Record<Status, string>,
     roles: { orchestrator: 'orchestrator', subagent: 'subagent', agent: 'agent' } as Record<string, string>,
     defaultModel: (provider: string) => `${provider}, default model`,
     cost: (cost: Cost | null): string => {
       if (!cost) return 'cost unknown';
       if (cost.kind === 'usd') return usdText(cost);
-      if (cost.kind === 'plan') return cost.share === null ? 'plan' : `plan · ≈${share(cost.share)}% of ${cost.window ?? 'window'}`;
-      if (cost.kind === 'launch') return `plan · 1 launch (${cost.used}/${cost.allowance} in ${cost.windowHours} h)`;
-      return 'plan · flat rate';
+      // A subscription (or a flat-rate plan account) is paid for already: a share of its window, never money.
+      const name = cost.kind === 'plan' && cost.subscription === false ? 'coding plan' : 'subscription';
+      if (cost.kind === 'plan') return cost.share === null ? name : `${name} · ~${share(cost.share)}% of ${cost.window ? `${cost.window} window` : 'its window'}`;
+      if (cost.kind === 'launch') return `coding plan · 1 launch (${cost.used}/${cost.allowance} in ${cost.windowHours} h)`;
+      return 'subscription';
     },
-    costTip: (cost: Cost | null): string => !cost ? 'The Assistant did not route this card, so it has no estimate.' : cost.kind === 'usd' ? (cost.measured ? 'Measured tokens of this card at the model\'s listed price (cache reads at a tenth).' : 'Estimated price of one task on this model.') : cost.kind === 'plan' && cost.measured ? `Runs on ${cost.label}: its measured tokens as a share of the plan, not money.` : `Runs on ${cost.label}: a share of the plan, not money.`,
+    costTip: (cost: Cost | null): string => !cost ? 'The Assistant did not route this card, so it has no estimate.' : cost.kind === 'usd' ? (cost.measured ? 'Measured tokens of this card at the model\'s listed price (cache reads at a tenth).' : 'Estimated price of one task on this model.') : cost.kind === 'plan' && cost.measured ? `Runs on ${cost.label}: its measured tokens as a share of the subscription's window, not money.` : `Runs on ${cost.label}, already paid for: a share of its window, not money.`,
+    auto: 'Auto (Jev)', autoCalls: (model: string, calls: number) => `${model} ×${calls} ${calls === 1 ? 'call' : 'calls'}`, autoTip: 'Model: Auto (Jev): the models its answered calls used, as the Assistant\'s router counted them.',
     tokens: (n: number) => `${tokensText(n)} tokens`, tokensTip: 'Measured by CanvasTTY from the agent\'s own usage log.',
     providerEstimate: (usd: number) => `≈$${money(usd)} (agent's estimate)`, providerEstimateTip: 'The agent\'s own price estimate from its model list (OpenCode), not a bill.',
     elapsed: (ms: number): string => {
@@ -65,18 +68,20 @@ const STRINGS = {
     title: 'Дерево агентов', tree: 'Дерево',
     none: 'Дерева агентов пока нет. Оно появится, когда оркестратор запустит субагентов, или когда вы выберете в меню окна оркестратора «Дерево агентов».',
     agents: (n: number) => `${n} ${ruPlural(n, 'агент', 'агента', 'агентов')}`, running: (n: number) => `${n} ${ruPlural(n, 'работает', 'работают', 'работают')}`,
-    plan: 'план', planShare: (plan: Totals['plans'][number]) => plan.share !== null ? `${plan.label}: ≈${share(plan.share)}% окна ${ruWindow(plan.window)}`.trimEnd() : plan.launches ? `${plan.label}: ${plan.launches} ${ruPlural(plan.launches, 'запуск', 'запуска', 'запусков')}` : `${plan.label}: план`,
+    plan: 'подписка', planShare: (plan: Totals['plans'][number]) => plan.share !== null ? `${plan.label}: ~${share(plan.share)}% окна ${ruWindow(plan.window)}`.trimEnd() : plan.launches ? `${plan.label}: ${plan.launches} ${ruPlural(plan.launches, 'запуск', 'запуска', 'запусков')}` : `${plan.label}: подписка`,
     status: { running: 'Работает', waiting: 'Ждёт', approval: 'Нужно одобрение', done: 'Готово', failed: 'Ошибка' } as Record<Status, string>,
     roles: { orchestrator: 'оркестратор', subagent: 'субагент', agent: 'агент' } as Record<string, string>,
     defaultModel: (provider: string) => `${provider}, модель по умолчанию`,
     cost: (cost: Cost | null): string => {
       if (!cost) return 'цена неизвестна';
       if (cost.kind === 'usd') return usdText(cost);
-      if (cost.kind === 'plan') return cost.share === null ? 'план' : `план · ≈${share(cost.share)}% окна ${ruWindow(cost.window)}`.trimEnd();
-      if (cost.kind === 'launch') return `план · 1 запуск (${cost.used}/${cost.allowance} за ${cost.windowHours} ч)`;
-      return 'план · без лимита по цене';
+      const name = cost.kind === 'plan' && cost.subscription === false ? 'план для кода' : 'подписка';
+      if (cost.kind === 'plan') return cost.share === null ? name : `${name} · ~${share(cost.share)}% окна ${ruWindow(cost.window)}`.trimEnd();
+      if (cost.kind === 'launch') return `план для кода · 1 запуск (${cost.used}/${cost.allowance} за ${cost.windowHours} ч)`;
+      return 'подписка';
     },
-    costTip: (cost: Cost | null): string => !cost ? 'Помощник не выбирал маршрут для этого окна, оценки нет.' : cost.kind === 'usd' ? (cost.measured ? 'Измеренные токены этого окна по цене модели из каталога (чтение кэша — десятая часть).' : 'Оценка цены одной задачи на этой модели.') : cost.kind === 'plan' && cost.measured ? `Работает на «${cost.label}»: измеренные токены как доля плана, а не деньги.` : `Работает на «${cost.label}»: доля плана, а не деньги.`,
+    costTip: (cost: Cost | null): string => !cost ? 'Помощник не выбирал маршрут для этого окна, оценки нет.' : cost.kind === 'usd' ? (cost.measured ? 'Измеренные токены этого окна по цене модели из каталога (чтение кэша — десятая часть).' : 'Оценка цены одной задачи на этой модели.') : cost.kind === 'plan' && cost.measured ? `Работает на «${cost.label}»: измеренные токены как доля окна подписки, а не деньги.` : `Работает на «${cost.label}», уже оплаченной: доля её окна, а не деньги.`,
+    auto: 'Авто (Jev)', autoCalls: (model: string, calls: number) => `${model} ×${calls} ${ruPlural(calls, 'вызов', 'вызова', 'вызовов')}`, autoTip: 'Модель «Авто (Jev)»: модели, на которых ответили её вызовы, по счёту маршрутизатора Ассистента.',
     tokens: (n: number) => `${tokensText(n)} токенов`, tokensTip: 'Измерено CanvasTTY по журналу расхода самого агента.',
     providerEstimate: (usd: number) => `≈$${money(usd)} (оценка агента)`, providerEstimateTip: 'Собственная оценка цены агента по его списку моделей (OpenCode), не счёт.',
     elapsed: (ms: number): string => {
@@ -159,8 +164,10 @@ function nodeCard(node: TreeNode): HTMLElement {
       el('span', { className: 'tree-node__title', textContent: node.title, title: node.title }),
       el('span', { className: `pill pill--${node.status}`, textContent: t.status[node.status] })),
     el('div', { className: 'tree-node__model' },
-      el('strong', { textContent: node.model ?? t.defaultModel(provider) }),
-      node.model ? ` · ${provider}` : '', ` · ${t.roles[node.role] ?? node.role}`),
+      ...(node.auto && !node.model
+        ? [el('strong', { textContent: t.auto, title: t.autoTip }), ` · ${node.auto.map(entry => t.autoCalls(entry.model, entry.calls)).join(', ')} · ${provider}`]
+        : [el('strong', { textContent: node.model ?? t.defaultModel(provider) }), node.model ? ` · ${provider}` : '']),
+      ` · ${t.roles[node.role] ?? node.role}`),
     ...(node.task ? [el('div', { className: 'tree-node__task', textContent: node.task, title: node.task })] : []),
     el('div', { className: 'tree-node__meta' }, ...meta));
   return card;
@@ -183,7 +190,10 @@ function summary(totals: Totals): string {
 
 function render(): void {
   if (!view) return;
-  if (!view.trees.length) { root.replaceChildren(el('div', { className: 'empty', textContent: t.none })); return; }
+  // The page's own heading in the person's language: a CanvasTTY that drops localized card titles (1.8.x) shows the
+  // English one above it.
+  const heading = el('h1', { className: 'tree-title', textContent: t.title });
+  if (!view.trees.length) { root.replaceChildren(heading, el('div', { className: 'empty', textContent: t.none })); return; }
   const tree = view.trees.find(item => item.root.id === chosen) ?? view.trees[0]!;
   const head: Array<HTMLElement> = [];
   if (view.trees.length > 1) {
@@ -193,6 +203,7 @@ function render(): void {
     head.push(el('label', { className: 'field tree-pick' }, el('span', { className: 'field__label', textContent: t.tree }), select));
   }
   root.replaceChildren(
+    heading,
     el('div', { className: 'tree-header' }, ...head,
       el('div', { className: 'tree-summary' },
         el('strong', { className: 'tree-summary__line', textContent: summary(tree.totals) }),
