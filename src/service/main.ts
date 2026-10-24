@@ -56,7 +56,10 @@ serve({
     // Brokered requests (Auto through another extension's account): the answer, then its chunks, then the end.
     'canvastty.accounts.head': params => { assistant?.auto.broker.notification('head', params); },
     'canvastty.accounts.chunk': params => { assistant?.auto.broker.notification('chunk', params); },
-    'canvastty.accounts.end': params => { assistant?.auto.broker.notification('end', params); }
+    'canvastty.accounts.end': params => { assistant?.auto.broker.notification('end', params); },
+    // A core that tells callers about grant changes: withdrawn accounts are asked about again (older cores: the next
+    // list read that lists them again does the same).
+    'canvastty.accounts.grantsChanged': () => { assistant?.auto.broker.grantsChanged(); }
   },
   methods: {
     // Host-only requests.

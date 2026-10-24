@@ -8,6 +8,7 @@ import type { RouteRecord } from '../route/records.ts';
 import type { Estimate } from '../route/engine.ts';
 import { ROUTE_CLIS, type QuotaBy, type ValueSpeed, type NewModelPolicy, type PlanDecl, type RouteAllow, type RouteSettings, type TrustLevel } from '../route/settings.ts';
 import { el } from './common.ts';
+import { usedLeft } from './quotaText.ts';
 
 export interface RouteState {
   settings: RouteSettings;
@@ -55,8 +56,8 @@ export const ROUTE_PAGE_STRINGS = {
     reserve: 'Reserve, %', parallel: 'At once', trust: 'Trusted with', trustUnset: 'not set',
     allowance: 'Launches per window', windowHours: 'Window, hours', remove: 'Remove', save: 'Save',
     quota: (q: SubscriptionQuota | null, ago: (at: number | null) => string) => !q ? '' : q.state === 'unknown' ? `quota unknown (${q.note})`
-      : q.state === 'exhausted' ? `no headroom above the reserve${q.window ? ` (${q.window.label ?? 'window'} ${Math.round(q.window.usedPercent)}% used)` : ''} · read ${ago(q.readAt)}`
-        : `${q.window ? `${q.window.label ?? 'window'} ${Math.round(q.window.usedPercent)}% used · ` : ''}headroom ${q.headroom}%${q.pace !== null && q.pace > 1 ? ` · burning faster than its window (pace ${q.pace})` : ''}${q.state === 'presumed-reset' ? ' · probably reset since' : ''} · read ${ago(q.readAt)}`,
+      : q.state === 'exhausted' ? `no headroom above the reserve${q.window ? ` (${q.window.label ?? 'window'} ${usedLeft('en', q.window.usedPercent)})` : ''} · read ${ago(q.readAt)}`
+        : `${q.window ? `${q.window.label ?? 'window'} ${usedLeft('en', q.window.usedPercent)} · ` : ''}headroom above the reserve ${q.headroom}%${q.pace !== null && q.pace > 1 ? ` · burning faster than its window (pace ${q.pace})` : ''}${q.state === 'presumed-reset' ? ' · probably reset since' : ''} · read ${ago(q.readAt)}`,
     running: (n: number) => n ? `${n} routed running` : '',
     launches: (n: number, allowance: number | undefined, hours: number) => `${n}${allowance ? ` of ${allowance}` : ''} launches counted in ${hours} h${allowance ? '' : ' (no allowance set: quota unknown)'}`,
     models: 'Models', modelsHelp: 'The CLI\'s own ids or aliases, comma-separated; for OpenCode provider/model or provider/*. Empty: the CLI\'s default.',
@@ -68,7 +69,7 @@ export const ROUTE_PAGE_STRINGS = {
     accountsChanged: 'Accounts changed what it shares since you allowed it: allow it again in Settings → Agents → Extension native code.',
     accountsUnreadable: (reason: string) => `Accounts' data cannot be read now (${reason}).`,
     pools: (label: string, ready: number, members: number, left: string) => `${label}: ${ready} of ${members} free${left}`,
-    poolLeft: (percent: number) => ` · ${percent}% left`,
+    poolLeft: (percent: number) => ` · ${usedLeft('en', 100 - percent)}`,
     flatRate: 'flat-rate plan',
     servers: 'Servers', serversOn: 'Let orchestrators run independent leaf tasks on these servers', serverList: 'Servers (name=cli+cli/at once, …)',
     serversHelp: 'Names as in the Environments plugin\'s servers. A leaf card runs on the server\'s own CLI sign-in; nothing from this computer goes there.',
@@ -112,8 +113,8 @@ export const ROUTE_PAGE_STRINGS = {
     reserve: 'Резерв, %', parallel: 'Одновременно', trust: 'Доверяю до', trustUnset: 'не задано',
     allowance: 'Запусков за окно', windowHours: 'Окно, часов', remove: 'Удалить', save: 'Сохранить',
     quota: (q: SubscriptionQuota | null, ago: (at: number | null) => string) => !q ? '' : q.state === 'unknown' ? `лимит неизвестен (${({ unread: 'ещё не прочитан', unreadable: 'не читается', stale: 'прочитан больше 30 мин назад', 'no-windows': 'нет окон' } as Record<string, string>)[q.code] ?? q.code})`
-      : q.state === 'exhausted' ? `нет запаса выше резерва${q.window ? ` (${q.window.label ?? 'окно'} использовано ${Math.round(q.window.usedPercent)}%)` : ''} · прочитано ${ago(q.readAt)}`
-        : `${q.window ? `${q.window.label ?? 'окно'}: использовано ${Math.round(q.window.usedPercent)}% · ` : ''}запас ${q.headroom}%${q.pace !== null && q.pace > 1 ? ` · расходуется быстрее окна (темп ${q.pace})` : ''}${q.state === 'presumed-reset' ? ' · вероятно, уже сбросилось' : ''} · прочитано ${ago(q.readAt)}`,
+      : q.state === 'exhausted' ? `нет запаса выше резерва${q.window ? ` (${q.window.label ?? 'окно'}: ${usedLeft('ru', q.window.usedPercent)})` : ''} · прочитано ${ago(q.readAt)}`
+        : `${q.window ? `${q.window.label ?? 'окно'}: ${usedLeft('ru', q.window.usedPercent)} · ` : ''}запас выше резерва ${q.headroom}%${q.pace !== null && q.pace > 1 ? ` · расходуется быстрее окна (темп ${q.pace})` : ''}${q.state === 'presumed-reset' ? ' · вероятно, уже сбросилось' : ''} · прочитано ${ago(q.readAt)}`,
     running: (n: number) => n ? `запущено через route: ${n}` : '',
     launches: (n: number, allowance: number | undefined, hours: number) => `запусков за ${hours} ч: ${n}${allowance ? ` из ${allowance}` : ' (лимит не задан: неизвестно)'}`,
     models: 'Модели', modelsHelp: 'Собственные id или псевдонимы CLI через запятую; для OpenCode — provider/model или provider/*. Пусто — модель CLI по умолчанию.',
@@ -125,7 +126,7 @@ export const ROUTE_PAGE_STRINGS = {
     accountsChanged: 'Accounts изменил то, чем делится, после вашего разрешения: разрешите снова в Настройки → Агенты → Нативный код расширений.',
     accountsUnreadable: (reason: string) => `Данные Accounts сейчас не читаются (${reason}).`,
     pools: (label: string, ready: number, members: number, left: string) => `${label}: свободно ${ready} из ${members}${left}`,
-    poolLeft: (percent: number) => ` · осталось ${percent}%`,
+    poolLeft: (percent: number) => ` · ${usedLeft('ru', 100 - percent)}`,
     flatRate: 'фиксированный тариф',
     servers: 'Серверы', serversOn: 'Разрешить оркестраторам запускать независимые листовые задачи на этих серверах', serverList: 'Серверы (имя=cli+cli/одновременно, …)',
     serversHelp: 'Имена — как у серверов в плагине Environments. Листовое окно работает на собственном входе CLI на сервере; с этого компьютера туда ничего не уходит.',

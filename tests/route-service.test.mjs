@@ -48,7 +48,7 @@ test('route and pick_route: the choice, two alternatives, why-lines and estimate
   const answer = await route.tool('route', orchestrator, input(`Explain the cache layer ${MARKER}`));
   assert.notEqual(answer.isError, true);
   assert.match(answer.content, /^Suggested: claude · opus@max \(= claude-opus-4-8, alias table\) on Max · score [\d.]+ for research/u);
-  assert.match(answer.content, /Estimate: ≈ 8% of the 5 h \(now 41% used\)\./u);
+  assert.match(answer.content, /Estimate: ≈ 8% of the 5 h \(now 41% used, 59% left\)\./u);
   assert.match(answer.content, /Pass these to spawn_agent .*\{"provider":"claude","launchOptions":\{"canvastty-accounts":\{"account":"none"\},"canvastty-assistant":\{"model":"off"\}\},"model":"opus","effort":"max"\}/u);
   assert.match(answer.content, /Alternative 1: .*\nAlternative 2: /u);
   assert.match(answer.content, /strategy single-strong/u);

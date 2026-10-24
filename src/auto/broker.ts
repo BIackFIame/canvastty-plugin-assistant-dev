@@ -30,6 +30,12 @@ export interface BrokeredAccount {
 
 export type BrokerMode = 'unknown' | 'ready' | 'unsupported' | 'failing';
 
+/**
+ * Set on the 403 this service makes for a grant CanvasTTY says is missing or changed (`not_granted`,
+ * `grant_changed`): the person withdrew it in Settings. Local only (the Response never leaves this process).
+ */
+export const WITHDRAWN_HEADER = 'x-canvastty-grant-withdrawn';
+
 const LIST_FRESH_MS = 15_000;
 const UNSUPPORTED_REST_MS = 30 * 60_000;
 const FAILING_REST_MS = 60_000;
@@ -66,6 +72,7 @@ export function brokeredAccountOf(value: unknown): BrokeredAccount | null {
 }
 
 interface Pending {
+  ref: string;
   resolve(response: Response): void;
   reject(error: Error): void;
   controller: ReadableStreamDefaultController<Uint8Array> | null;
@@ -85,6 +92,12 @@ export class AccountBroker {
   private next = 1;
   private readonly prefix = `auto-${Math.random().toString(36).slice(2, 10)}`;
   private readonly encoder = new TextEncoder();
+  /**
+   * Accounts whose grant CanvasTTY refused (withdrawn or changed), with when: unavailable, not "failing", until a
+   * list read that began after that lists them again (CanvasTTY lists only accounts the person allowed) or a grant
+   * change notice from CanvasTTY.
+   */
+  private readonly withdrawnRefs = new Map<string, number>();
 
   constructor(host: Host, options: { now?: () => number; log?: (level: 'info' | 'warn', message: string) => void } = {}) {
     this.host = host;
@@ -99,9 +112,12 @@ export class AccountBroker {
     const now = this.now();
     if (this.cached && now - this.cached.at < LIST_FRESH_MS) return Promise.resolve(this.cached.accounts);
     if (now < this.restUntil) return Promise.resolve(this.cached?.accounts ?? []);
+    const startedAt = now;
     this.listing ??= this.host.callHost('accounts.list', {}).then(answer => {
       const raw = isRecord(answer) && Array.isArray(answer.accounts) ? answer.accounts : [];
       const accounts = raw.map(brokeredAccountOf).filter((entry): entry is BrokeredAccount => entry !== null);
+      // Listed again by a read that began after the refusal: the person allowed it again.
+      for (const [ref, at] of this.withdrawnRefs) if (startedAt > at && accounts.some(account => account.ref === ref)) this.withdrawnRefs.delete(ref);
       this.status = 'ready';
       this.cached = { at: this.now(), accounts };
       return accounts;
@@ -118,8 +134,15 @@ export class AccountBroker {
 
   /** The last list without waiting (for synchronous checks such as which upstreams are usable now). */
   known(ref: string): BrokeredAccount | null {
+    if (this.withdrawnRefs.has(ref)) return null;
     return this.cached?.accounts.find(account => account.ref === ref) ?? null;
   }
+
+  /** CanvasTTY refused this account's grant (the person withdrew or must renew it): unavailable until allowed again. */
+  withdrawn(ref: string): boolean { return this.withdrawnRefs.has(ref); }
+
+  /** A grant changed (CanvasTTY's notice, where a core sends one): every account is asked about again. */
+  grantsChanged(): void { this.withdrawnRefs.clear(); this.invalidate(); }
 
   /** The list changed (a grant, an owner change): the next call asks again. */
   invalidate(): void { this.cached = null; this.restUntil = 0; }
@@ -140,7 +163,7 @@ export class AccountBroker {
     const signal = init.signal ?? null;
     if (signal?.aborted) throw abortError();
     return new Promise<Response>((resolve, reject) => {
-      const entry: Pending = { resolve, reject, controller: null, headed: false, done: false };
+      const entry: Pending = { ref, resolve, reject, controller: null, headed: false, done: false };
       this.pending.set(requestId, entry);
       const onAbort = (): void => {
         if (entry.done) return;
@@ -165,7 +188,7 @@ export class AccountBroker {
         this.pending.delete(requestId);
         entry.done = true;
         const message = clean(error instanceof Error ? error.message : String(error), 300);
-        resolve(this.refusalFor(reason, message));
+        resolve(this.refusalFor(reason, message, ref));
       });
     });
   }
@@ -206,7 +229,7 @@ export class AccountBroker {
         return;
       }
       if (reason === 'network' || reason === 'timeout' || reason === 'cancelled') { entry.reject(new Error(`brokered request: ${reason}`)); return; }
-      entry.resolve(this.refusalFor(reason, clean(error.message, 300)));
+      entry.resolve(this.refusalFor(reason, clean(error.message, 300), entry.ref));
       return;
     }
     if (error) this.finish(requestId, new Error(`brokered request ended: ${clean(error.reason, 40)}`));
@@ -230,7 +253,7 @@ export class AccountBroker {
     } catch { /* already closed */ }
   }
 
-  private refusalFor(reason: string | null, message: string): Response {
+  private refusalFor(reason: string | null, message: string, ref: string | null = null): Response {
     switch (reason) {
       // A plan used up (the owner said so) or the local per-account rate: the router's quota cooldown.
       case 'budget_refused': return this.refusal(429, message || 'The account\'s plan is used up.');
@@ -238,7 +261,15 @@ export class AccountBroker {
       case 'model_refused': case 'path_refused': return this.refusal(404, message);
       case 'owner_unavailable': return this.refusal(503, message);
       case 'too_large': return this.refusal(413, message);
-      case 'not_granted': case 'grant_changed': case 'caller_unavailable': case 'account_unknown':
+      case 'not_granted': case 'grant_changed': {
+        // The person withdrew the grant (or must renew it): not a failing account, an unavailable one.
+        this.invalidate();
+        if (ref) this.withdrawnRefs.set(ref, this.now());
+        const answer = this.refusal(403, message);
+        answer.headers.set(WITHDRAWN_HEADER, reason);
+        return answer;
+      }
+      case 'caller_unavailable': case 'account_unknown':
         this.invalidate();
         return this.refusal(403, message);
       default: return this.refusal(503, message || 'The brokered request failed.');

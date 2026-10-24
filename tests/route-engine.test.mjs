@@ -126,7 +126,7 @@ test('prefer subscriptions: a subscription with headroom wins within the window 
   const settings = declared({ plans: declared().plans.filter(plan => plan.id !== 'glm-plan') });
   const on = decide(ctx({ view: view('research', 'medium'), settings, accountRows: [] }));
   assert.equal(on.top.key, 'claude|plan:claude-max|opus|max');
-  assert.match(whyLine(on.top, on, NOW), /subscription: free \(5 h 41% used, headroom 39% above the reserve, read 3 min ago\)/u);
+  assert.match(whyLine(on.top, on, NOW), /subscription: free \(5 h 41% used, 59% left, headroom 39% above the reserve, read 3 min ago\)/u);
   assert.match(estimateText(on.top.estimate), /≈ 8% of the 5 h/u);
   // Burning fast (Max at 70% after a fifth of the window): with the preference on it still wins inside the window…
   const burning = parseLimits(limitsAnswer({ claude: 70 }), NOW);
