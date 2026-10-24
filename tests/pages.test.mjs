@@ -430,7 +430,7 @@ test('decision models page: "Where agents run" — plans with windows and aliase
   assert.match(text, /Where agents run/u);
   assert.match(text, /Limit windows: read 3 min ago/u);
   assert.match(text, /Claude Code · subscription · Max/u);
-  assert.match(text, /5 h 41% used · headroom 39% · read 3 min ago · 1 routed running/u);
+  assert.match(text, /5 h 41% used · 59% left · headroom above the reserve 39% · read 3 min ago · 1 routed running/u);
   assert.match(text, /opus → claude-opus-4-8 \(alias table 2026-10-15\); mystery → no score/u);
   assert.match(text, /14 of 100 launches counted in 5 h/u);
   assert.match(text, /Z\.AI GLM · glm-5\.3 · Claude Code · ready/u);
@@ -476,7 +476,7 @@ test('decision models page: "Where agents run" — plans with windows and aliase
   const ru = ui.app.all().find(node => node.dataset?.section === 'routing').text();
   assert.match(ru, /Где работают агенты/u);
   assert.match(ru, /Claude Code · подписка · Max/u);
-  assert.match(ru, /5 h: использовано 41% · запас 39% · прочитано 3 мин назад · запущено через route: 1/u);
+  assert.match(ru, /5 h: использовано 41% · осталось 59% · запас выше резерва 39% · прочитано 3 мин назад · запущено через route: 1/u);
   assert.match(ru, /opus → claude-opus-4-8 \(таблица псевдонимов 2026-10-15\); mystery → без оценки/u);
   assert.match(ru, /исследование\/средняя · одна сильная .*≈ 8% окна 5 h .*подписка: Max · оценка 41,8 \(Artificial Analysis v4\.3\.2\), на 3 ниже лучшей · бесплатно в пределах окна/u);
   assert.match(ru, /Отдыхают после лимита: claude-max → /u);

@@ -857,7 +857,7 @@ export function costText(c: Candidate, now: number): string {
 
 function costBase(c: Candidate, now: number): string {
   const read = c.quota ? `, read ${ago(c.quota.readAt, now)}` : '';
-  const used = c.quota?.window ? `${windowName(c.quota.window.minutes, c.quota.window.label)} ${Math.round(c.quota.window.usedPercent)}% used` : '';
+  const used = c.quota?.window ? `${windowName(c.quota.window.minutes, c.quota.window.label)} ${Math.round(c.quota.window.usedPercent)}% used, ${Math.round(100 - c.quota.window.usedPercent)}% left` : '';
   switch (c.costBasis) {
     case 'free': return `subscription: free (${used}, headroom ${c.quota?.headroom}% above the reserve${read})`;
     case 'burning': return `subscription burning faster than its window (pace ${c.quota?.pace}): priced like its API route${read}`;
@@ -893,7 +893,7 @@ export function whyLine(c: Candidate, decision: Pick<RouteDecision, 'scoredAs' |
 export function estimateText(estimate: Estimate): string {
   switch (estimate.kind) {
     case 'usd': return estimate.high === 0 ? '$0' : `$${estimate.low}–${estimate.high}`;
-    case 'window': return `≈ ${estimate.share}% of the ${estimate.window ?? 'window'}${estimate.usedPercent !== null ? ` (now ${Math.round(estimate.usedPercent)}% used)` : ''}`;
+    case 'window': return `≈ ${estimate.share}% of the ${estimate.window ?? 'window'}${estimate.usedPercent !== null ? ` (now ${Math.round(estimate.usedPercent)}% used, ${Math.round(100 - estimate.usedPercent)}% left)` : ''}`;
     case 'launches': return `1 launch (${estimate.used} of ${estimate.allowance} used in ${estimate.windowHours} h)`;
     case 'flat': return 'flat-rate, unpriced';
     default: return estimate.note;

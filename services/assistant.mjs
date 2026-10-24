@@ -15539,7 +15539,7 @@ function costText(c, now) {
 }
 function costBase(c, now) {
   const read2 = c.quota ? `, read ${ago(c.quota.readAt, now)}` : "";
-  const used = c.quota?.window ? `${windowName(c.quota.window.minutes, c.quota.window.label)} ${Math.round(c.quota.window.usedPercent)}% used` : "";
+  const used = c.quota?.window ? `${windowName(c.quota.window.minutes, c.quota.window.label)} ${Math.round(c.quota.window.usedPercent)}% used, ${Math.round(100 - c.quota.window.usedPercent)}% left` : "";
   switch (c.costBasis) {
     case "free":
       return `subscription: free (${used}, headroom ${c.quota?.headroom}% above the reserve${read2})`;
@@ -15582,7 +15582,7 @@ function estimateText(estimate2) {
     case "usd":
       return estimate2.high === 0 ? "$0" : `$${estimate2.low}\u2013${estimate2.high}`;
     case "window":
-      return `\u2248 ${estimate2.share}% of the ${estimate2.window ?? "window"}${estimate2.usedPercent !== null ? ` (now ${Math.round(estimate2.usedPercent)}% used)` : ""}`;
+      return `\u2248 ${estimate2.share}% of the ${estimate2.window ?? "window"}${estimate2.usedPercent !== null ? ` (now ${Math.round(estimate2.usedPercent)}% used, ${Math.round(100 - estimate2.usedPercent)}% left)` : ""}`;
     case "launches":
       return `1 launch (${estimate2.used} of ${estimate2.allowance} used in ${estimate2.windowHours} h)`;
     case "flat":

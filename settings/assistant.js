@@ -995,6 +995,12 @@
     servers: []
   });
 
+  // src/ui/quotaText.ts
+  function usedLeft(locale, usedPercent) {
+    const used = Math.round(Math.max(0, Math.min(100, usedPercent)));
+    return locale === "ru" ? `\u0438\u0441\u043F\u043E\u043B\u044C\u0437\u043E\u0432\u0430\u043D\u043E ${used}% \xB7 \u043E\u0441\u0442\u0430\u043B\u043E\u0441\u044C ${100 - used}%` : `${used}% used \xB7 ${100 - used}% left`;
+  }
+
   // src/ui/routing.ts
   var CLI_NAMES = { claude: "Claude Code", codex: "Codex", grok: "Grok Build", kimi: "Kimi", qwen: "Qwen Code", opencode: "OpenCode", hermes: "Hermes", omp: "OMP", pi: "Pi", cursor: "Cursor", minimax: "MiniMax Code", devin: "Devin", antigravity: "Antigravity" };
   var cliName = (id) => CLI_NAMES[id] ?? id;
@@ -1019,7 +1025,7 @@
       windowHours: "Window, hours",
       remove: "Remove",
       save: "Save",
-      quota: (q, ago) => !q ? "" : q.state === "unknown" ? `quota unknown (${q.note})` : q.state === "exhausted" ? `no headroom above the reserve${q.window ? ` (${q.window.label ?? "window"} ${Math.round(q.window.usedPercent)}% used)` : ""} \xB7 read ${ago(q.readAt)}` : `${q.window ? `${q.window.label ?? "window"} ${Math.round(q.window.usedPercent)}% used \xB7 ` : ""}headroom ${q.headroom}%${q.pace !== null && q.pace > 1 ? ` \xB7 burning faster than its window (pace ${q.pace})` : ""}${q.state === "presumed-reset" ? " \xB7 probably reset since" : ""} \xB7 read ${ago(q.readAt)}`,
+      quota: (q, ago) => !q ? "" : q.state === "unknown" ? `quota unknown (${q.note})` : q.state === "exhausted" ? `no headroom above the reserve${q.window ? ` (${q.window.label ?? "window"} ${usedLeft("en", q.window.usedPercent)})` : ""} \xB7 read ${ago(q.readAt)}` : `${q.window ? `${q.window.label ?? "window"} ${usedLeft("en", q.window.usedPercent)} \xB7 ` : ""}headroom above the reserve ${q.headroom}%${q.pace !== null && q.pace > 1 ? ` \xB7 burning faster than its window (pace ${q.pace})` : ""}${q.state === "presumed-reset" ? " \xB7 probably reset since" : ""} \xB7 read ${ago(q.readAt)}`,
       running: (n) => n ? `${n} routed running` : "",
       launches: (n, allowance, hours) => `${n}${allowance ? ` of ${allowance}` : ""} launches counted in ${hours} h${allowance ? "" : " (no allowance set: quota unknown)"}`,
       models: "Models",
@@ -1038,7 +1044,7 @@
       accountsChanged: "Accounts changed what it shares since you allowed it: allow it again in Settings \u2192 Agents \u2192 Extension native code.",
       accountsUnreadable: (reason) => `Accounts' data cannot be read now (${reason}).`,
       pools: (label, ready, members, left) => `${label}: ${ready} of ${members} free${left}`,
-      poolLeft: (percent) => ` \xB7 ${percent}% left`,
+      poolLeft: (percent) => ` \xB7 ${usedLeft("en", 100 - percent)}`,
       flatRate: "flat-rate plan",
       servers: "Servers",
       serversOn: "Let orchestrators run independent leaf tasks on these servers",
@@ -1114,7 +1120,7 @@
       windowHours: "\u041E\u043A\u043D\u043E, \u0447\u0430\u0441\u043E\u0432",
       remove: "\u0423\u0434\u0430\u043B\u0438\u0442\u044C",
       save: "\u0421\u043E\u0445\u0440\u0430\u043D\u0438\u0442\u044C",
-      quota: (q, ago) => !q ? "" : q.state === "unknown" ? `\u043B\u0438\u043C\u0438\u0442 \u043D\u0435\u0438\u0437\u0432\u0435\u0441\u0442\u0435\u043D (${{ unread: "\u0435\u0449\u0451 \u043D\u0435 \u043F\u0440\u043E\u0447\u0438\u0442\u0430\u043D", unreadable: "\u043D\u0435 \u0447\u0438\u0442\u0430\u0435\u0442\u0441\u044F", stale: "\u043F\u0440\u043E\u0447\u0438\u0442\u0430\u043D \u0431\u043E\u043B\u044C\u0448\u0435 30 \u043C\u0438\u043D \u043D\u0430\u0437\u0430\u0434", "no-windows": "\u043D\u0435\u0442 \u043E\u043A\u043E\u043D" }[q.code] ?? q.code})` : q.state === "exhausted" ? `\u043D\u0435\u0442 \u0437\u0430\u043F\u0430\u0441\u0430 \u0432\u044B\u0448\u0435 \u0440\u0435\u0437\u0435\u0440\u0432\u0430${q.window ? ` (${q.window.label ?? "\u043E\u043A\u043D\u043E"} \u0438\u0441\u043F\u043E\u043B\u044C\u0437\u043E\u0432\u0430\u043D\u043E ${Math.round(q.window.usedPercent)}%)` : ""} \xB7 \u043F\u0440\u043E\u0447\u0438\u0442\u0430\u043D\u043E ${ago(q.readAt)}` : `${q.window ? `${q.window.label ?? "\u043E\u043A\u043D\u043E"}: \u0438\u0441\u043F\u043E\u043B\u044C\u0437\u043E\u0432\u0430\u043D\u043E ${Math.round(q.window.usedPercent)}% \xB7 ` : ""}\u0437\u0430\u043F\u0430\u0441 ${q.headroom}%${q.pace !== null && q.pace > 1 ? ` \xB7 \u0440\u0430\u0441\u0445\u043E\u0434\u0443\u0435\u0442\u0441\u044F \u0431\u044B\u0441\u0442\u0440\u0435\u0435 \u043E\u043A\u043D\u0430 (\u0442\u0435\u043C\u043F ${q.pace})` : ""}${q.state === "presumed-reset" ? " \xB7 \u0432\u0435\u0440\u043E\u044F\u0442\u043D\u043E, \u0443\u0436\u0435 \u0441\u0431\u0440\u043E\u0441\u0438\u043B\u043E\u0441\u044C" : ""} \xB7 \u043F\u0440\u043E\u0447\u0438\u0442\u0430\u043D\u043E ${ago(q.readAt)}`,
+      quota: (q, ago) => !q ? "" : q.state === "unknown" ? `\u043B\u0438\u043C\u0438\u0442 \u043D\u0435\u0438\u0437\u0432\u0435\u0441\u0442\u0435\u043D (${{ unread: "\u0435\u0449\u0451 \u043D\u0435 \u043F\u0440\u043E\u0447\u0438\u0442\u0430\u043D", unreadable: "\u043D\u0435 \u0447\u0438\u0442\u0430\u0435\u0442\u0441\u044F", stale: "\u043F\u0440\u043E\u0447\u0438\u0442\u0430\u043D \u0431\u043E\u043B\u044C\u0448\u0435 30 \u043C\u0438\u043D \u043D\u0430\u0437\u0430\u0434", "no-windows": "\u043D\u0435\u0442 \u043E\u043A\u043E\u043D" }[q.code] ?? q.code})` : q.state === "exhausted" ? `\u043D\u0435\u0442 \u0437\u0430\u043F\u0430\u0441\u0430 \u0432\u044B\u0448\u0435 \u0440\u0435\u0437\u0435\u0440\u0432\u0430${q.window ? ` (${q.window.label ?? "\u043E\u043A\u043D\u043E"}: ${usedLeft("ru", q.window.usedPercent)})` : ""} \xB7 \u043F\u0440\u043E\u0447\u0438\u0442\u0430\u043D\u043E ${ago(q.readAt)}` : `${q.window ? `${q.window.label ?? "\u043E\u043A\u043D\u043E"}: ${usedLeft("ru", q.window.usedPercent)} \xB7 ` : ""}\u0437\u0430\u043F\u0430\u0441 \u0432\u044B\u0448\u0435 \u0440\u0435\u0437\u0435\u0440\u0432\u0430 ${q.headroom}%${q.pace !== null && q.pace > 1 ? ` \xB7 \u0440\u0430\u0441\u0445\u043E\u0434\u0443\u0435\u0442\u0441\u044F \u0431\u044B\u0441\u0442\u0440\u0435\u0435 \u043E\u043A\u043D\u0430 (\u0442\u0435\u043C\u043F ${q.pace})` : ""}${q.state === "presumed-reset" ? " \xB7 \u0432\u0435\u0440\u043E\u044F\u0442\u043D\u043E, \u0443\u0436\u0435 \u0441\u0431\u0440\u043E\u0441\u0438\u043B\u043E\u0441\u044C" : ""} \xB7 \u043F\u0440\u043E\u0447\u0438\u0442\u0430\u043D\u043E ${ago(q.readAt)}`,
       running: (n) => n ? `\u0437\u0430\u043F\u0443\u0449\u0435\u043D\u043E \u0447\u0435\u0440\u0435\u0437 route: ${n}` : "",
       launches: (n, allowance, hours) => `\u0437\u0430\u043F\u0443\u0441\u043A\u043E\u0432 \u0437\u0430 ${hours} \u0447: ${n}${allowance ? ` \u0438\u0437 ${allowance}` : " (\u043B\u0438\u043C\u0438\u0442 \u043D\u0435 \u0437\u0430\u0434\u0430\u043D: \u043D\u0435\u0438\u0437\u0432\u0435\u0441\u0442\u043D\u043E)"}`,
       models: "\u041C\u043E\u0434\u0435\u043B\u0438",
@@ -1133,7 +1139,7 @@
       accountsChanged: "Accounts \u0438\u0437\u043C\u0435\u043D\u0438\u043B \u0442\u043E, \u0447\u0435\u043C \u0434\u0435\u043B\u0438\u0442\u0441\u044F, \u043F\u043E\u0441\u043B\u0435 \u0432\u0430\u0448\u0435\u0433\u043E \u0440\u0430\u0437\u0440\u0435\u0448\u0435\u043D\u0438\u044F: \u0440\u0430\u0437\u0440\u0435\u0448\u0438\u0442\u0435 \u0441\u043D\u043E\u0432\u0430 \u0432 \u041D\u0430\u0441\u0442\u0440\u043E\u0439\u043A\u0438 \u2192 \u0410\u0433\u0435\u043D\u0442\u044B \u2192 \u041D\u0430\u0442\u0438\u0432\u043D\u044B\u0439 \u043A\u043E\u0434 \u0440\u0430\u0441\u0448\u0438\u0440\u0435\u043D\u0438\u0439.",
       accountsUnreadable: (reason) => `\u0414\u0430\u043D\u043D\u044B\u0435 Accounts \u0441\u0435\u0439\u0447\u0430\u0441 \u043D\u0435 \u0447\u0438\u0442\u0430\u044E\u0442\u0441\u044F (${reason}).`,
       pools: (label, ready, members, left) => `${label}: \u0441\u0432\u043E\u0431\u043E\u0434\u043D\u043E ${ready} \u0438\u0437 ${members}${left}`,
-      poolLeft: (percent) => ` \xB7 \u043E\u0441\u0442\u0430\u043B\u043E\u0441\u044C ${percent}%`,
+      poolLeft: (percent) => ` \xB7 ${usedLeft("ru", 100 - percent)}`,
       flatRate: "\u0444\u0438\u043A\u0441\u0438\u0440\u043E\u0432\u0430\u043D\u043D\u044B\u0439 \u0442\u0430\u0440\u0438\u0444",
       servers: "\u0421\u0435\u0440\u0432\u0435\u0440\u044B",
       serversOn: "\u0420\u0430\u0437\u0440\u0435\u0448\u0438\u0442\u044C \u043E\u0440\u043A\u0435\u0441\u0442\u0440\u0430\u0442\u043E\u0440\u0430\u043C \u0437\u0430\u043F\u0443\u0441\u043A\u0430\u0442\u044C \u043D\u0435\u0437\u0430\u0432\u0438\u0441\u0438\u043C\u044B\u0435 \u043B\u0438\u0441\u0442\u043E\u0432\u044B\u0435 \u0437\u0430\u0434\u0430\u0447\u0438 \u043D\u0430 \u044D\u0442\u0438\u0445 \u0441\u0435\u0440\u0432\u0435\u0440\u0430\u0445",
