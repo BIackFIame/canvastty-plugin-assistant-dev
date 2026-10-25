@@ -107,6 +107,8 @@ serve({
     // The main agent («Главный агент»): the Assistant page's section and the HOME widget.
     'conductor.state': async () => { const a = await ready; a.pageOpened(); return a.conductorState(); },
     'conductor.start': async () => (await ready).conductor.start(),
+    // CanvasTTY's launcher entry (C5, host-only): start the main agent, or answer which card is open.
+    'canvastty.launcher.entry': async params => { const a = await ready; if (params.locale === 'en' || params.locale === 'ru') a.setLocale(params.locale); return a.conductor.start(); },
     'conductor.addProject': async params => (await ready).conductor.addProject(params.path),
     'conductor.removeProject': async params => (await ready).conductor.removeProject(str(params.projectId)),
     'conductor.save': async params => (await ready).conductor.saveOptions(params.settings),

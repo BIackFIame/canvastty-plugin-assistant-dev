@@ -224,7 +224,7 @@
       noProjectsWidget: "\u041F\u0440\u043E\u0435\u043A\u0442\u043E\u0432 \u043F\u043E\u043A\u0430 \u043D\u0435\u0442: \u0434\u043E\u0431\u0430\u0432\u044C\u0442\u0435 \u043F\u0430\u043F\u043A\u0438 \u043D\u0430 \u0441\u0442\u0440\u0430\u043D\u0438\u0446\u0435 \u041F\u043E\u043C\u043E\u0449\u043D\u0438\u043A\u0430."
     }
   };
-  var SETTINGS_SECTION = { "native-code": "agents", broker: "agents", home: "appearance" };
+  var SETTINGS_SECTION = { "native-code": "native-code", broker: "agents", home: "appearance" };
   var unsupportedMethod = (error) => /unsupported plugin method|unknown (host )?method|not (supported|available)/iu.test(error instanceof Error ? error.message : String(error));
 
   // src/ui/conductorSection.ts

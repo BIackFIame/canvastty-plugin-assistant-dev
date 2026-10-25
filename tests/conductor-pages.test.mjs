@@ -121,6 +121,11 @@ test('Assistant page: with grants.request the missing items go in one request (t
   assert.ok(request);
   assert.deepEqual(request.params.items, [{ kind: 'mayStartOrchestrators' }, { kind: 'brokerGrant', owner: 'canvastty-accounts', account: '*' }, { kind: 'trustUpdates', plugin: 'canvastty-assistant' }, { kind: 'trustUpdates', plugin: 'canvastty-environments' }]);
   assert.ok(!JSON.stringify(request.params).includes('"plugin":"canvastty-accounts"'), 'never trust updates for Accounts');
+  // settings.open: each item's button opens its section (native code is scrolled to; broker grants are under Agents).
+  const opens = ui.app.all().filter(node => node.tagName === 'BUTTON' && node.textContent === CONDUCTOR_TEXT.en.openSettings);
+  for (const node of opens) node.click();
+  await settle();
+  assert.deepEqual(asked.filter(entry => entry.method === 'settings.open').map(entry => entry.params.section), ['native-code', 'agents', 'native-code', 'appearance']);
 });
 
 test('HOME widget: start or show, one line per project; a click shows the card that waits for the person', async () => {

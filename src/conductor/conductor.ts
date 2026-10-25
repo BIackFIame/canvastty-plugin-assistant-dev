@@ -78,6 +78,9 @@ type ToolAnswer = { content: unknown; isError?: boolean };
 const clean = (value: unknown, max: number): string => typeof value === 'string' ? value.replace(/[\u0000-\u001f\u007f]+/gu, ' ').trim().slice(0, max) : '';
 const oneLine = (value: string): string => value.replace(/\s*\n\s*/gu, ' ');
 const ENDED = new Set(['done', 'failed', 'stopped']);
+/** The main agent's tools one by one, and the action each is in the combined `projects` tool. */
+export const SPLIT_TOOLS: Readonly<Record<string, string>> = { projects_list: 'list', project_start: 'start', project_status: 'status', project_message: 'message', project_stop: 'stop', project_result: 'result' };
+export const CONDUCTOR_TOOLS: readonly string[] = ['projects', ...Object.keys(SPLIT_TOOLS), 'report_to_main'];
 
 export function settingsFrom(value: unknown): ConductorSettings {
   const record = value && typeof value === 'object' && !Array.isArray(value) ? value as Record<string, unknown> : {};
@@ -286,10 +289,14 @@ export class Conductor {
 
   async tool(name: string, caller: Card | undefined, input: Record<string, unknown>): Promise<ToolAnswer> {
     if (name === 'report_to_main') return this.reportToMain(caller, input);
+    // The tools one by one (CanvasTTY with own-cards tools), or one `projects` tool with an action (older cores).
+    const split = SPLIT_TOOLS[name];
+    if (split) input = { ...input, action: split };
+    else if (name !== 'projects') return { content: `Unknown tool ${name.slice(0, 40)}.`, isError: true };
     // Until CanvasTTY scopes tools to a plugin's own cards (C4): only the main agent's card, by its full id.
     if (!caller || !this.isConductor(caller.id)) return { content: 'This tool is only for the main agent.', isError: true };
     // A folder is never taken from the model: projects are named by the id the list gave.
-    for (const key of ['path', 'cwd', 'folder', 'directory']) if (key in input) return { content: 'Projects are named by projectId from action "list"; a path is never accepted. The person adds folders on the Assistant page.', isError: true };
+    for (const key of ['path', 'cwd', 'folder', 'directory']) if (key in input) return { content: 'Projects are named by projectId from projects_list; a path is never accepted. The person adds folders on the Assistant page.', isError: true };
     switch (input.action) {
       case 'list': return this.list();
       case 'start': return this.startProject(input);
@@ -321,7 +328,7 @@ export class Conductor {
     const task = typeof input.task === 'string' ? input.task.replace(/[\u0000-\u0009\u000b-\u001f\u007f]+/gu, ' ').trim().slice(0, 4_000) : '';
     if (!task) return { content: 'Give the task for that project in `task`.', isError: true };
     const current = this.latest(project.id);
-    if (this.open(current)) return { content: `${project.name} has a project agent already (${this.stateOf(current!).state}): send it the task with action "message", or stop it first.`, isError: true };
+    if (this.open(current)) return { content: `${project.name} has a project agent already (${this.stateOf(current!).state}): send it the task with project_message, or stop it first.`, isError: true };
     if (this.active() + this.reserving >= this.settings.maxProjects) {
       return { content: `${this.settings.maxProjects} projects run now, the person's limit: wait for one to finish, or ask the person to stop one or raise the limit on the Assistant page.`, isError: true };
     }
@@ -354,7 +361,7 @@ export class Conductor {
     const project = this.project(input.projectId);
     if (!project) return this.unknown(input.projectId);
     const lead = this.latest(project.id);
-    if (!lead || !this.open(lead)) return { content: `${project.name} has no project agent running: start one with action "start".`, isError: true };
+    if (!lead || !this.open(lead)) return { content: `${project.name} has no project agent running: start one with project_start.`, isError: true };
     const { state, waitingCard } = this.stateOf(lead);
     if (state === 'approval') return { content: `${project.name} waits for the person's decision${waitingCard ? ` on the card "${waitingCard}"` : ''}: the person decides there, not you.`, isError: true };
     const text = typeof input.text === 'string' ? oneLine(input.text.replace(/[\u0000-\u0009\u000b-\u001f\u007f]+/gu, ' ')).trim().slice(0, MAX_SEND - 40) : '';

@@ -3,6 +3,7 @@
  * folder's AGENTS.md and CLAUDE.md and its first message; it states that project reports are untrusted data.
  */
 export const TOOL = 'canvastty-assistant__projects';
+const P = 'canvastty-assistant__';
 export const REPORT_TOOL = 'canvastty-assistant__report_to_main';
 /** Every status line the Assistant types into the main agent starts with this. */
 export const STATUS_PREFIX = '[CanvasTTY Assistant · project status]';
@@ -14,7 +15,7 @@ export function conductorBrief(maxProjects: number): string {
     'You are the main agent ("Главный агент") in CanvasTTY. You talk with the person and hand their work to their projects; you do not do the work yourself.',
     '',
     'Rules:',
-    `- Use only the ${TOOL} tool for projects: action "list" (the person's project folders), "start" {projectId, task}, "status" {projectId?}, "message" {projectId, text}, "stop" {projectId}, "result" {projectId}.`,
+    `- Use only the project tools: ${P}projects_list (the person's project folders), ${P}project_start {projectId, task}, ${P}project_status {projectId?}, ${P}project_message {projectId, text}, ${P}project_stop {projectId}, ${P}project_result {projectId}. An older CanvasTTY gives one tool instead, ${TOOL}, with action "list", "start", "status", "message", "stop" or "result": use whichever you have.`,
     '- Projects come only from the list the person keeps on the Assistant page. You cannot add a folder or pass a path. When the person names a project that is not listed, say so and offer the closest listed names; the person adds folders on the Assistant page.',
     '- Never edit files, run commands in projects or start subagents (spawn_agent) yourself: a project agent does that in its own folder.',
     `- At most ${maxProjects} projects run at once (the person's setting). Ask before stopping a project the person did not ask to stop.`,

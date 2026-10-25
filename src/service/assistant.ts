@@ -35,7 +35,7 @@ import { turnView, type TurnView } from '../auto/select.ts';
 import { DEFAULT_MAX_PARALLEL } from '../route/settings.ts';
 import { buildTree, type TreeAccount, type TreeRoute, type TreeView } from '../tree/agentTree.ts';
 import { homedir } from 'node:os';
-import { Conductor, TOOL_CLIS, type LeadRoute, type TopStart } from '../conductor/conductor.ts';
+import { Conductor, CONDUCTOR_TOOLS, TOOL_CLIS, type LeadRoute, type TopStart } from '../conductor/conductor.ts';
 import { accountQuotaFrom } from '../route/service.ts';
 import type { Candidate } from '../route/engine.ts';
 
@@ -373,7 +373,7 @@ export class Assistant {
     // The main agent's own project tool (its first call would otherwise ask the person in Claude Code): allowed
     // here, for that card only, by its full session id. Counts only where the person let the Assistant allow.
     const tool = params.tool as { name?: unknown; kind?: unknown } | undefined;
-    if (this.conductor.isConductor(params.sessionId) && tool?.kind === 'other' && typeof tool.name === 'string' && /(?:^|__)canvastty-assistant__projects$/u.test(tool.name)) {
+    if (this.conductor.isConductor(params.sessionId) && tool?.kind === 'other' && typeof tool.name === 'string' && /(?:^|__)canvastty-assistant__(?:projects|projects_list|project_(?:start|status|message|stop|result))$/u.test(tool.name)) {
       return { verdict: 'allow', reason: 'The main agent\'s own project tool.' };
     }
     const budget = typeof params.budgetMs === 'number' && Number.isFinite(params.budgetMs) ? params.budgetMs : 3_000;
@@ -521,7 +521,7 @@ export class Assistant {
    */
   private async autopilotPlan(caller: SessionSummary | undefined, input: Record<string, unknown>): Promise<{ content: unknown; isError?: boolean }> {
     if (!caller || typeof caller.id !== 'string') return { content: 'CanvasTTY did not say which card is calling.', isError: true };
-    if (this.conductor.isConductor(caller.id)) return { content: 'The main agent starts no subagents: hand work to a project with canvastty-assistant__projects (action "start").', isError: true };
+    if (this.conductor.isConductor(caller.id)) return { content: 'The main agent starts no subagents: hand work to a project with canvastty-assistant__project_start.', isError: true };
     // Lines kept: a list of parts is part of the task's shape.
     const task = planTask(input.task);
     if (!task) return { content: 'Give the whole task in `task`.', isError: true };
@@ -915,7 +915,7 @@ export class Assistant {
   // -------------------------------------------------------------------------
 
   async tool(name: string, caller: SessionSummary | undefined, input: Record<string, unknown>): Promise<{ content: unknown; isError?: boolean }> {
-    if (name === 'projects' || name === 'report_to_main') return this.conductor.tool(name, caller, input);
+    if (CONDUCTOR_TOOLS.includes(name)) return this.conductor.tool(name, caller, input);
     if (this.harness.handles(name)) return this.harness.tool(name, caller, input);
     if (this.routing.handles(name)) {
       if (!caller || typeof caller.id !== 'string') return { content: 'CanvasTTY did not say which card is calling.', isError: true };

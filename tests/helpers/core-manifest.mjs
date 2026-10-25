@@ -2,6 +2,8 @@
 // `title.ru`, …) need a core with localized manifest strings; CanvasTTY main (1.8.1) refuses them as unknown
 // fields. Against such a core the tests use the manifest without them, and say so, so everything else is still
 // checked by the core's own validator. A core that knows them gets the manifest unchanged.
+import { coreAllVariant } from '../../scripts/manifest-variant.mjs';
+
 export const LOCALIZED_KEY = /^[A-Za-z]+\.(?:ru|en|zh-CN)$/u;
 
 export function withoutLocalizedKeys(value) {
@@ -42,13 +44,15 @@ const declaresPolicy = manifest => manifest.services.some(service => service.lau
  * scoped form and it was dropped, or the manifest has none: the 1.8.x variant).
  */
 export function manifestForCore(validatePluginManifest, manifest) {
-  let current = manifest, localized = true, policy = true, coreAll = true;
-  for (let attempt = 0; attempt < 4; attempt++) {
+  let current = manifest, localized = true, policy = true, coreAll = true, ownCards = true;
+  for (let attempt = 0; attempt < 5; attempt++) {
     try {
       validatePluginManifest(current);
-      return { manifest: current, localized, policy: policy && declaresPolicy(current) };
+      return { manifest: current, localized, policy: policy && declaresPolicy(current), ownCards };
     } catch (error) {
       const message = String(error?.message);
+      // A core without own-cards tools (C4) and launcher entries (C5): the core-all variant (scripts/manifest-variant.mjs).
+      if (ownCards && /unknown field: (launcherEntry|audience)\b|between 1 and 16 items/u.test(message)) { current = coreAllVariant(current); ownCards = false; continue; }
       if (localized && /unknown field: [A-Za-z]+\.(?:ru|en|zh-CN)\b/u.test(message)) { current = withoutLocalizedKeys(current); localized = false; continue; }
       if (policy && /launch policy/iu.test(message)) { current = withoutPolicy(current); policy = false; continue; }
       if (coreAll && /unknown field: uses\b|permission[^.]*(providers:read|usage:read|accounts:broker)|(providers:read|usage:read|accounts:broker)/iu.test(message)) { current = withoutCoreAllKeys(current); coreAll = false; continue; }
@@ -56,5 +60,5 @@ export function manifestForCore(validatePluginManifest, manifest) {
     }
   }
   validatePluginManifest(current);
-  return { manifest: current, localized, policy: policy && declaresPolicy(current) };
+  return { manifest: current, localized, policy: policy && declaresPolicy(current), ownCards };
 }

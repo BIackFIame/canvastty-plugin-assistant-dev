@@ -17577,6 +17577,7 @@ import { join as join17 } from "node:path";
 
 // src/conductor/brief.ts
 var TOOL = "canvastty-assistant__projects";
+var P = "canvastty-assistant__";
 var REPORT_TOOL = "canvastty-assistant__report_to_main";
 var STATUS_PREFIX = "[CanvasTTY Assistant \xB7 project status]";
 var BRIEF_MARK = "<!-- written by the CanvasTTY Assistant for the main agent; edit freely, then delete this line -->";
@@ -17585,7 +17586,7 @@ function conductorBrief(maxProjects) {
     'You are the main agent ("\u0413\u043B\u0430\u0432\u043D\u044B\u0439 \u0430\u0433\u0435\u043D\u0442") in CanvasTTY. You talk with the person and hand their work to their projects; you do not do the work yourself.',
     "",
     "Rules:",
-    `- Use only the ${TOOL} tool for projects: action "list" (the person's project folders), "start" {projectId, task}, "status" {projectId?}, "message" {projectId, text}, "stop" {projectId}, "result" {projectId}.`,
+    `- Use only the project tools: ${P}projects_list (the person's project folders), ${P}project_start {projectId, task}, ${P}project_status {projectId?}, ${P}project_message {projectId, text}, ${P}project_stop {projectId}, ${P}project_result {projectId}. An older CanvasTTY gives one tool instead, ${TOOL}, with action "list", "start", "status", "message", "stop" or "result": use whichever you have.`,
     "- Projects come only from the list the person keeps on the Assistant page. You cannot add a folder or pass a path. When the person names a project that is not listed, say so and offer the closest listed names; the person adds folders on the Assistant page.",
     "- Never edit files, run commands in projects or start subagents (spawn_agent) yourself: a project agent does that in its own folder.",
     `- At most ${maxProjects} projects run at once (the person's setting). Ask before stopping a project the person did not ask to stop.`,
@@ -17822,6 +17823,8 @@ var MAX_REPORTS_KEPT = 64;
 var clean6 = (value, max) => typeof value === "string" ? value.replace(/[\u0000-\u001f\u007f]+/gu, " ").trim().slice(0, max) : "";
 var oneLine2 = (value) => value.replace(/\s*\n\s*/gu, " ");
 var ENDED = /* @__PURE__ */ new Set(["done", "failed", "stopped"]);
+var SPLIT_TOOLS = { projects_list: "list", project_start: "start", project_status: "status", project_message: "message", project_stop: "stop", project_result: "result" };
+var CONDUCTOR_TOOLS = ["projects", ...Object.keys(SPLIT_TOOLS), "report_to_main"];
 function settingsFrom(value) {
   const record4 = value && typeof value === "object" && !Array.isArray(value) ? value : {};
   const max = typeof record4.maxProjects === "number" && Number.isInteger(record4.maxProjects) ? Math.max(1, Math.min(MAX_PROJECTS_AT_ONCE, record4.maxProjects)) : DEFAULT_MAX_PROJECTS;
@@ -18055,8 +18058,11 @@ var Conductor = class {
   // ---- the agent tools ----
   async tool(name, caller, input) {
     if (name === "report_to_main") return this.reportToMain(caller, input);
+    const split = SPLIT_TOOLS[name];
+    if (split) input = { ...input, action: split };
+    else if (name !== "projects") return { content: `Unknown tool ${name.slice(0, 40)}.`, isError: true };
     if (!caller || !this.isConductor(caller.id)) return { content: "This tool is only for the main agent.", isError: true };
-    for (const key of ["path", "cwd", "folder", "directory"]) if (key in input) return { content: 'Projects are named by projectId from action "list"; a path is never accepted. The person adds folders on the Assistant page.', isError: true };
+    for (const key of ["path", "cwd", "folder", "directory"]) if (key in input) return { content: "Projects are named by projectId from projects_list; a path is never accepted. The person adds folders on the Assistant page.", isError: true };
     switch (input.action) {
       case "list":
         return this.list();
@@ -18093,7 +18099,7 @@ ${JSON.stringify({ projects, running: this.active(), maxProjects: this.settings.
     const task = typeof input.task === "string" ? input.task.replace(/[\u0000-\u0009\u000b-\u001f\u007f]+/gu, " ").trim().slice(0, 4e3) : "";
     if (!task) return { content: "Give the task for that project in `task`.", isError: true };
     const current = this.latest(project.id);
-    if (this.open(current)) return { content: `${project.name} has a project agent already (${this.stateOf(current).state}): send it the task with action "message", or stop it first.`, isError: true };
+    if (this.open(current)) return { content: `${project.name} has a project agent already (${this.stateOf(current).state}): send it the task with project_message, or stop it first.`, isError: true };
     if (this.active() + this.reserving >= this.settings.maxProjects) {
       return { content: `${this.settings.maxProjects} projects run now, the person's limit: wait for one to finish, or ask the person to stop one or raise the limit on the Assistant page.`, isError: true };
     }
@@ -18128,7 +18134,7 @@ ${JSON.stringify({ projectId: project.id, leadId: answer.sessionId, route: answe
     const project = this.project(input.projectId);
     if (!project) return this.unknown(input.projectId);
     const lead = this.latest(project.id);
-    if (!lead || !this.open(lead)) return { content: `${project.name} has no project agent running: start one with action "start".`, isError: true };
+    if (!lead || !this.open(lead)) return { content: `${project.name} has no project agent running: start one with project_start.`, isError: true };
     const { state, waitingCard } = this.stateOf(lead);
     if (state === "approval") return { content: `${project.name} waits for the person's decision${waitingCard ? ` on the card "${waitingCard}"` : ""}: the person decides there, not you.`, isError: true };
     const text6 = typeof input.text === "string" ? oneLine2(input.text.replace(/[\u0000-\u0009\u000b-\u001f\u007f]+/gu, " ")).trim().slice(0, MAX_SEND - 40) : "";
@@ -18688,7 +18694,7 @@ var Assistant = class {
   // -------------------------------------------------------------------------
   async decide(params) {
     const tool = params.tool;
-    if (this.conductor.isConductor(params.sessionId) && tool?.kind === "other" && typeof tool.name === "string" && /(?:^|__)canvastty-assistant__projects$/u.test(tool.name)) {
+    if (this.conductor.isConductor(params.sessionId) && tool?.kind === "other" && typeof tool.name === "string" && /(?:^|__)canvastty-assistant__(?:projects|projects_list|project_(?:start|status|message|stop|result))$/u.test(tool.name)) {
       return { verdict: "allow", reason: "The main agent's own project tool." };
     }
     const budget = typeof params.budgetMs === "number" && Number.isFinite(params.budgetMs) ? params.budgetMs : 3e3;
@@ -18837,7 +18843,7 @@ var Assistant = class {
    */
   async autopilotPlan(caller, input) {
     if (!caller || typeof caller.id !== "string") return { content: "CanvasTTY did not say which card is calling.", isError: true };
-    if (this.conductor.isConductor(caller.id)) return { content: 'The main agent starts no subagents: hand work to a project with canvastty-assistant__projects (action "start").', isError: true };
+    if (this.conductor.isConductor(caller.id)) return { content: "The main agent starts no subagents: hand work to a project with canvastty-assistant__project_start.", isError: true };
     const task = planTask(input.task);
     if (!task) return { content: "Give the whole task in `task`.", isError: true };
     const { plan: plan3, view, shaped, from } = await this.planOf(task, this.classOf(caller.id), caller.id);
@@ -19228,7 +19234,7 @@ ${JSON.stringify({ sessionId, server: server.label, provider })}` };
   // EP-6: orchestrator tools
   // -------------------------------------------------------------------------
   async tool(name, caller, input) {
-    if (name === "projects" || name === "report_to_main") return this.conductor.tool(name, caller, input);
+    if (CONDUCTOR_TOOLS.includes(name)) return this.conductor.tool(name, caller, input);
     if (this.harness.handles(name)) return this.harness.tool(name, caller, input);
     if (this.routing.handles(name)) {
       if (!caller || typeof caller.id !== "string") return { content: "CanvasTTY did not say which card is calling.", isError: true };
@@ -19663,6 +19669,12 @@ serve({
       return a.conductorState();
     },
     "conductor.start": async () => (await ready).conductor.start(),
+    // CanvasTTY's launcher entry (C5, host-only): start the main agent, or answer which card is open.
+    "canvastty.launcher.entry": async (params) => {
+      const a = await ready;
+      if (params.locale === "en" || params.locale === "ru") a.setLocale(params.locale);
+      return a.conductor.start();
+    },
     "conductor.addProject": async (params) => (await ready).conductor.addProject(params.path),
     "conductor.removeProject": async (params) => (await ready).conductor.removeProject(str2(params.projectId)),
     "conductor.save": async (params) => (await ready).conductor.saveOptions(params.settings),

@@ -34,7 +34,7 @@ test('the manifest\'s coreFiles match the package bytes, and the service and pag
 
 test('the manifest passes CanvasTTY\'s own validator (when CANVASTTY_REPO points at a checkout)', { skip: !process.env.CANVASTTY_REPO }, async () => {
   const { validatePluginManifest } = await import(join(process.env.CANVASTTY_REPO, 'src/main/services/PluginManager.ts'));
-  const { manifest: accepted, localized, policy } = manifestForCore(validatePluginManifest, manifest);
+  const { manifest: accepted, localized, policy, ownCards } = manifestForCore(validatePluginManifest, manifest);
   const checked = validatePluginManifest(accepted);
   assert.deepEqual(checked.services[0].decide, { events: ['pre-tool'], timeoutMs: 45_000 });
   // Only the scoped policy (own trees: never a launch the person starts); a core without it gets none at all.
@@ -42,9 +42,18 @@ test('the manifest passes CanvasTTY\'s own validator (when CANVASTTY_REPO points
   if (policy) assert.notEqual(checked.services[0].launch.policy, true, 'never unscoped');
   else assert.equal(checked.services[0].launch.policy, undefined, 'a core without the scoped form: no policy, phase-1 checks');
   assert.equal(checked.services[0].launch.delegable, true);
-  assert.deepEqual(checked.services[0].tools.map(tool => tool.name), ['recommend', 'review_status', 'route', 'pick_route', 'route_outcome', 'autopilot_plan', 'start_leaf', 'leaf_status', 'flows_list', 'flow_plan', 'flow_status', 'task_add', 'task_update', 'task_list', 'projects', 'report_to_main']);
-  // CanvasTTY gives a service at most 16 agent tools: the main agent's six project actions are one tool.
-  assert.equal(checked.services[0].tools.length, 16);
+  assert.deepEqual(checked.services[0].tools.map(tool => tool.name), ['recommend', 'review_status', 'route', 'pick_route', 'route_outcome', 'autopilot_plan', 'start_leaf', 'leaf_status', 'flows_list', 'flow_plan', 'flow_status', 'task_add', 'task_update', 'task_list',
+    ...(ownCards ? ['projects_list', 'project_start', 'project_status', 'project_message', 'project_stop', 'project_result', 'report_to_main'] : ['projects', 'report_to_main'])]);
+  if (ownCards) {
+    // Own-cards tools (C4): only the cards the Assistant started see them; the 16 every card sees are unchanged.
+    assert.deepEqual(checked.services[0].tools.filter(tool => tool.audience === 'own-cards').map(tool => tool.name), ['projects_list', 'project_start', 'project_status', 'project_message', 'project_stop', 'project_result', 'report_to_main']);
+    assert.equal(checked.services[0].launcherEntry.title, 'Main agent');
+    assert.equal(checked.services[0].launcherEntry['title.ru'], 'Главный агент');
+  } else {
+    // A core without them: the main agent's six project actions are one tool within the 16 every card shares.
+    assert.equal(checked.services[0].tools.length, 16);
+    assert.equal(checked.services[0].launcherEntry, undefined);
+  }
   assert.deepEqual(checked.contributions.filter(entry => entry.kind === 'home-widget').map(entry => [entry.id, entry.entry]), [['conductor', 'apps/main.html']]);
   assert.deepEqual(checked.services[0].cardActions.map(action => action.id), ['flow-preview', 'task-board', 'report', 'agent-tree']);
   if (localized && manifest['name.ru'] !== undefined) assert.deepEqual(checked.services[0].cardActions.map(action => action['title.ru']), ['План по сценарию…', 'Доска задач', 'Отчёт', 'Дерево агентов'], 'the core keeps the Russian card action titles (needs localized card action titles)');
@@ -180,4 +189,32 @@ test('end to end over JSON-RPC: off answers nothing; on in Auto the rule allows 
   const status = JSON.parse((await service.request('canvastty.tools.call', { tool: 'review_status', caller, input: {} })).content);
   assert.equal(status.commandReview, 'auto');
   assert.equal(await service.request('canvastty.launch.prepare', { sessionId: 's2', provider: 'claude', profile: 'yolo', role: 'agent', cwd: project, restoring: false, resume: false, options: {}, chosen: true, environment: null }), null);
+});
+
+test('launcher entry (C5) over JSON-RPC: canvastty.launcher.entry starts the main agent in the person\'s language', async t => {
+  const storage = {};
+  const created = [];
+  const service = startService(t, {
+    dataDir: join(base, 'data-launcher'),
+    host: {
+      'storage.get': ({ key }) => storage[key] ?? null,
+      'storage.set': ({ key, value }) => { storage[key] = value; },
+      'sessions.subscribe': () => ({ sessions: [] }),
+      'sessions.create': params => {
+        if (params.role !== 'agent' && params.role !== 'orchestrator') throw new Error('role must be agent or orchestrator.');
+        if (!params.provider) throw new Error('provider and cwd are required.');
+        created.push(params);
+        return { sessionId: '0c0c0c0c-1111-4111-8111-111111111111' };
+      },
+      'sessions.send': params => ({ sessionId: params.sessionId, sent: true }),
+      'providers.list': () => ({ providers: [{ id: 'claude', installed: true, available: true, signIn: 'ok', subagent: true, orchestrator: true, efforts: ['low', 'medium', 'high'] }], environments: [] }),
+      'secrets.get': () => null, 'redaction.register': () => null, 'cards.setBadge': () => null
+    }
+  });
+  const first = await service.request('canvastty.launcher.entry', { locale: 'ru' });
+  assert.equal(first.started, true, JSON.stringify(first));
+  assert.equal(created.length, 1);
+  assert.equal(created[0].role, 'orchestrator');
+  assert.equal(created[0].title, 'Главный агент');
+  assert.match(created[0].cwd, /CanvasTTY[\\/]main-agent$/u);
 });

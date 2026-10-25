@@ -108,7 +108,7 @@ export const CONDUCTOR_TEXT = {
 };
 
 /** The Settings section an item lives in, for `settings.open` on a host that has it. */
-export const SETTINGS_SECTION: Record<string, string> = { 'native-code': 'agents', broker: 'agents', home: 'appearance' };
+export const SETTINGS_SECTION: Record<string, string> = { 'native-code': 'native-code', broker: 'agents', home: 'appearance' };
 
 /** A host method this CanvasTTY does not have (the frame answers "Unsupported plugin method"). */
 export const unsupportedMethod = (error: unknown): boolean => /unsupported plugin method|unknown (host )?method|not (supported|available)/iu.test(error instanceof Error ? error.message : String(error));

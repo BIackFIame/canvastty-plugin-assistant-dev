@@ -405,10 +405,14 @@ test('core: the main agent and its project agents are plugin-started orchestrato
   const { validatePluginManifest } = await import(join(core, 'src/main/services/PluginManager.ts'));
   const { TerminalManager } = await import(join(core, 'src/main/services/TerminalManager.ts'));
   const { PluginSessions } = await import(join(core, 'src/main/services/PluginSessions.ts'));
+  const { PluginAgentTools } = await import(join(core, 'src/main/services/PluginAgentTools.ts'));
   const accepted = manifestForCore(validatePluginManifest, manifest);
   const checked = validatePluginManifest(accepted.manifest);
   const launch = checked.services[0].launch;
-  assert.ok(checked.services[0].tools.some(tool => tool.name === 'projects') && checked.services[0].tools.some(tool => tool.name === 'report_to_main'), 'the core keeps both tools');
+  const names = checked.services[0].tools.map(tool => tool.name);
+  // Own-cards tools where the core has them (C4), else the combined `projects` within the 16 every card shares.
+  assert.ok(accepted.ownCards ? names.includes('project_start') && !names.includes('projects') : names.includes('projects') && !names.includes('project_start'), names.join());
+  assert.ok(names.includes('report_to_main'));
   const consent = { allowed: false };
   let sessions = null, assistant = null;
   const outcomes = [];
@@ -432,6 +436,17 @@ test('core: the main agent and its project agents are plugin-started orchestrato
   terminals.configureLaunchPipeline(pipeline);
   sessions = new PluginSessions({ terminals, notify: (_p, _s, _m, event) => { assistant.sessionEvent(event); return true; }, mayStartOrchestrators: pluginId => pluginId === ASSISTANT && consent.allowed });
   assistant.sessionsKnown(sessions.handle(ASSISTANT, 'assistant', 'sessions.subscribe', {}, manifest.permissions).sessions);
+  // CanvasTTY's agent-tools bridge, as an agent reaches the Assistant's tools.
+  const agentTools = new PluginAgentTools({
+    providers: () => [{ pluginId: ASSISTANT, pluginName: 'CanvasTTY Assistant', serviceId: 'assistant', tools: checked.services[0].tools }],
+    call: async (_p, _s, _m, params) => assistant.tool(params.tool, params.caller, params.input),
+    caller: id => sessions.summary(id), owner: id => terminals.pluginContext(id)?.owner ?? null, redact: text => text
+  });
+  /** A project action through the bridge: the tool of its own (own-cards cores) or `projects` with the action. */
+  const SPLIT = { list: 'projects_list', start: 'project_start', status: 'project_status', message: 'project_message', stop: 'project_stop', result: 'project_result' };
+  const project = (id, action, input = {}) => accepted.ownCards
+    ? agentTools.call(id, 'orchestrator', `${ASSISTANT}__${SPLIT[action]}`, input)
+    : agentTools.call(id, 'orchestrator', `${ASSISTANT}__projects`, { action, ...input });
   const waitFor = async (predicate, ms = 5_000) => { const end = Date.now() + ms; while (Date.now() < end) { const value = await predicate(); if (value) return value; await new Promise(resolve => setTimeout(resolve, 10)); } throw new Error('Condition was not met in time.'); };
   const flush = () => new Promise(resolve => setTimeout(resolve, 0));
 
@@ -454,9 +469,11 @@ test('core: the main agent and its project agents are plugin-started orchestrato
 
   // Projects: only listed folders; the real core starts the project agent there.
   for (const name of ['shop-api', 'landing']) await assistant.conductor.addProject(f.project(name));
-  assert.equal((await assistant.tool('projects', caller(started.sessionId), { action: 'start', projectId: 'shop-api', task: 'x', cwd: '/etc' })).isError, true);
-  const leadAnswer = await assistant.tool('projects', caller(started.sessionId), { action: 'start', projectId: 'shop-api', task: 'Fix the payment rounding' });
-  assert.equal(leadAnswer.isError, undefined, leadAnswer.content);
+  // A path from the model: refused by the schema (no such field) or by the Assistant; nothing starts.
+  const withPath = await project(started.sessionId, 'start', { projectId: 'shop-api', task: 'x', cwd: '/etc' }).catch(error => ({ isError: true, content: error.message }));
+  assert.equal(withPath.isError, true);
+  const leadAnswer = await project(started.sessionId, 'start', { projectId: 'shop-api', task: 'Fix the payment rounding' });
+  assert.ok(!leadAnswer.isError, leadAnswer.content);
   const leadId = json(leadAnswer).leadId;
   await waitFor(() => spawned.length === 2);
   const leadMeta = terminals.getMetadata(leadId);
@@ -465,8 +482,18 @@ test('core: the main agent and its project agents are plugin-started orchestrato
   assert.equal(realpathSync(leadMeta.cwd), f.project('shop-api'));
   assert.equal(spawned[1].options.cwd && realpathSync(spawned[1].options.cwd), f.project('shop-api'), 'the PTY runs in the project folder');
   // Another orchestrator (the project agent) cannot use the main agent's tool; it reports instead.
-  assert.match((await assistant.tool('projects', caller(leadId), { action: 'list' })).content, /only for the main agent/u);
-  assert.equal((await assistant.tool('report_to_main', caller(leadId), { status: 'done', summary: 'Rounding fixed.' })).content, 'Sent to the main agent.');
+  assert.match((await project(leadId, 'list')).content, /only for the main agent/u);
+  assert.equal((await agentTools.call(leadId, 'orchestrator', `${ASSISTANT}__report_to_main`, { status: 'done', summary: 'Rounding fixed.' })).content, 'Sent to the main agent.');
+  // A card the person starts: the own-cards tools are not even listed, and a call is refused by CanvasTTY.
+  const before = spawned.length;
+  const mine = terminals.create({ provider: 'claude', cwd: f.project('landing'), profile: 'normal', position: { x: 0, y: 0 }, role: 'orchestrator', title: 'Mine' });
+  await waitFor(() => spawned.length > before || terminals.getMetadata(mine.id)?.status === 'failed');
+  if (accepted.ownCards) {
+    assert.ok(!agentTools.names('orchestrator', 'claude', null).some(name => /project|report_to_main/u.test(name)), 'not listed to the person\'s cards');
+    assert.ok(agentTools.list('orchestrator', 'claude', leadId).some(tool => tool.name === `${ASSISTANT}__project_start`), 'listed to the Assistant\'s own cards');
+    await assert.rejects(agentTools.call(mine.id, 'orchestrator', `${ASSISTANT}__project_start`, { projectId: 'landing', task: 'x' }), /not available to this session/u);
+    await assert.rejects(agentTools.call(mine.id, 'orchestrator', `${ASSISTANT}__report_to_main`, { status: 'done', summary: 'x' }), /not available to this session/u);
+  } else assert.match((await project(mine.id, 'list')).content, /only for the main agent/u, 'listed to every orchestrator, refused by the Assistant');
 
   // Push: the main agent is working (a hook says so) → nothing; idle and quiet → one line, accepted by the core.
   terminals.applyProviderSignal(started.sessionId, { kind: 'lifecycle', state: 'working' });
@@ -483,8 +510,34 @@ test('core: the main agent and its project agents are plugin-started orchestrato
   await waitFor(() => outcomes.filter(entry => entry.method === 'sessions.send').length >= 3);
   assert.ok(outcomes.filter(entry => entry.method === 'sessions.send').every(entry => entry.ok), JSON.stringify(outcomes));
   // Stop: the core closes the project agent's card.
-  assert.match((await assistant.tool('projects', caller(started.sessionId), { action: 'stop', projectId: 'shop-api' })).content, /Stopped shop-api/u);
+  assert.match((await project(started.sessionId, 'stop', { projectId: 'shop-api' })).content, /Stopped shop-api/u);
   await waitFor(() => !terminals.list().some(session => session.id === leadId));
   // The person's main-agent card itself is only ever sent to, never stopped by the Assistant.
   assert.ok(terminals.list().some(session => session.id === started.sessionId));
+});
+
+test('split tools (CanvasTTY with own-cards tools): the same actions one by one, the same caller checks; the brief names both forms', async () => {
+  const f = fixture({ names: ['shop-api'] });
+  const main = await f.startMain();
+  await f.assistant.conductor.addProject(f.project('shop-api'));
+  assert.match((await f.tool('projects_list', main, {})).content, /▸ shop-api — not started/u);
+  const started = await f.tool('project_start', main, { projectId: 'shop-api', task: 'Fix the payment' });
+  assert.equal(started.isError, undefined, started.content);
+  const lead = f.card(json(started).leadId, { cwd: f.project('shop-api') });
+  f.event('created', lead);
+  assert.match((await f.tool('project_status', main, { projectId: 'shop-api' })).content, /▸ shop-api — /u);
+  assert.match((await f.tool('project_start', main, { projectId: 'shop-api', task: 'x', path: '/etc' })).content, /path is never accepted/u);
+  for (const name of ['projects_list', 'project_start', 'project_status', 'project_message', 'project_stop', 'project_result']) {
+    assert.match((await f.tool(name, lead, { projectId: 'shop-api', task: 'x', text: 'x' })).content, /only for the main agent/u, name);
+  }
+  assert.equal((await f.tool('report_to_main', lead, { status: 'progress', summary: 'Half done.' })).content, 'Sent to the main agent.');
+  assert.match((await f.tool('project_result', main, { projectId: 'shop-api' })).content, /^> Half done\.$/mu);
+  assert.match((await f.tool('project_message', main, { projectId: 'shop-api', text: 'Also add a test' })).content, /Sent to shop-api/u);
+  assert.match((await f.tool('project_stop', main, { projectId: 'shop-api' })).content, /Stopped shop-api/u);
+  const brief = conductorBrief(4);
+  assert.match(brief, /canvastty-assistant__project_start \{projectId, task\}/u);
+  assert.match(brief, /canvastty-assistant__projects, with action/u);
+  const decide = name => f.assistant.decide({ event: 'pre-tool', sessionId: main.id, provider: 'claude', role: 'orchestrator', cwd: f.home, agentCwd: null, tool: { name, kind: 'other', command: null, paths: [] }, input: {}, truncated: false });
+  assert.equal((await decide('mcp__canvastty_agents__canvastty-assistant__project_start'))?.verdict, 'allow');
+  assert.notEqual((await decide('mcp__canvastty_agents__canvastty-assistant__report_to_main'))?.verdict, 'allow');
 });
