@@ -338,7 +338,7 @@ export class RouteService {
     const record = this.bySessionFull(sessionId);
     const option = record?.spawned ? record.options[record.spawned.option] : undefined;
     if (!record || !option) return null;
-    return { model: option.model, identity: option.identity, kind: option.kind, label: option.label, costBasis: option.costBasis, estimate: option.estimateData ?? null };
+    return { model: option.model, identity: option.identity, kind: option.kind, label: option.label, costBasis: option.costBasis, estimate: option.estimateData ?? null, signIn: option.signIn, cli: option.cli };
   }
 
   /** The decision of this run a child was started from, by the child's full session id. */

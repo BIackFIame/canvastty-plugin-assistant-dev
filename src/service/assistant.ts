@@ -33,7 +33,11 @@ import { AUTOPILOT_STRINGS } from '../autopilot/i18n.ts';
 import { ruleDifficulty } from '../harness/router.ts';
 import { turnView, type TurnView } from '../auto/select.ts';
 import { DEFAULT_MAX_PARALLEL } from '../route/settings.ts';
-import { buildTree, type TreeRoute, type TreeView } from '../tree/agentTree.ts';
+import { buildTree, type TreeAccount, type TreeRoute, type TreeView } from '../tree/agentTree.ts';
+import { homedir } from 'node:os';
+import { Conductor, CONDUCTOR_TOOLS, TOOL_CLIS, type LeadRoute, type TopStart } from '../conductor/conductor.ts';
+import { accountQuotaFrom } from '../route/service.ts';
+import type { Candidate } from '../route/engine.ts';
 
 /**
  * The Assistant service: one process that answers CanvasTTY's decision hook (command review), its launch pipeline
@@ -145,8 +149,10 @@ export class Assistant {
   private readonly refused = new Set<string>();
   /** Whether this CanvasTTY lets a plugin start an orchestrator (B8): null until asked. */
   private b8: boolean | null = null;
+  /** The main agent («Главный агент») and its project agents. */
+  readonly conductor: Conductor;
 
-  constructor(options: { host: Host; dataDir: string; settings?: unknown; settingsUnavailable?: boolean; harness?: unknown; harnessUnavailable?: boolean; autoRouting?: unknown; autoRoutingUnavailable?: boolean; routing?: unknown; routingUnavailable?: boolean; locale?: unknown; transport?: typeof fetch; catalogTransport?: typeof fetch; git?: null; now?: () => number; autoTimeouts?: RouterDeps['timeouts'] }) {
+  constructor(options: { host: Host; dataDir: string; settings?: unknown; settingsUnavailable?: boolean; harness?: unknown; harnessUnavailable?: boolean; autoRouting?: unknown; autoRoutingUnavailable?: boolean; routing?: unknown; routingUnavailable?: boolean; conductor?: unknown; conductorUnavailable?: boolean; home?: string; conductorClock?: { now: () => number; schedule: (run: () => void, ms: number) => { cancel(): void } }; locale?: unknown; transport?: typeof fetch; catalogTransport?: typeof fetch; git?: null; now?: () => number; autoTimeouts?: RouterDeps['timeouts'] }) {
     this.host = options.host;
     // Nothing saved (a fresh install, or an update from a version that saved nothing) or nothing readable: the
     // defaults, with command review Off. The person turns it on; the plugin never decides trust for them.
@@ -229,6 +235,13 @@ export class Assistant {
       ...(options.git === null ? { git: null } : {}),
       suggest: (sessionId, verdict, summary) => { void this.harness.setBadge(sessionId, 'review', () => suggestionBadge(verdict, summary, this.harness.strings)); }
     });
+    this.conductor = new Conductor({
+      host: options.host, dataDir: options.dataDir, home: options.home ?? homedir(), locale: () => this.locale,
+      ...(options.conductorClock ? options.conductorClock : options.now ? { now: options.now } : {}),
+      session: id => this.sessions.get(id), treeBelow: id => this.treeBelow(id),
+      startTop: input => this.startTop(input), accountOf: route => this.accountOf(route),
+      openFolders: () => this.autopilotEntry().folders
+    }, options.conductor, options.conductorUnavailable === true);
   }
 
   get pageLocale(): Locale { return this.locale; }
@@ -335,6 +348,9 @@ export class Assistant {
     for (const session of list) if (session && typeof session === 'object' && typeof (session as SessionSummary).id === 'string') this.sessions.set((session as SessionSummary).id, session as SessionSummary);
     // Keys of cards CanvasTTY no longer has (they closed while the service was down) stop working now.
     this.auto.sessionsKnown(new Set(this.sessions.keys()));
+    // The main agent and its project agents after a restart: still open, re-bound (the main agent starts nobody).
+    this.conductor.sessionsKnown(new Set(this.sessions.keys()));
+    if (this.conductor.conductorId) { this.bindings.markAuto(this.conductor.conductorId); this.bindings.setPlan(this.conductor.conductorId, 0); }
   }
 
   sessionEvent(event: { type?: unknown; session?: unknown }): void {
@@ -344,8 +360,9 @@ export class Assistant {
     this.routing.sessionEvent(event);
     const ended = event.type === 'closed' || event.type === 'exited' || session.status === 'exited';
     if (ended) { this.bindings.ended(session.id); this.usage.ended(session.id); }
-    if (event.type === 'closed') { this.usage.closed(session.id); this.autoTop.delete(session.id); this.leaves.delete(session.id); this.started.delete(session.id); this.refused.delete(session.id); this.sessions.delete(session.id); this.review.forget(session.id); this.classes.delete(session.id); this.triaged.delete(session.id); this.auto.sessionClosed(session.id); return; }
+    if (event.type === 'closed') { this.conductor.sessionEvent(event.type, session); this.usage.closed(session.id); this.autoTop.delete(session.id); this.leaves.delete(session.id); this.started.delete(session.id); this.refused.delete(session.id); this.sessions.delete(session.id); this.review.forget(session.id); this.classes.delete(session.id); this.triaged.delete(session.id); this.auto.sessionClosed(session.id); return; }
     this.sessions.set(session.id, session);
+    this.conductor.sessionEvent(event.type, session);
   }
 
   // -------------------------------------------------------------------------
@@ -353,6 +370,12 @@ export class Assistant {
   // -------------------------------------------------------------------------
 
   async decide(params: Record<string, unknown>): Promise<DecideAnswer> {
+    // The main agent's own project tool (its first call would otherwise ask the person in Claude Code): allowed
+    // here, for that card only, by its full session id. Counts only where the person let the Assistant allow.
+    const tool = params.tool as { name?: unknown; kind?: unknown } | undefined;
+    if (this.conductor.isConductor(params.sessionId) && tool?.kind === 'other' && typeof tool.name === 'string' && /(?:^|__)canvastty-assistant__(?:projects|projects_list|project_(?:start|status|message|stop|result))$/u.test(tool.name)) {
+      return { verdict: 'allow', reason: 'The main agent\'s own project tool.' };
+    }
     const budget = typeof params.budgetMs === 'number' && Number.isFinite(params.budgetMs) ? params.budgetMs : 3_000;
     const answer = await this.review.decide(params as unknown as DecideRequest, Math.min(budget, DECIDE_BUDGET_MS));
     // Loop alerts and the session report see every call, whatever command review answered (or if it is off).
@@ -422,6 +445,8 @@ export class Assistant {
     if (top) {
       // Its subagents are routed like any Auto card's; the route itself is what Jev chose when it was started.
       this.bindings.markAuto(context.sessionId);
+      // The main agent starts no subagents (also after a restart).
+      if (this.conductor.isConductor(context.sessionId)) this.bindings.setPlan(context.sessionId, 0);
       const own = ownChoice(top);
       if (own) return isOwnSignInCli(context.provider) ? { args: ownSignInArgs(context.provider, own) } : null;
       bound = top as ChildTarget;
@@ -496,6 +521,7 @@ export class Assistant {
    */
   private async autopilotPlan(caller: SessionSummary | undefined, input: Record<string, unknown>): Promise<{ content: unknown; isError?: boolean }> {
     if (!caller || typeof caller.id !== 'string') return { content: 'CanvasTTY did not say which card is calling.', isError: true };
+    if (this.conductor.isConductor(caller.id)) return { content: 'The main agent starts no subagents: hand work to a project with canvastty-assistant__project_start.', isError: true };
     // Lines kept: a list of parts is part of the task's shape.
     const task = planTask(input.task);
     if (!task) return { content: 'Give the whole task in `task`.', isError: true };
@@ -613,6 +639,178 @@ export class Assistant {
   }
 
   /**
+   * The main agent or one of its project agents (conductor-design.md §3.3, §3.4): Jev routing among the CLIs whose
+   * agents reach this plugin's tools (Claude Code, Codex, Qwen Code, OpenCode). The main agent goes on the strongest
+   * route, flat-rate first (a subscription, a coding plan, the CLI's own sign-in, a plan account); a project agent on
+   * what Jev chooses for its task, with its plan. Started like "Start with Auto (Jev)": bound to the decision,
+   * `sessions.create {role: "orchestrator"}` in the given folder, only with the person's "May start orchestrators".
+   */
+  async startTop(input: { kind: 'conductor' | 'lead'; task: string; cwd: string; title: string }): Promise<TopStart> {
+    const task = planTask(input.task);
+    if (!task || !input.cwd) return { started: false, code: 'input' };
+    if (!this.harness.settings.routing) return { started: false, code: 'routingOff' };
+    if (!await this.orchestratorsSupported()) return { started: false, code: 'core' };
+    const dataClass = this.settings.defaultDataClass;
+    let plan: AutopilotPlan | null = null;
+    let view: TurnView;
+    if (input.kind === 'lead') {
+      const planned = await this.planOf(task, dataClass, 'conductor-lead');
+      plan = planned.plan;
+      view = planned.decision ? turnView(planned.decision, 'jev', task, { role: 'orchestrator' }) : turnView({ difficulty: ruleDifficulty(task), strong: false }, 'rules', task, { role: 'orchestrator' });
+    } else view = turnView({ difficulty: 'hard', strong: true }, 'rules', task, { role: 'orchestrator' });
+    const { candidates, dropped } = await this.routing.orchestratorRoutes(view, dataClass, { clis: TOOL_CLIS });
+    const ordered = input.kind === 'conductor' ? [...candidates].sort((a, b) => Number(flatRate(b)) - Number(flatRate(a))) : candidates;
+    const chosen = ordered.map(candidate => ({ candidate, target: topTargetOf(candidate.spawn, false) })).find(entry => entry.target !== null && (TOOL_CLIS as readonly string[]).includes(entry.candidate.spawn.provider));
+    if (!chosen) return { started: false, code: 'noRoute', ...(dropped.length ? { detail: dropped.join('; ').slice(0, 240) } : {}) };
+    const { candidate } = chosen;
+    const spawn = candidate.spawn;
+    const launchOptions: Spawn['launchOptions'] = {};
+    for (const [pluginId, values] of Object.entries(spawn.launchOptions)) if (pluginId !== ASSISTANT_ID) launchOptions[pluginId] = { ...values };
+    launchOptions[ASSISTANT_ID] = { model: this.bindings.bindTop(spawn.provider, chosen.target!, randomUUID().slice(0, 8), expectedOf({ launchOptions })) };
+    let sessionId: string | null = null;
+    try {
+      const created = await this.host.callHost('sessions.create', { provider: spawn.provider, cwd: input.cwd, role: 'orchestrator', title: text(input.title, 80) || 'Auto (Jev)', launchOptions }) as { sessionId?: unknown };
+      sessionId = typeof created?.sessionId === 'string' ? created.sessionId : null;
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      if (/not allowed this plugin to start orchestrators/iu.test(message)) { this.orchestratorConsent = { at: Date.now(), state: 'missing' }; return { started: false, code: 'consent' }; }
+      return { started: false, code: 'refused', detail: message.replace(/[\u0000-\u001f\u007f]+/gu, ' ').slice(0, 240) };
+    }
+    if (!sessionId) return { started: false, code: 'refused' };
+    this.orchestratorConsent = { at: Date.now(), state: 'ok' };
+    this.bindings.markAuto(sessionId);
+    // The main agent starts nobody; a project agent within its plan's child count.
+    this.bindings.setPlan(sessionId, plan ? plan.children : 0);
+    const treeRoute: TreeRoute = { model: candidate.model, identity: candidate.identity, kind: candidate.kind, label: candidate.label, costBasis: candidate.costBasis, estimate: candidate.estimate, signIn: candidate.signIn, cli: candidate.cli };
+    this.started.set(sessionId, { server: null, provider: spawn.provider, route: treeRoute });
+    while (this.started.size > 64) this.started.delete(this.started.keys().next().value!);
+    const route: LeadRoute = { cli: spawn.provider, kind: candidate.kind, label: `${spawn.provider} · ${candidate.label}${spawn.model ? ` · ${spawn.model}` : ''}${spawn.effort ? `@${spawn.effort}` : ''}`.slice(0, 160), model: spawn.model ?? candidate.model ?? null, effort: spawn.effort ?? candidate.effort ?? null, signIn: candidate.signIn, accountId: candidate.accountId ?? null };
+    return { started: true, sessionId, route, planLine: plan ? planText(plan) : null };
+  }
+
+  /**
+   * The account a route runs on and the quota left there, for status lines and the agent tree: a model account or
+   * a pool from Accounts' quota share (accounts.quota, accounts.routes; the last answers, no read here), a CLI's own
+   * subscription from CanvasTTY's limit windows (the tightest window not yet reset).
+   */
+  accountOf(route: Pick<LeadRoute, 'cli' | 'kind' | 'label' | 'signIn'> & { accountId?: string | null }): { account: string | null; quota: { percent: number | null; resetsAt: number | null } | null } {
+    const signIn = route.signIn ?? '';
+    const ru = this.locale === 'ru';
+    const record = (value: unknown): Record<string, unknown> | null => value && typeof value === 'object' && !Array.isArray(value) ? value as Record<string, unknown> : null;
+    if (signIn.startsWith('account:')) {
+      const id = route.accountId || signIn.slice(8);
+      const answer = record(this.accounts.peekQuota());
+      const rows = [...(Array.isArray(answer?.accounts) ? answer.accounts : []), ...(Array.isArray(answer?.poolAccounts) ? answer.poolAccounts : [])].map(record).filter((row): row is Record<string, unknown> => !!row);
+      const row = rows.find(entry => entry.accountId === id);
+      const quota = row ? accountQuotaFrom(row.quota) : undefined;
+      const label = row && typeof row.account === 'string' && row.account.trim() ? row.account.trim().slice(0, 60) : route.label.replace(/ · [^·]*$/u, '').slice(0, 60);
+      return { account: label, quota: quota ? { percent: quota.remainingPercent, resetsAt: quota.resetsAt } : null };
+    }
+    if (signIn.startsWith('pool:')) {
+      const pool = this.accounts.peekRoutes()?.pools.find(entry => entry.cli === signIn.slice(5));
+      return { account: pool?.label ?? route.label.replace(/ \(\d+\/\d+ free\)$/u, '').slice(0, 60), quota: pool?.quota ? { percent: pool.quota.remainingPercent, resetsAt: pool.quota.resetsAt } : null };
+    }
+    if (route.kind === 'auto') return { account: 'Auto (Jev)', quota: null };
+    const own = route.kind === 'cli-default' ? (ru ? 'своя подписка' : 'own sign-in') : route.label.slice(0, 60);
+    // CanvasTTY's windows are the CLI's default sign-in: a subscription on it, or the CLI's own default.
+    if (route.kind === 'subscription' || route.kind === 'cli-default') {
+      const limits = this.routing.limits?.providers.find(entry => entry.provider === route.cli);
+      const now = Date.now();
+      const open = (limits?.state === 'available' ? limits.windows : []).filter(window => window.resetsAt === null || window.resetsAt > now);
+      if (open.length) {
+        const tight = open.reduce((a, b) => b.usedPercent > a.usedPercent ? b : a);
+        return { account: own, quota: { percent: Math.max(0, 100 - tight.usedPercent), resetsAt: tight.resetsAt } };
+      }
+    }
+    return { account: own, quota: null };
+  }
+
+  /** The agent tree's account and quota for a card: its route decision, its start, or its Auto sign-in. */
+  private treeAccount(id: string): TreeAccount | null {
+    const route = this.routing.routeOf(id) ?? this.started.get(id)?.route ?? null;
+    const lead = this.conductor.routeOf(id);
+    const card = this.sessions.get(id);
+    let found: ReturnType<Assistant['accountOf']> | null = null;
+    if (lead) found = this.accountOf(lead);
+    else if (route?.signIn && route.cli) found = this.accountOf({ cli: route.cli, kind: route.kind, label: route.label, signIn: route.signIn, accountId: route.signIn.startsWith('account:') ? route.signIn.slice(8) : null });
+    else if (this.autoTop.has(id) && card) found = this.accountOf({ cli: card.provider, kind: 'subscription', label: this.autoTop.get(id)!.label, signIn: `cli:${card.provider}` });
+    return found?.account ? { label: found.account, quota: found.quota } : null;
+  }
+
+  private sharesAskedAt = 0;
+  /** The person's "May start orchestrators" for this plugin, last seen (a probe or a start). */
+  private orchestratorConsent: { at: number; state: 'ok' | 'missing' | 'unsupported' } | null = null;
+
+  /**
+   * Whether the person allowed this plugin to start orchestrators, asked without starting anything: CanvasTTY checks
+   * the role and that consent before the CLI and the folder, so a call without them is refused for one or the other.
+   */
+  private async orchestratorsAllowed(): Promise<'ok' | 'missing' | 'unsupported'> {
+    if (this.orchestratorConsent && Date.now() - this.orchestratorConsent.at < 15_000) return this.orchestratorConsent.state;
+    // An older core ignores the role and refuses for the missing CLI: not "allowed".
+    if (!await this.orchestratorsSupported()) return 'unsupported';
+    let state: 'ok' | 'missing' | 'unsupported';
+    try { await this.host.callHost('sessions.create', { role: 'orchestrator' }); state = 'ok'; } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      state = /not allowed this plugin to start orchestrators/iu.test(message) ? 'missing' : /role must be agent or orchestrator|does not have the sessions:launch permission|unknown host method/iu.test(message) ? 'unsupported' : 'ok';
+    }
+    this.orchestratorConsent = { at: Date.now(), state };
+    return state;
+  }
+
+  /**
+   * The setup checklist on the Assistant page (conductor-design.md §2.1, "this week, without core"): what the main
+   * agent needs and what is missing, each with the CanvasTTY grant that gives it (for a host that offers
+   * `grants.request`, C2) and the Settings section where the person gives it today. Read from what this service
+   * already sees: the routing switch, the orchestrator consent probe, Accounts' shared reads, the brokered accounts,
+   * CanvasTTY's environments. Nothing here grants anything.
+   */
+  async setupChecklist(): Promise<{ items: SetupItem[]; ready: boolean }> {
+    // Accounts' shared reads were refused or not read yet: asked again (the person may have just allowed them), at most
+    // every 10 s; otherwise the last answer stands.
+    if (this.accounts.mode !== 'ready' && Date.now() - this.sharesAskedAt > 10_000) {
+      this.sharesAskedAt = Date.now();
+      await this.accounts.quota(60_000, 800, true).catch(() => null);
+    }
+    const accountsState = this.accounts.state();
+    const [orchestrators, brokered, listed] = await Promise.all([
+      this.orchestratorsAllowed(),
+      this.auto.broker.list().catch(() => []),
+      this.providers.list(60_000, 800).catch(() => null)
+    ]);
+    const reason = accountsState.reason ?? '';
+    const accountsRunning: ItemState = accountsState.mode === 'ready' || /^not_(approved|declared|shared)$/u.test(reason) ? 'ok'
+      : /provider_unavailable|not_running|not_installed|disabled/u.test(reason) ? 'missing' : accountsState.mode === 'unsupported' ? 'unsupported' : 'unknown';
+    const shares: ItemState = accountsState.mode === 'ready' ? 'ok' : /^not_approved$/u.test(reason) ? 'missing' : accountsState.mode === 'unsupported' ? 'unsupported' : 'unknown';
+    const brokerState: ItemState = this.auto.broker.mode === 'unsupported' ? 'unsupported' : brokered.length ? 'ok' : this.auto.broker.mode === 'ready' ? 'missing' : 'unknown';
+    const environments: ItemState = listed ? listed.environments.some(entry => entry.pluginId === 'canvastty-environments') ? 'ok' : 'unknown' : 'unknown';
+    const items: SetupItem[] = [
+      { id: 'routing', state: this.harness.settings.routing ? 'ok' : 'missing', section: 'page' },
+      { id: 'orchestrators', state: orchestrators, section: 'native-code', grants: [{ kind: 'mayStartOrchestrators' }] },
+      { id: 'projects', state: this.conductor.settings.projects.length ? 'ok' : 'missing', section: 'page', count: this.conductor.settings.projects.length },
+      { id: 'accounts', state: accountsRunning, optional: true, section: 'native-code', grants: [{ kind: 'nativeCode', plugin: ACCOUNTS_ID }] },
+      { id: 'shares', state: shares, optional: true, section: 'native-code', grants: [{ kind: 'sharedRead', provider: ACCOUNTS_ID, method: 'accounts.routes' }, { kind: 'sharedRead', provider: ACCOUNTS_ID, method: 'accounts.quota' }] },
+      { id: 'broker', state: brokerState, optional: true, section: 'broker', count: brokered.length, grants: [{ kind: 'brokerGrant', owner: ACCOUNTS_ID, account: '*' }] },
+      { id: 'decisions', state: 'unknown', optional: true, section: 'native-code', grants: [{ kind: 'decisionsMayAllow' }] },
+      { id: 'environments', state: environments, optional: true, section: 'native-code', grants: [{ kind: 'nativeCode', plugin: 'canvastty-environments' }] },
+      // The owner's choice: updates from the same repository keep trust for the Assistant and Environments, never for
+      // Accounts (it holds the keys).
+      { id: 'trustUpdates', state: 'unknown', optional: true, section: 'native-code', grants: [{ kind: 'trustUpdates', plugin: ASSISTANT_ID }, { kind: 'trustUpdates', plugin: 'canvastty-environments' }] },
+      { id: 'widget', state: 'unknown', optional: true, section: 'home' }
+    ];
+    return { items, ready: items.every(item => item.optional || item.state === 'ok') };
+  }
+
+  /** The Assistant page's "main agent" section and the HOME widget. */
+  async conductorState(): Promise<unknown> {
+    const view = this.conductor.view();
+    return {
+      settings: this.conductor.settings, folder: this.conductor.folder, ...view, suggestions: this.conductor.suggestions(),
+      checklist: await this.setupChecklist(), routing: this.harness.settings.routing
+    };
+  }
+
+  /**
    * start_leaf (D6, Phase 1): an independent leaf task on a server the person declared (Advanced, off by default),
    * as a card this plugin starts there (Environments ssh-host) on that server's own CLI sign-in. Only a leaf: it
    * cannot start subagents. Nothing from this computer's sign-ins or keys reaches the server.
@@ -717,6 +915,7 @@ export class Assistant {
   // -------------------------------------------------------------------------
 
   async tool(name: string, caller: SessionSummary | undefined, input: Record<string, unknown>): Promise<{ content: unknown; isError?: boolean }> {
+    if (CONDUCTOR_TOOLS.includes(name)) return this.conductor.tool(name, caller, input);
     if (this.harness.handles(name)) return this.harness.tool(name, caller, input);
     if (this.routing.handles(name)) {
       if (!caller || typeof caller.id !== 'string') return { content: 'CanvasTTY did not say which card is calling.', isError: true };
@@ -807,7 +1006,8 @@ export class Assistant {
         const share = used.plan ? Math.round((used.tokens * this.routing.settings.expectedShare.medium / perTask) * 100) / 100 : null;
         return { models: used.models, plan: used.plan, usd: used.usd, share };
       },
-      task: id => this.review.taskOf(id),
+      task: id => this.review.taskOf(id) ?? this.conductor.taskOf(id),
+      account: id => this.treeAccount(id),
       planChildren: id => this.bindings.planOf(id),
       endedAt: id => this.harness.finished(id),
       autoTop: id => this.autoTop.get(id) ?? null
@@ -853,7 +1053,7 @@ export class Assistant {
   }
 
   /** A later read of the stored settings succeeded (after a storage error at start): they apply now. */
-  storageRecovered(stored: { settings?: unknown; harness?: unknown; autoRouting?: unknown; routing?: unknown }): void {
+  storageRecovered(stored: { settings?: unknown; harness?: unknown; autoRouting?: unknown; routing?: unknown; conductor?: unknown }): void {
     if ('settings' in stored) {
       this.settings = normalizeAssistantSettings(stored.settings);
       this.settingsReadable = true;
@@ -862,6 +1062,7 @@ export class Assistant {
     if ('harness' in stored) { this.harness.loadSettings(stored.harness); this.harnessReadable = true; }
     if ('autoRouting' in stored) this.auto.loaded(stored.autoRouting);
     if ('routing' in stored) this.routing.loaded(stored.routing);
+    if ('conductor' in stored) this.conductor.loaded(stored.conductor);
     this.host.emit('settings', null);
   }
 
@@ -923,3 +1124,15 @@ function triageBadge(advice: Advice, strings: ServiceStrings): { text: string; t
 
 /** Who wrote a tool's task text: an orchestrator or another agent, never the person. */
 function requesterOf(role: unknown): 'orchestrator' | 'agent' { return role === 'orchestrator' ? 'orchestrator' : 'agent'; }
+
+/** A flat-rate route (paid for already): a subscription, a coding plan, the CLI's own sign-in, a plan account. */
+function flatRate(candidate: Candidate): boolean {
+  return candidate.kind === 'subscription' || candidate.kind === 'coding-plan' || candidate.kind === 'cli-default' || candidate.costBasis === 'plan' || candidate.costBasis === 'flat';
+}
+
+export type ItemState = 'ok' | 'missing' | 'unknown' | 'unsupported';
+/** One CanvasTTY grant, in the shape `grants.request` (C2) takes. */
+export type GrantItem =
+  | { kind: 'nativeCode'; plugin: string } | { kind: 'mayStartOrchestrators' } | { kind: 'decisionsMayAllow' }
+  | { kind: 'sharedRead'; provider: string; method: string } | { kind: 'brokerGrant'; owner: string; account: string } | { kind: 'trustUpdates'; plugin: string };
+export interface SetupItem { id: string; state: ItemState; optional?: boolean; count?: number; section: 'page' | 'native-code' | 'broker' | 'home'; grants?: GrantItem[] }

@@ -54,6 +54,10 @@
   var usdText = (cost) => cost.low === cost.high ? `$${money(cost.low)}` : `$${money(cost.low)}\u2013${money(cost.high)}`;
   var tokensText = (n) => n >= 1e6 ? `${(n / 1e6).toFixed(1)}M` : n >= 1e3 ? `${Math.round(n / 1e3)}k` : String(Math.round(n));
   var share = (value) => value < 1 ? "<1" : String(Math.round(value));
+  var clock = (at) => {
+    const d = new Date(at);
+    return `${String(d.getHours()).padStart(2, "0")}:${String(d.getMinutes()).padStart(2, "0")}`;
+  };
   var ruWindow = (label) => (label ?? "").replace(/(\d+)\s*h\b/gu, "$1 \u0447").replace(/(\d+)\s*d\b/gu, "$1 \u0434").replace(/\bweek\b/gu, "\u043D\u0435\u0434\u0435\u043B\u044F");
   var STRINGS = {
     en: {
@@ -95,7 +99,9 @@
       collapse: "Hide agents",
       show: (title) => `Show ${title} on the canvas`,
       focusOld: "This CanvasTTY version cannot show a card from a plugin page. Find it on the canvas by its title.",
-      focusFail: (why) => `Could not show the card: ${why}`
+      focusFail: (why) => `Could not show the card: ${why}`,
+      quota: (percent, resetsAt) => `${percent === null ? "quota left unknown" : `${percent}% left`}${resetsAt ? `, resets ${clock(resetsAt)}` : ""}`,
+      accountTip: "The account it runs on; the quota left is the last reading (Accounts, or CanvasTTY's limit windows)."
     },
     ru: {
       title: "\u0414\u0435\u0440\u0435\u0432\u043E \u0430\u0433\u0435\u043D\u0442\u043E\u0432",
@@ -136,7 +142,9 @@
       collapse: "\u0421\u043A\u0440\u044B\u0442\u044C \u0430\u0433\u0435\u043D\u0442\u043E\u0432",
       show: (title) => `\u041F\u043E\u043A\u0430\u0437\u0430\u0442\u044C \xAB${title}\xBB \u043D\u0430 \u0445\u043E\u043B\u0441\u0442\u0435`,
       focusOld: "\u042D\u0442\u0430 \u0432\u0435\u0440\u0441\u0438\u044F CanvasTTY \u043D\u0435 \u0443\u043C\u0435\u0435\u0442 \u043F\u043E\u043A\u0430\u0437\u044B\u0432\u0430\u0442\u044C \u043E\u043A\u043D\u043E \u0441\u043E \u0441\u0442\u0440\u0430\u043D\u0438\u0446\u044B \u043F\u043B\u0430\u0433\u0438\u043D\u0430. \u041D\u0430\u0439\u0434\u0438\u0442\u0435 \u0435\u0433\u043E \u043D\u0430 \u0445\u043E\u043B\u0441\u0442\u0435 \u043F\u043E \u043D\u0430\u0437\u0432\u0430\u043D\u0438\u044E.",
-      focusFail: (why) => `\u041D\u0435 \u0443\u0434\u0430\u043B\u043E\u0441\u044C \u043F\u043E\u043A\u0430\u0437\u0430\u0442\u044C \u043E\u043A\u043D\u043E: ${why}`
+      focusFail: (why) => `\u041D\u0435 \u0443\u0434\u0430\u043B\u043E\u0441\u044C \u043F\u043E\u043A\u0430\u0437\u0430\u0442\u044C \u043E\u043A\u043D\u043E: ${why}`,
+      quota: (percent, resetsAt) => `${percent === null ? "\u043E\u0441\u0442\u0430\u0442\u043E\u043A \u043A\u0432\u043E\u0442\u044B \u043D\u0435\u0438\u0437\u0432\u0435\u0441\u0442\u0435\u043D" : `\u043E\u0441\u0442\u0430\u043B\u043E\u0441\u044C ${percent} %`}${resetsAt ? `, \u0441\u0431\u0440\u043E\u0441 ${clock(resetsAt)}` : ""}`,
+      accountTip: "\u0410\u043A\u043A\u0430\u0443\u043D\u0442, \u043D\u0430 \u043A\u043E\u0442\u043E\u0440\u043E\u043C \u043E\u043D \u0440\u0430\u0431\u043E\u0442\u0430\u0435\u0442; \u043E\u0441\u0442\u0430\u0442\u043E\u043A \u043A\u0432\u043E\u0442\u044B \u2014 \u043F\u043E\u0441\u043B\u0435\u0434\u043D\u0435\u0435 \u0447\u0442\u0435\u043D\u0438\u0435 (Accounts \u0438\u043B\u0438 \u043E\u043A\u043D\u0430 \u043B\u0438\u043C\u0438\u0442\u043E\u0432 CanvasTTY)."
     }
   };
   var t = STRINGS.en;
@@ -189,6 +197,7 @@
     const provider = PROVIDERS[node.provider] ?? node.provider;
     const elapsed = elapsedOf(node);
     const meta = [
+      node.account?.quota ? el("span", { className: "tree-quota", textContent: t.quota(node.account.quota.percent, node.account.quota.resetsAt), title: t.accountTip }) : null,
       el("span", { className: `tree-cost${node.cost && node.cost.kind !== "usd" ? " tree-cost--plan" : ""}`, textContent: t.cost(node.cost), title: t.costTip(node.cost) }),
       node.usage ? el("span", { className: "tree-tokens", textContent: t.tokens(node.usage.tokens), title: t.tokensTip }) : null,
       node.usage?.providerEstimate !== void 0 ? el("span", { className: "tree-estimate", textContent: t.providerEstimate(node.usage.providerEstimate), title: t.providerEstimateTip }) : null,
@@ -224,6 +233,7 @@
         "div",
         { className: "tree-node__model" },
         ...node.auto && !node.model ? [el("strong", { textContent: t.auto, title: t.autoTip }), ` \xB7 ${node.auto.map((entry) => t.autoCalls(entry.model, entry.calls)).join(", ")} \xB7 ${provider}`] : [el("strong", { textContent: node.model ?? t.defaultModel(provider) }), node.model ? ` \xB7 ${provider}` : ""],
+        node.account ? ` \xB7 ${node.account.label}` : "",
         ` \xB7 ${t.roles[node.role] ?? node.role}`
       ),
       ...node.task ? [el("div", { className: "tree-node__task", textContent: node.task, title: node.task })] : [],

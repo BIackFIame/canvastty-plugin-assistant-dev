@@ -2,6 +2,7 @@
 // and one action: Start with Auto (Jev). Decision models are optional and live
 // on their own page, opened from the link at the bottom.
 import { el, errorText, host, onContext, segmented, SERVICE, settingRow, toggle, whenIdle, type PageLocale } from './common.ts';
+import { conductorSection, loadConductor } from './conductorSection.ts';
 
 type Level = 'strict' | 'basic' | 'off';
 interface State {
@@ -85,6 +86,7 @@ const STRINGS = {
 };
 
 let t = STRINGS.en;
+let pageLocale: PageLocale = 'en';
 let state: State | null = null;
 /** "Start with Auto (Jev)": the open cards' folders and whether servers are on (null on an older service). */
 let entry: { folders: string[]; servers: boolean } | null = null;
@@ -99,6 +101,7 @@ const say = (message: string, error = false): void => { status.textContent = mes
 async function load(): Promise<void> {
   state = await host.service.request(SERVICE, 'harness.settings') as State;
   entry = await (host.service.request(SERVICE, 'autopilot.entry') as Promise<{ folders: string[]; servers: boolean }>).catch(() => null);
+  await loadConductor();
   if (entry && !draft.folder && entry.folders[0]) draft.folder = entry.folders[0];
   render();
 }
@@ -180,11 +183,16 @@ function render(): void {
       settingRow(t.loops, t.loopsHelp, toggle('loopAlerts', s.loopAlerts, t.loops, value => save({ loopAlerts: value }))),
       settingRow(t.flows, t.flowsHelp, toggle('flows', s.flows, t.flows, value => save({ flows: value })))),
     el('div', { className: 'row' }, el('span', { className: 'muted', textContent: t.models(s.models) }), openModels, openTree),
-    ...[startCard()].filter((node): node is HTMLElement => node !== null)
+    ...[conductorSection(pageLocale, render, say), startCard()].filter((node): node is HTMLElement => node !== null)
   );
 }
 
-onContext((locale: PageLocale) => { t = STRINGS[locale]; render(); });
+onContext((locale: PageLocale) => { t = STRINGS[locale]; pageLocale = locale; render(); });
 // Either settings page saving (or a delayed read of the saved settings) sends `settings`.
-host.service.onEvent(({ serviceId, event }) => { if (serviceId === SERVICE && event === 'settings') whenIdle(() => { void load().catch(error => say(errorText(error), true)); }); });
+host.service.onEvent(({ serviceId, event }) => {
+  if (serviceId !== SERVICE) return;
+  if (event === 'settings') whenIdle(() => { void load().catch(error => say(errorText(error), true)); });
+  // The main agent's projects changed (a start, a report, a status): its section only.
+  if (event === 'conductor') whenIdle(() => { void loadConductor().then(render, error => say(errorText(error), true)); });
+});
 load().catch(error => say(errorText(error), true));

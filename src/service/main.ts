@@ -28,7 +28,7 @@ serve({
     await dropRetiredKeys(host);
     assistant = new Assistant({
       host, dataDir, settings: values.settings, settingsUnavailable: failed.includes('settings'), harness: values.harness, harnessUnavailable: failed.includes('harness'),
-      autoRouting: values.autoRouting, autoRoutingUnavailable: failed.includes('autoRouting'), routing: values.routing, routingUnavailable: failed.includes('routing'), locale: params.locale
+      autoRouting: values.autoRouting, autoRoutingUnavailable: failed.includes('autoRouting'), routing: values.routing, routingUnavailable: failed.includes('routing'), conductor: values.conductor, conductorUnavailable: failed.includes('conductor'), locale: params.locale
     });
     // Cards that run on Auto (Jev) keep working after a service restart: same port, same keys (hashes on disk).
     await assistant.auto.resume();
@@ -104,6 +104,14 @@ serve({
     // "Start with Auto (Jev)" on the settings page (an orchestrator this plugin starts, with the person's consent).
     'autopilot.entry': async () => (await ready).autopilotEntry(),
     'autopilot.start': async params => (await ready).startAuto(params ?? {}),
+    // The main agent («Главный агент»): the Assistant page's section and the HOME widget.
+    'conductor.state': async () => { const a = await ready; a.pageOpened(); return a.conductorState(); },
+    'conductor.start': async () => (await ready).conductor.start(),
+    // CanvasTTY's launcher entry (C5, host-only): start the main agent, or answer which card is open.
+    'canvastty.launcher.entry': async params => { const a = await ready; if (params.locale === 'en' || params.locale === 'ru') a.setLocale(params.locale); return a.conductor.start(); },
+    'conductor.addProject': async params => (await ready).conductor.addProject(params.path),
+    'conductor.removeProject': async params => (await ready).conductor.removeProject(str(params.projectId)),
+    'conductor.save': async params => (await ready).conductor.saveOptions(params.settings),
     // The Flow preview and Task board cards.
     'harness.view': async () => (await ready).harness.view(),
     // The Agent tree card.

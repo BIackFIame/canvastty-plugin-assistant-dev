@@ -27,7 +27,10 @@ export interface TreeCard {
 }
 
 /** The route a card was started on, from the Assistant's route records. */
-export interface TreeRoute { model: string | null; identity?: string | null; kind: string; label: string; costBasis: string; estimate: Estimate | null }
+export interface TreeRoute { model: string | null; identity?: string | null; kind: string; label: string; costBasis: string; estimate: Estimate | null; signIn?: string; cli?: string }
+
+/** The account a card runs on (a plan, a model account, a pool, the CLI's own sign-in) and its quota left, when known. */
+export interface TreeAccount { label: string; quota: { percent: number | null; resetsAt: number | null } | null }
 
 /**
  * A card's measured tokens (CanvasTTY's usage.session, where the core measures it): counts, the price of a paid
@@ -55,6 +58,8 @@ export interface TreeInputs {
   auto?(id: string): TreeAuto | null;
   /** A launch that was refused and never started: left out of the agents and the plan count, counted apart. */
   refused?(id: string): boolean;
+  /** The account and its quota left (from the route decision and Accounts' quota share). */
+  account?(id: string): TreeAccount | null;
 }
 
 export interface TreeAuto { models: Array<{ model: string; calls: number }>; plan: string | null; usd: number | null; share: number | null }
@@ -69,6 +74,8 @@ export interface TreeNode {
   auto: Array<{ model: string; calls: number }> | null;
   status: TreeStatus;
   task: string | null;
+  /** The account it runs on and the quota left there (null: not known). */
+  account: TreeAccount | null;
   cost: TreeCost | null;
   /** Measured tokens (null: not measured). */
   usage: TreeUsage | null;
@@ -199,6 +206,14 @@ function totalsOf(root: TreeNode): TreeTotals {
 
 const round = (value: number): number => Math.round(value * 1_000) / 1_000;
 
+function accountOf(value: TreeAccount | null): TreeAccount | null {
+  const label = value ? oneLine(value.label, 60) : null;
+  if (!value || !label) return null;
+  const percent = value.quota && typeof value.quota.percent === 'number' && Number.isFinite(value.quota.percent) ? Math.max(0, Math.min(100, Math.round(value.quota.percent))) : null;
+  const resetsAt = value.quota && typeof value.quota.resetsAt === 'number' && Number.isFinite(value.quota.resetsAt) ? value.quota.resetsAt : null;
+  return { label, quota: value.quota ? { percent, resetsAt } : null };
+}
+
 /**
  * The trees: one per card at the top of a chain of parents (an orchestrator, or a card whose parent CanvasTTY no
  * longer lists). A lone agent that started nobody is not a tree. Parents that point in a circle (a corrupt event
@@ -243,6 +258,7 @@ export function buildTree(input: TreeInputs, options: { focus?: string | null } 
       auto: auto && auto.models.length ? auto.models.slice(0, 3).map(entry => ({ model: modelLabel(entry.model) ?? entry.model, calls: entry.calls })) : null,
       status: statusOf(card),
       task: oneLine(input.task(card.id), TREE_LIMITS.task),
+      account: accountOf(input.account?.(card.id) ?? null),
       cost,
       usage,
       startedAt: typeof card.startedAt === 'number' && Number.isFinite(card.startedAt) ? card.startedAt : null,
