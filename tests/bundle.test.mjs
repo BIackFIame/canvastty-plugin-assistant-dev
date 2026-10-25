@@ -42,7 +42,10 @@ test('the manifest passes CanvasTTY\'s own validator (when CANVASTTY_REPO points
   if (policy) assert.notEqual(checked.services[0].launch.policy, true, 'never unscoped');
   else assert.equal(checked.services[0].launch.policy, undefined, 'a core without the scoped form: no policy, phase-1 checks');
   assert.equal(checked.services[0].launch.delegable, true);
-  assert.deepEqual(checked.services[0].tools.map(tool => tool.name), ['recommend', 'review_status', 'route', 'pick_route', 'route_outcome', 'autopilot_plan', 'start_leaf', 'leaf_status', 'flows_list', 'flow_plan', 'flow_status', 'task_add', 'task_update', 'task_list']);
+  assert.deepEqual(checked.services[0].tools.map(tool => tool.name), ['recommend', 'review_status', 'route', 'pick_route', 'route_outcome', 'autopilot_plan', 'start_leaf', 'leaf_status', 'flows_list', 'flow_plan', 'flow_status', 'task_add', 'task_update', 'task_list', 'projects', 'report_to_main']);
+  // CanvasTTY gives a service at most 16 agent tools: the main agent's six project actions are one tool.
+  assert.equal(checked.services[0].tools.length, 16);
+  assert.deepEqual(checked.contributions.filter(entry => entry.kind === 'home-widget').map(entry => [entry.id, entry.entry]), [['conductor', 'apps/main.html']]);
   assert.deepEqual(checked.services[0].cardActions.map(action => action.id), ['flow-preview', 'task-board', 'report', 'agent-tree']);
   if (localized && manifest['name.ru'] !== undefined) assert.deepEqual(checked.services[0].cardActions.map(action => action['title.ru']), ['План по сценарию…', 'Доска задач', 'Отчёт', 'Дерево агентов'], 'the core keeps the Russian card action titles (needs localized card action titles)');
   assert.equal(checked.settingsContribution, 'settings');

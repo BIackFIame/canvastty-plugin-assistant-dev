@@ -10,7 +10,7 @@ type Cost =
   | { kind: 'launch'; label: string; used: number; allowance: number; windowHours: number }
   | { kind: 'flat'; label: string };
 interface TreeNode {
-  id: string; title: string; role: string; provider: string; model: string | null; auto?: Array<{ model: string; calls: number }> | null; status: Status; task: string | null;
+  id: string; title: string; role: string; provider: string; model: string | null; account?: { label: string; quota: { percent: number | null; resetsAt: number | null } | null } | null; auto?: Array<{ model: string; calls: number }> | null; status: Status; task: string | null;
   cost: Cost | null; usage?: { tokens: number; providerEstimate?: number } | null; startedAt: number | null; endedAt: number | null; planChildren: number | null; descendants: number; refused?: number; children: TreeNode[];
 }
 interface Totals { agents: number; refused?: number; running: number; usd: { low: number; high: number } | null; plans: Array<{ label: string; share: number | null; window: string | null; cards: number; launches: number }>; unpriced: number; tokens?: number | null; providerEstimate?: number | null }
@@ -30,6 +30,7 @@ const usdText = (cost: { low: number; high: number }): string => cost.low === co
 const tokensText = (n: number): string => n >= 1_000_000 ? `${(n / 1_000_000).toFixed(1)}M` : n >= 1_000 ? `${Math.round(n / 1_000)}k` : String(Math.round(n));
 const share = (value: number): string => value < 1 ? '<1' : String(Math.round(value));
 /** Limit windows come labelled in English ("5 h", "7 d"): the Russian page says ч and д. */
+const clock = (at: number): string => { const d = new Date(at); return `${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}`; };
 const ruWindow = (label: string | null): string => (label ?? '').replace(/(\d+)\s*h\b/gu, '$1 ч').replace(/(\d+)\s*d\b/gu, '$1 д').replace(/\bweek\b/gu, 'неделя');
 
 const STRINGS = {
@@ -62,7 +63,9 @@ const STRINGS = {
     refused: (n: number) => `${n} refused`, refusedTip: 'Launches refused before they started (for example a subagent spawned without pick_route). They are not counted as agents or as parts of the plan.',
     expand: 'Show agents', collapse: 'Hide agents', show: (title: string) => `Show ${title} on the canvas`,
     focusOld: 'This CanvasTTY version cannot show a card from a plugin page. Find it on the canvas by its title.',
-    focusFail: (why: string) => `Could not show the card: ${why}`
+    focusFail: (why: string) => `Could not show the card: ${why}`,
+    quota: (percent: number | null, resetsAt: number | null) => `${percent === null ? 'quota left unknown' : `${percent}% left`}${resetsAt ? `, resets ${clock(resetsAt)}` : ''}`,
+    accountTip: 'The account it runs on; the quota left is the last reading (Accounts, or CanvasTTY\'s limit windows).'
   },
   ru: {
     title: 'Дерево агентов', tree: 'Дерево',
@@ -92,7 +95,9 @@ const STRINGS = {
     refused: (n: number) => `${n} ${ruPlural(n, 'запуск отклонён', 'запуска отклонены', 'запусков отклонено')}`, refusedTip: 'Запуски, отклонённые до старта (например, субагент без pick_route). Они не считаются агентами и частями плана.',
     expand: 'Показать агентов', collapse: 'Скрыть агентов', show: (title: string) => `Показать «${title}» на холсте`,
     focusOld: 'Эта версия CanvasTTY не умеет показывать окно со страницы плагина. Найдите его на холсте по названию.',
-    focusFail: (why: string) => `Не удалось показать окно: ${why}`
+    focusFail: (why: string) => `Не удалось показать окно: ${why}`,
+    quota: (percent: number | null, resetsAt: number | null) => `${percent === null ? 'остаток квоты неизвестен' : `осталось ${percent} %`}${resetsAt ? `, сброс ${clock(resetsAt)}` : ''}`,
+    accountTip: 'Аккаунт, на котором он работает; остаток квоты — последнее чтение (Accounts или окна лимитов CanvasTTY).'
   }
 };
 
@@ -139,6 +144,7 @@ function nodeCard(node: TreeNode): HTMLElement {
   const provider = PROVIDERS[node.provider] ?? node.provider;
   const elapsed = elapsedOf(node);
   const meta: Array<HTMLElement | null> = [
+    node.account?.quota ? el('span', { className: 'tree-quota', textContent: t.quota(node.account.quota.percent, node.account.quota.resetsAt), title: t.accountTip }) : null,
     el('span', { className: `tree-cost${node.cost && node.cost.kind !== 'usd' ? ' tree-cost--plan' : ''}`, textContent: t.cost(node.cost), title: t.costTip(node.cost) }),
     node.usage ? el('span', { className: 'tree-tokens', textContent: t.tokens(node.usage.tokens), title: t.tokensTip }) : null,
     node.usage?.providerEstimate !== undefined ? el('span', { className: 'tree-estimate', textContent: t.providerEstimate(node.usage.providerEstimate), title: t.providerEstimateTip }) : null,
@@ -167,6 +173,7 @@ function nodeCard(node: TreeNode): HTMLElement {
       ...(node.auto && !node.model
         ? [el('strong', { textContent: t.auto, title: t.autoTip }), ` · ${node.auto.map(entry => t.autoCalls(entry.model, entry.calls)).join(', ')} · ${provider}`]
         : [el('strong', { textContent: node.model ?? t.defaultModel(provider) }), node.model ? ` · ${provider}` : '']),
+      node.account ? ` · ${node.account.label}` : '',
       ` · ${t.roles[node.role] ?? node.role}`),
     ...(node.task ? [el('div', { className: 'tree-node__task', textContent: node.task, title: node.task })] : []),
     el('div', { className: 'tree-node__meta' }, ...meta));

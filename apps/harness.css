@@ -133,3 +133,17 @@ button, input, select, textarea { font: inherit; color: inherit; }
 .pill--done { border: 1px solid var(--line-strong); color: var(--secondary); }
 .tree-node--approval { border-color: var(--yellow); }
 .tree-node--failed { border-color: var(--danger); }
+
+/* The HOME widget «Главный агент»: a tight page, one clickable status line per project. */
+.page--widget { gap: 0.62rem; padding: 0.77rem 0.92rem; }
+.widget-lines { display: grid; gap: 0.15rem; min-width: 0; }
+.widget-line {
+  display: block; width: 100%; min-width: 0; padding: 0.31rem 0.46rem; border: 0; border-radius: var(--radius-sm);
+  background: transparent; color: var(--text); text-align: left; cursor: pointer;
+  overflow: hidden; white-space: nowrap; text-overflow: ellipsis;
+}
+.widget-line:hover:not(:disabled) { background: var(--surface-soft); }
+.widget-line:focus-visible { outline: 2px solid var(--primary); outline-offset: 1px; }
+.widget-line:disabled { cursor: default; color: var(--text-muted); }
+.widget-line.is-warn { color: var(--yellow); }
+.row > .input { flex: 1 1 16rem; width: auto; }

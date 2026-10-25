@@ -6,7 +6,7 @@ import type { Host } from '../rpc.ts';
  * for it. On a failed read the Assistant runs with command review Off, saves nothing over the stored value, logs it,
  * and reads again later.
  */
-export const STORED_KEYS = ['settings', 'harness', 'autoRouting', 'routing'] as const;
+export const STORED_KEYS = ['settings', 'harness', 'autoRouting', 'routing', 'conductor'] as const;
 export type StoredKey = typeof STORED_KEYS[number];
 export type Stored = Partial<Record<StoredKey, unknown>>;
 

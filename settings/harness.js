@@ -78,6 +78,333 @@
     refresh();
   }
 
+  // src/ui/conductorText.ts
+  var PLUGIN = "CanvasTTY Assistant";
+  var CONDUCTOR_TEXT = {
+    en: {
+      title: "Main agent",
+      help: "One agent you talk to: it hands your tasks to your projects, starts a project agent in each on the route Jev picks, and follows them. It works only in the folders listed here.",
+      start: "Start the main agent",
+      starting: "Starting\u2026",
+      open: "Show the main agent",
+      status: (s) => s === "working" ? "working" : s === "needs_approval" ? "waits for you" : s === "idle" ? "ready" : s ?? "",
+      running: (n, max) => `Projects running: ${n} of ${max}`,
+      codes: {
+        routingOff: "Turn on Automatic routing above first.",
+        core: "This CanvasTTY does not let plugins start orchestrators.",
+        consent: `Allow \u201CMay start orchestrators\u201D for the Assistant first (see the checklist).`,
+        noRoute: "No route can run the main agent now: it needs Claude Code, Codex, Qwen Code or OpenCode with a sign-in, plan or account.",
+        refused: "CanvasTTY did not start it.",
+        folder: "Its folder could not be created.",
+        busy: "It is starting already.",
+        input: "CanvasTTY did not start it."
+      },
+      checklist: "What the main agent needs",
+      allowMissing: "Allow what is missing\u2026",
+      allowHelp: "CanvasTTY shows one dialog with each permission; you untick what you do not want.",
+      noBundle: "This CanvasTTY cannot ask for these permissions from a page: give them in Settings at the paths shown.",
+      openSettings: "Open Settings",
+      noOpen: "Open it yourself:",
+      state: { ok: "done", missing: "missing", unknown: "not known", unsupported: "not in this CanvasTTY" },
+      optional: "optional",
+      items: {
+        routing: ["Automatic routing is on", "Turn it on above."],
+        orchestrators: ["The Assistant may start orchestrators", `Settings \u2192 Agents \u2192 Extension native code \u2192 ${PLUGIN} \u2192 May start orchestrators`],
+        projects: ["At least one project folder", "Add folders below."],
+        accounts: ["Accounts runs (its native code is trusted)", "Settings \u2192 Agents \u2192 Extension native code \u2192 CanvasTTY Accounts"],
+        shares: ["The Assistant reads Accounts\u2019 routes and quota", `Settings \u2192 Agents \u2192 Extension native code \u2192 ${PLUGIN} \u2192 Reads from other extensions`],
+        broker: ["Plan accounts allowed for the Assistant", "Settings \u2192 Agents \u2192 Accounts for other extensions"],
+        decisions: ["The Assistant may allow the main agent\u2019s project tool (no prompt in Claude Code)", `Settings \u2192 Agents \u2192 Extension native code \u2192 ${PLUGIN} \u2192 May allow agent actions`],
+        environments: ["Environments runs (servers; not needed for local work)", "Settings \u2192 Agents \u2192 Extension native code \u2192 CanvasTTY Environments"],
+        trustUpdates: ["Updates keep trust (Assistant and Environments, not Accounts)", "Asked in CanvasTTY\u2019s permission dialog where this CanvasTTY has it."],
+        widget: ["The \u201CMain agent\u201D tile on HOME", "Settings \u2192 Appearance \u2192 HOME composition"]
+      },
+      count: (n) => ` (${n})`,
+      projects: "My projects",
+      projectsHelp: "The main agent starts work only in these folders. It never adds one itself.",
+      noProjects: "No folders yet.",
+      remove: "Remove",
+      add: "Add",
+      pick: "Choose\u2026",
+      pathPlaceholder: "Full path of a project folder",
+      suggest: "Folders of open cards \u2014 add?",
+      refused: {
+        path: "Write a full path.",
+        missing: "No such folder.",
+        notDirectory: "That is not a folder.",
+        root: "Not the disk root.",
+        home: "Not your home folder itself: choose a project inside it.",
+        system: "Not a system folder.",
+        private: "Not a folder with keys, sign-ins or CanvasTTY data.",
+        conductor: "That is the main agent\u2019s own folder.",
+        full: "The list is full (32).",
+        listed: "Already listed."
+      },
+      push: "Report status by itself",
+      pushHelp: "The Assistant types a project\u2019s status line into the main agent when the project is done, failed, blocked or waits for you, but only while the main agent is idle and nothing was typed there for a while; changes close together go as one line.",
+      max: "Projects at once",
+      maxHelp: "A start beyond this waits until a project ends. Each project agent may start agents of its own.",
+      folderLine: (path) => `Its folder: ${path}`,
+      saved: "Saved.",
+      notSaved: "Not saved: ",
+      widgetSetup: "Setup is not finished: the Assistant page lists what is missing.",
+      openPage: "Assistant page\u2026",
+      focusOld: "This CanvasTTY cannot show a card from here.",
+      noProjectsWidget: "No projects yet: add folders on the Assistant page."
+    },
+    ru: {
+      title: "\u0413\u043B\u0430\u0432\u043D\u044B\u0439 \u0430\u0433\u0435\u043D\u0442",
+      help: "\u041E\u0434\u0438\u043D \u0430\u0433\u0435\u043D\u0442, \u0441 \u043A\u043E\u0442\u043E\u0440\u044B\u043C \u0432\u044B \u0433\u043E\u0432\u043E\u0440\u0438\u0442\u0435: \u043E\u043D \u043F\u0435\u0440\u0435\u0434\u0430\u0451\u0442 \u0437\u0430\u0434\u0430\u0447\u0438 \u0432\u0430\u0448\u0438\u043C \u043F\u0440\u043E\u0435\u043A\u0442\u0430\u043C, \u0437\u0430\u043F\u0443\u0441\u043A\u0430\u0435\u0442 \u0432 \u043A\u0430\u0436\u0434\u043E\u043C \u0430\u0433\u0435\u043D\u0442\u0430 \u043F\u0440\u043E\u0435\u043A\u0442\u0430 \u043D\u0430 \u043C\u0430\u0440\u0448\u0440\u0443\u0442\u0435, \u043A\u043E\u0442\u043E\u0440\u044B\u0439 \u0432\u044B\u0431\u0438\u0440\u0430\u0435\u0442 Jev, \u0438 \u0441\u043B\u0435\u0434\u0438\u0442 \u0437\u0430 \u043D\u0438\u043C\u0438. \u0420\u0430\u0431\u043E\u0442\u0430\u0435\u0442 \u0442\u043E\u043B\u044C\u043A\u043E \u0432 \u043F\u0430\u043F\u043A\u0430\u0445 \u0438\u0437 \u044D\u0442\u043E\u0433\u043E \u0441\u043F\u0438\u0441\u043A\u0430.",
+      start: "\u0417\u0430\u043F\u0443\u0441\u0442\u0438\u0442\u044C \u0433\u043B\u0430\u0432\u043D\u043E\u0433\u043E \u0430\u0433\u0435\u043D\u0442\u0430",
+      starting: "\u0417\u0430\u043F\u0443\u0441\u043A\u2026",
+      open: "\u041F\u043E\u043A\u0430\u0437\u0430\u0442\u044C \u0433\u043B\u0430\u0432\u043D\u043E\u0433\u043E \u0430\u0433\u0435\u043D\u0442\u0430",
+      status: (s) => s === "working" ? "\u0440\u0430\u0431\u043E\u0442\u0430\u0435\u0442" : s === "needs_approval" ? "\u0436\u0434\u0451\u0442 \u0432\u0430\u0441" : s === "idle" ? "\u0433\u043E\u0442\u043E\u0432" : s ?? "",
+      running: (n, max) => `\u041F\u0440\u043E\u0435\u043A\u0442\u043E\u0432 \u0432 \u0440\u0430\u0431\u043E\u0442\u0435: ${n} \u0438\u0437 ${max}`,
+      codes: {
+        routingOff: "\u0421\u043D\u0430\u0447\u0430\u043B\u0430 \u0432\u043A\u043B\u044E\u0447\u0438\u0442\u0435 \u0430\u0432\u0442\u043E\u043C\u0430\u0442\u0438\u0447\u0435\u0441\u043A\u0438\u0439 \u0432\u044B\u0431\u043E\u0440 \u043C\u043E\u0434\u0435\u043B\u0438 \u0432\u044B\u0448\u0435.",
+        core: "\u042D\u0442\u0430 \u0432\u0435\u0440\u0441\u0438\u044F CanvasTTY \u043D\u0435 \u0440\u0430\u0437\u0440\u0435\u0448\u0430\u0435\u0442 \u043F\u043B\u0430\u0433\u0438\u043D\u0430\u043C \u0437\u0430\u043F\u0443\u0441\u043A\u0430\u0442\u044C \u043E\u0440\u043A\u0435\u0441\u0442\u0440\u0430\u0442\u043E\u0440\u043E\u0432.",
+        consent: "\u0421\u043D\u0430\u0447\u0430\u043B\u0430 \u0440\u0430\u0437\u0440\u0435\u0448\u0438\u0442\u0435 \u041F\u043E\u043C\u043E\u0449\u043D\u0438\u043A\u0443 \xAB\u041C\u043E\u0436\u0435\u0442 \u0437\u0430\u043F\u0443\u0441\u043A\u0430\u0442\u044C \u043E\u0440\u043A\u0435\u0441\u0442\u0440\u0430\u0442\u043E\u0440\u043E\u0432\xBB (\u0441\u043C. \u0441\u043F\u0438\u0441\u043E\u043A \u043D\u0438\u0436\u0435).",
+        noRoute: "\u0421\u0435\u0439\u0447\u0430\u0441 \u043D\u0435\u0442 \u043C\u0430\u0440\u0448\u0440\u0443\u0442\u0430 \u0434\u043B\u044F \u0433\u043B\u0430\u0432\u043D\u043E\u0433\u043E \u0430\u0433\u0435\u043D\u0442\u0430: \u043D\u0443\u0436\u0435\u043D Claude Code, Codex, Qwen Code \u0438\u043B\u0438 OpenCode \u0441\u043E \u0432\u0445\u043E\u0434\u043E\u043C, \u043F\u043B\u0430\u043D\u043E\u043C \u0438\u043B\u0438 \u0430\u043A\u043A\u0430\u0443\u043D\u0442\u043E\u043C.",
+        refused: "CanvasTTY \u043D\u0435 \u0437\u0430\u043F\u0443\u0441\u0442\u0438\u043B \u0435\u0433\u043E.",
+        folder: "\u041D\u0435 \u0443\u0434\u0430\u043B\u043E\u0441\u044C \u0441\u043E\u0437\u0434\u0430\u0442\u044C \u0435\u0433\u043E \u043F\u0430\u043F\u043A\u0443.",
+        busy: "\u041E\u043D \u0443\u0436\u0435 \u0437\u0430\u043F\u0443\u0441\u043A\u0430\u0435\u0442\u0441\u044F.",
+        input: "CanvasTTY \u043D\u0435 \u0437\u0430\u043F\u0443\u0441\u0442\u0438\u043B \u0435\u0433\u043E."
+      },
+      checklist: "\u0427\u0442\u043E \u043D\u0443\u0436\u043D\u043E \u0433\u043B\u0430\u0432\u043D\u043E\u043C\u0443 \u0430\u0433\u0435\u043D\u0442\u0443",
+      allowMissing: "\u0420\u0430\u0437\u0440\u0435\u0448\u0438\u0442\u044C \u043D\u0435\u0434\u043E\u0441\u0442\u0430\u044E\u0449\u0435\u0435\u2026",
+      allowHelp: "CanvasTTY \u043F\u043E\u043A\u0430\u0436\u0435\u0442 \u043E\u0434\u043D\u043E \u043E\u043A\u043D\u043E \u0441\u043E \u0432\u0441\u0435\u043C\u0438 \u0440\u0430\u0437\u0440\u0435\u0448\u0435\u043D\u0438\u044F\u043C\u0438; \u043D\u0435\u043D\u0443\u0436\u043D\u043E\u0435 \u043C\u043E\u0436\u043D\u043E \u0441\u043D\u044F\u0442\u044C.",
+      noBundle: "\u042D\u0442\u0430 \u0432\u0435\u0440\u0441\u0438\u044F CanvasTTY \u043D\u0435 \u0443\u043C\u0435\u0435\u0442 \u0437\u0430\u043F\u0440\u0430\u0448\u0438\u0432\u0430\u0442\u044C \u0440\u0430\u0437\u0440\u0435\u0448\u0435\u043D\u0438\u044F \u0441\u043E \u0441\u0442\u0440\u0430\u043D\u0438\u0446\u044B: \u0432\u043A\u043B\u044E\u0447\u0438\u0442\u0435 \u0438\u0445 \u0432 \u041D\u0430\u0441\u0442\u0440\u043E\u0439\u043A\u0430\u0445 \u043F\u043E \u0443\u043A\u0430\u0437\u0430\u043D\u043D\u044B\u043C \u043F\u0443\u0442\u044F\u043C.",
+      openSettings: "\u041E\u0442\u043A\u0440\u044B\u0442\u044C \u043D\u0430\u0441\u0442\u0440\u043E\u0439\u043A\u0438",
+      noOpen: "\u041E\u0442\u043A\u0440\u043E\u0439\u0442\u0435 \u0441\u0430\u043C\u0438:",
+      state: { ok: "\u0433\u043E\u0442\u043E\u0432\u043E", missing: "\u043D\u0435 \u0445\u0432\u0430\u0442\u0430\u0435\u0442", unknown: "\u043D\u0435\u0438\u0437\u0432\u0435\u0441\u0442\u043D\u043E", unsupported: "\u043D\u0435\u0442 \u0432 \u044D\u0442\u043E\u0439 \u0432\u0435\u0440\u0441\u0438\u0438" },
+      optional: "\u043F\u043E \u0436\u0435\u043B\u0430\u043D\u0438\u044E",
+      items: {
+        routing: ["\u0412\u043A\u043B\u044E\u0447\u0451\u043D \u0430\u0432\u0442\u043E\u043C\u0430\u0442\u0438\u0447\u0435\u0441\u043A\u0438\u0439 \u0432\u044B\u0431\u043E\u0440 \u043C\u043E\u0434\u0435\u043B\u0438", "\u0412\u043A\u043B\u044E\u0447\u0438\u0442\u0435 \u0435\u0433\u043E \u0432\u044B\u0448\u0435."],
+        orchestrators: ["\u041F\u043E\u043C\u043E\u0449\u043D\u0438\u043A \u043C\u043E\u0436\u0435\u0442 \u0437\u0430\u043F\u0443\u0441\u043A\u0430\u0442\u044C \u043E\u0440\u043A\u0435\u0441\u0442\u0440\u0430\u0442\u043E\u0440\u043E\u0432", `\u041D\u0430\u0441\u0442\u0440\u043E\u0439\u043A\u0438 \u2192 \u0410\u0433\u0435\u043D\u0442\u044B \u2192 \u041D\u0430\u0442\u0438\u0432\u043D\u044B\u0439 \u043A\u043E\u0434 \u0440\u0430\u0441\u0448\u0438\u0440\u0435\u043D\u0438\u0439 \u2192 ${PLUGIN} \u2192 \u041C\u043E\u0436\u0435\u0442 \u0437\u0430\u043F\u0443\u0441\u043A\u0430\u0442\u044C \u043E\u0440\u043A\u0435\u0441\u0442\u0440\u0430\u0442\u043E\u0440\u043E\u0432`],
+        projects: ["\u0425\u043E\u0442\u044F \u0431\u044B \u043E\u0434\u043D\u0430 \u043F\u0430\u043F\u043A\u0430 \u043F\u0440\u043E\u0435\u043A\u0442\u0430", "\u0414\u043E\u0431\u0430\u0432\u044C\u0442\u0435 \u043F\u0430\u043F\u043A\u0438 \u043D\u0438\u0436\u0435."],
+        accounts: ["Accounts \u0440\u0430\u0431\u043E\u0442\u0430\u0435\u0442 (\u0435\u0433\u043E \u043D\u0430\u0442\u0438\u0432\u043D\u044B\u0439 \u043A\u043E\u0434 \u043F\u043E\u0434\u0442\u0432\u0435\u0440\u0436\u0434\u0451\u043D)", "\u041D\u0430\u0441\u0442\u0440\u043E\u0439\u043A\u0438 \u2192 \u0410\u0433\u0435\u043D\u0442\u044B \u2192 \u041D\u0430\u0442\u0438\u0432\u043D\u044B\u0439 \u043A\u043E\u0434 \u0440\u0430\u0441\u0448\u0438\u0440\u0435\u043D\u0438\u0439 \u2192 CanvasTTY Accounts"],
+        shares: ["\u041F\u043E\u043C\u043E\u0449\u043D\u0438\u043A \u0447\u0438\u0442\u0430\u0435\u0442 \u043C\u0430\u0440\u0448\u0440\u0443\u0442\u044B \u0438 \u043A\u0432\u043E\u0442\u044B Accounts", `\u041D\u0430\u0441\u0442\u0440\u043E\u0439\u043A\u0438 \u2192 \u0410\u0433\u0435\u043D\u0442\u044B \u2192 \u041D\u0430\u0442\u0438\u0432\u043D\u044B\u0439 \u043A\u043E\u0434 \u0440\u0430\u0441\u0448\u0438\u0440\u0435\u043D\u0438\u0439 \u2192 ${PLUGIN} \u2192 \u0427\u0442\u0435\u043D\u0438\u0435 \u0434\u0430\u043D\u043D\u044B\u0445 \u0434\u0440\u0443\u0433\u0438\u0445 \u0440\u0430\u0441\u0448\u0438\u0440\u0435\u043D\u0438\u0439`],
+        broker: ["\u0410\u043A\u043A\u0430\u0443\u043D\u0442\u044B \u043F\u043B\u0430\u043D\u043E\u0432 \u0440\u0430\u0437\u0440\u0435\u0448\u0435\u043D\u044B \u041F\u043E\u043C\u043E\u0449\u043D\u0438\u043A\u0443", "\u041D\u0430\u0441\u0442\u0440\u043E\u0439\u043A\u0438 \u2192 \u0410\u0433\u0435\u043D\u0442\u044B \u2192 \u0423\u0447\u0451\u0442\u043D\u044B\u0435 \u0437\u0430\u043F\u0438\u0441\u0438 \u0434\u043B\u044F \u0434\u0440\u0443\u0433\u0438\u0445 \u0440\u0430\u0441\u0448\u0438\u0440\u0435\u043D\u0438\u0439"],
+        decisions: ["\u041F\u043E\u043C\u043E\u0449\u043D\u0438\u043A \u043C\u043E\u0436\u0435\u0442 \u0440\u0430\u0437\u0440\u0435\u0448\u0430\u0442\u044C \u0433\u043B\u0430\u0432\u043D\u043E\u043C\u0443 \u0430\u0433\u0435\u043D\u0442\u0443 \u0435\u0433\u043E \u0438\u043D\u0441\u0442\u0440\u0443\u043C\u0435\u043D\u0442 \u043F\u0440\u043E\u0435\u043A\u0442\u043E\u0432 (\u0431\u0435\u0437 \u0432\u043E\u043F\u0440\u043E\u0441\u0430 \u0432 Claude Code)", `\u041D\u0430\u0441\u0442\u0440\u043E\u0439\u043A\u0438 \u2192 \u0410\u0433\u0435\u043D\u0442\u044B \u2192 \u041D\u0430\u0442\u0438\u0432\u043D\u044B\u0439 \u043A\u043E\u0434 \u0440\u0430\u0441\u0448\u0438\u0440\u0435\u043D\u0438\u0439 \u2192 ${PLUGIN} \u2192 \u041C\u043E\u0436\u0435\u0442 \u0440\u0430\u0437\u0440\u0435\u0448\u0430\u0442\u044C \u0434\u0435\u0439\u0441\u0442\u0432\u0438\u044F \u0430\u0433\u0435\u043D\u0442\u043E\u0432`],
+        environments: ["Environments \u0440\u0430\u0431\u043E\u0442\u0430\u0435\u0442 (\u0441\u0435\u0440\u0432\u0435\u0440\u044B; \u0434\u043B\u044F \u0440\u0430\u0431\u043E\u0442\u044B \u043D\u0430 \u044D\u0442\u043E\u043C \u043A\u043E\u043C\u043F\u044C\u044E\u0442\u0435\u0440\u0435 \u043D\u0435 \u043D\u0443\u0436\u0435\u043D)", "\u041D\u0430\u0441\u0442\u0440\u043E\u0439\u043A\u0438 \u2192 \u0410\u0433\u0435\u043D\u0442\u044B \u2192 \u041D\u0430\u0442\u0438\u0432\u043D\u044B\u0439 \u043A\u043E\u0434 \u0440\u0430\u0441\u0448\u0438\u0440\u0435\u043D\u0438\u0439 \u2192 CanvasTTY Environments"],
+        trustUpdates: ["\u041E\u0431\u043D\u043E\u0432\u043B\u0435\u043D\u0438\u044F \u0441\u043E\u0445\u0440\u0430\u043D\u044F\u044E\u0442 \u0434\u043E\u0432\u0435\u0440\u0438\u0435 (\u041F\u043E\u043C\u043E\u0449\u043D\u0438\u043A \u0438 Environments, \u043D\u0435 Accounts)", "\u0421\u043F\u0440\u0430\u0448\u0438\u0432\u0430\u0435\u0442\u0441\u044F \u0432 \u043E\u043A\u043D\u0435 \u0440\u0430\u0437\u0440\u0435\u0448\u0435\u043D\u0438\u0439 CanvasTTY, \u0433\u0434\u0435 \u043E\u043D\u043E \u0435\u0441\u0442\u044C."],
+        widget: ["\u041F\u043B\u0438\u0442\u043A\u0430 \xAB\u0413\u043B\u0430\u0432\u043D\u044B\u0439 \u0430\u0433\u0435\u043D\u0442\xBB \u043D\u0430 HOME", "\u041D\u0430\u0441\u0442\u0440\u043E\u0439\u043A\u0438 \u2192 \u041E\u0444\u043E\u0440\u043C\u043B\u0435\u043D\u0438\u0435 \u2192 \u0421\u043E\u0441\u0442\u0430\u0432 HOME"]
+      },
+      count: (n) => ` (${n})`,
+      projects: "\u041C\u043E\u0438 \u043F\u0440\u043E\u0435\u043A\u0442\u044B",
+      projectsHelp: "\u0413\u043B\u0430\u0432\u043D\u044B\u0439 \u0430\u0433\u0435\u043D\u0442 \u043D\u0430\u0447\u0438\u043D\u0430\u0435\u0442 \u0440\u0430\u0431\u043E\u0442\u0443 \u0442\u043E\u043B\u044C\u043A\u043E \u0432 \u044D\u0442\u0438\u0445 \u043F\u0430\u043F\u043A\u0430\u0445. \u0421\u0430\u043C \u043E\u043D \u043F\u0430\u043F\u043E\u043A \u043D\u0435 \u0434\u043E\u0431\u0430\u0432\u043B\u044F\u0435\u0442.",
+      noProjects: "\u041F\u0430\u043F\u043E\u043A \u043F\u043E\u043A\u0430 \u043D\u0435\u0442.",
+      remove: "\u0423\u0431\u0440\u0430\u0442\u044C",
+      add: "\u0414\u043E\u0431\u0430\u0432\u0438\u0442\u044C",
+      pick: "\u0412\u044B\u0431\u0440\u0430\u0442\u044C\u2026",
+      pathPlaceholder: "\u041F\u043E\u043B\u043D\u044B\u0439 \u043F\u0443\u0442\u044C \u043A \u043F\u0430\u043F\u043A\u0435 \u043F\u0440\u043E\u0435\u043A\u0442\u0430",
+      suggest: "\u041F\u0430\u043F\u043A\u0438 \u043E\u0442\u043A\u0440\u044B\u0442\u044B\u0445 \u043E\u043A\u043E\u043D \u2014 \u0434\u043E\u0431\u0430\u0432\u0438\u0442\u044C?",
+      refused: {
+        path: "\u041D\u0430\u043F\u0438\u0448\u0438\u0442\u0435 \u043F\u043E\u043B\u043D\u044B\u0439 \u043F\u0443\u0442\u044C.",
+        missing: "\u0422\u0430\u043A\u043E\u0439 \u043F\u0430\u043F\u043A\u0438 \u043D\u0435\u0442.",
+        notDirectory: "\u042D\u0442\u043E \u043D\u0435 \u043F\u0430\u043F\u043A\u0430.",
+        root: "\u041D\u0435 \u043A\u043E\u0440\u0435\u043D\u044C \u0434\u0438\u0441\u043A\u0430.",
+        home: "\u041D\u0435 \u0441\u0430\u043C\u0430 \u0434\u043E\u043C\u0430\u0448\u043D\u044F\u044F \u043F\u0430\u043F\u043A\u0430: \u0432\u044B\u0431\u0435\u0440\u0438\u0442\u0435 \u043F\u0440\u043E\u0435\u043A\u0442 \u0432\u043D\u0443\u0442\u0440\u0438 \u043D\u0435\u0451.",
+        system: "\u041D\u0435 \u0441\u0438\u0441\u0442\u0435\u043C\u043D\u0430\u044F \u043F\u0430\u043F\u043A\u0430.",
+        private: "\u041D\u0435 \u043F\u0430\u043F\u043A\u0430 \u0441 \u043A\u043B\u044E\u0447\u0430\u043C\u0438, \u0432\u0445\u043E\u0434\u0430\u043C\u0438 \u0438\u043B\u0438 \u0434\u0430\u043D\u043D\u044B\u043C\u0438 CanvasTTY.",
+        conductor: "\u042D\u0442\u043E \u043F\u0430\u043F\u043A\u0430 \u0441\u0430\u043C\u043E\u0433\u043E \u0433\u043B\u0430\u0432\u043D\u043E\u0433\u043E \u0430\u0433\u0435\u043D\u0442\u0430.",
+        full: "\u0421\u043F\u0438\u0441\u043E\u043A \u043F\u043E\u043B\u043E\u043D (32).",
+        listed: "\u0423\u0436\u0435 \u0432 \u0441\u043F\u0438\u0441\u043A\u0435."
+      },
+      push: "\u0421\u043E\u043E\u0431\u0449\u0430\u0442\u044C \u0441\u0442\u0430\u0442\u0443\u0441 \u0441\u0430\u043C\u043E\u043C\u0443",
+      pushHelp: "\u041F\u043E\u043C\u043E\u0449\u043D\u0438\u043A \u0432\u043F\u0435\u0447\u0430\u0442\u044B\u0432\u0430\u0435\u0442 \u0441\u0442\u0440\u043E\u043A\u0443 \u0441\u0442\u0430\u0442\u0443\u0441\u0430 \u043F\u0440\u043E\u0435\u043A\u0442\u0430 \u0432 \u0433\u043B\u0430\u0432\u043D\u043E\u0433\u043E \u0430\u0433\u0435\u043D\u0442\u0430, \u043A\u043E\u0433\u0434\u0430 \u043F\u0440\u043E\u0435\u043A\u0442 \u0433\u043E\u0442\u043E\u0432, \u0443\u043F\u0430\u043B, \u0437\u0430\u0431\u043B\u043E\u043A\u0438\u0440\u043E\u0432\u0430\u043D \u0438\u043B\u0438 \u0436\u0434\u0451\u0442 \u0432\u0430\u0441, \u043D\u043E \u0442\u043E\u043B\u044C\u043A\u043E \u043F\u043E\u043A\u0430 \u0433\u043B\u0430\u0432\u043D\u044B\u0439 \u0430\u0433\u0435\u043D\u0442 \u0441\u0432\u043E\u0431\u043E\u0434\u0435\u043D \u0438 \u0432 \u043D\u0451\u043C \u043A\u0430\u043A\u043E\u0435-\u0442\u043E \u0432\u0440\u0435\u043C\u044F \u043D\u0438\u0447\u0435\u0433\u043E \u043D\u0435 \u043F\u0435\u0447\u0430\u0442\u0430\u043B\u0438; \u0431\u043B\u0438\u0437\u043A\u0438\u0435 \u043F\u043E \u0432\u0440\u0435\u043C\u0435\u043D\u0438 \u0438\u0437\u043C\u0435\u043D\u0435\u043D\u0438\u044F \u0438\u0434\u0443\u0442 \u043E\u0434\u043D\u043E\u0439 \u0441\u0442\u0440\u043E\u043A\u043E\u0439.",
+      max: "\u041F\u0440\u043E\u0435\u043A\u0442\u043E\u0432 \u043E\u0434\u043D\u043E\u0432\u0440\u0435\u043C\u0435\u043D\u043D\u043E",
+      maxHelp: "\u0417\u0430\u043F\u0443\u0441\u043A \u0441\u0432\u0435\u0440\u0445 \u044D\u0442\u043E\u0433\u043E \u0436\u0434\u0451\u0442, \u043F\u043E\u043A\u0430 \u043A\u0430\u043A\u043E\u0439-\u0442\u043E \u043F\u0440\u043E\u0435\u043A\u0442 \u0437\u0430\u043A\u043E\u043D\u0447\u0438\u0442. \u0410\u0433\u0435\u043D\u0442 \u043F\u0440\u043E\u0435\u043A\u0442\u0430 \u043C\u043E\u0436\u0435\u0442 \u0437\u0430\u043F\u0443\u0441\u043A\u0430\u0442\u044C \u0441\u0432\u043E\u0438\u0445 \u0430\u0433\u0435\u043D\u0442\u043E\u0432.",
+      folderLine: (path) => `\u0415\u0433\u043E \u043F\u0430\u043F\u043A\u0430: ${path}`,
+      saved: "\u0421\u043E\u0445\u0440\u0430\u043D\u0435\u043D\u043E.",
+      notSaved: "\u041D\u0435 \u0441\u043E\u0445\u0440\u0430\u043D\u0435\u043D\u043E: ",
+      widgetSetup: "\u041D\u0430\u0441\u0442\u0440\u043E\u0439\u043A\u0430 \u043D\u0435 \u0437\u0430\u043A\u043E\u043D\u0447\u0435\u043D\u0430: \u043D\u0430 \u0441\u0442\u0440\u0430\u043D\u0438\u0446\u0435 \u041F\u043E\u043C\u043E\u0449\u043D\u0438\u043A\u0430 \u0432\u0438\u0434\u043D\u043E, \u0447\u0435\u0433\u043E \u043D\u0435 \u0445\u0432\u0430\u0442\u0430\u0435\u0442.",
+      openPage: "\u0421\u0442\u0440\u0430\u043D\u0438\u0446\u0430 \u041F\u043E\u043C\u043E\u0449\u043D\u0438\u043A\u0430\u2026",
+      focusOld: "\u042D\u0442\u0430 \u0432\u0435\u0440\u0441\u0438\u044F CanvasTTY \u043D\u0435 \u0443\u043C\u0435\u0435\u0442 \u043F\u043E\u043A\u0430\u0437\u044B\u0432\u0430\u0442\u044C \u043E\u043A\u043D\u043E \u043E\u0442\u0441\u044E\u0434\u0430.",
+      noProjectsWidget: "\u041F\u0440\u043E\u0435\u043A\u0442\u043E\u0432 \u043F\u043E\u043A\u0430 \u043D\u0435\u0442: \u0434\u043E\u0431\u0430\u0432\u044C\u0442\u0435 \u043F\u0430\u043F\u043A\u0438 \u043D\u0430 \u0441\u0442\u0440\u0430\u043D\u0438\u0446\u0435 \u041F\u043E\u043C\u043E\u0449\u043D\u0438\u043A\u0430."
+    }
+  };
+  var SETTINGS_SECTION = { "native-code": "agents", broker: "agents", home: "appearance" };
+  var unsupportedMethod = (error) => /unsupported plugin method|unknown (host )?method|not (supported|available)/iu.test(error instanceof Error ? error.message : String(error));
+
+  // src/ui/conductorSection.ts
+  var view = null;
+  var draftPath = "";
+  var hint = null;
+  var busy = false;
+  var missing = /* @__PURE__ */ new Set();
+  async function loadConductor() {
+    view = await host.service.request(SERVICE, "conductor.state").catch(() => null);
+  }
+  function conductorSection(locale, rerender, say2) {
+    if (!view) return null;
+    const t2 = CONDUCTOR_TEXT[locale];
+    const v = view;
+    const act = (work) => {
+      if (busy) return;
+      busy = true;
+      hint = null;
+      rerender();
+      work().catch((error) => {
+        hint = errorText(error);
+      }).finally(async () => {
+        busy = false;
+        await loadConductor();
+        rerender();
+      });
+    };
+    const main = el("button", { type: "button", className: "button button--primary", disabled: busy, textContent: v.conductor ? t2.open : busy ? t2.starting : t2.start });
+    main.addEventListener("click", () => {
+      if (v.conductor) {
+        void focus(v.conductor.id, t2.focusOld, say2);
+        return;
+      }
+      act(async () => {
+        const answer = await host.service.request(SERVICE, "conductor.start");
+        if (answer.open) {
+          await focus(answer.open, t2.focusOld, say2);
+          return;
+        }
+        if (answer.started === false) hint = `${t2.codes[answer.code ?? "refused"] ?? t2.codes.refused}${answer.detail ? ` ${answer.detail}` : ""}`;
+      });
+    });
+    const head = el(
+      "div",
+      { className: "row" },
+      main,
+      v.conductor ? el("span", { className: "muted", textContent: t2.status(v.conductor.status) }) : null,
+      el("span", { className: "muted", textContent: t2.running(v.running, v.settings.maxProjects) })
+    );
+    const grants = v.checklist.items.filter((item) => item.state !== "ok" && item.state !== "unsupported").flatMap((item) => item.grants ?? []);
+    const bundle = el("button", { type: "button", className: "button", textContent: t2.allowMissing, disabled: busy || !grants.length || missing.has("grants.request") });
+    bundle.addEventListener("click", () => act(async () => {
+      if (!host.request) {
+        missing.add("grants.request");
+        hint = t2.noBundle;
+        return;
+      }
+      try {
+        await host.request("grants.request", { reason: t2.title, items: grants });
+      } catch (error) {
+        if (unsupportedMethod(error)) {
+          missing.add("grants.request");
+          hint = t2.noBundle;
+          return;
+        }
+        throw error;
+      }
+    }));
+    const rows = v.checklist.items.map((item) => {
+      const [label, path] = t2.items[item.id] ?? [item.id, ""];
+      const tag = el("span", { className: `tag${item.state === "ok" ? "" : " tag--warn"}`, textContent: `${t2.state[item.state] ?? item.state}${item.optional && item.state !== "ok" ? ` \xB7 ${t2.optional}` : ""}` });
+      const section = SETTINGS_SECTION[item.section];
+      let control = tag;
+      if (item.state !== "ok" && section && !missing.has("settings.open")) {
+        const open = el("button", { type: "button", className: "link-button", textContent: t2.openSettings });
+        open.addEventListener("click", () => {
+          if (!host.request) {
+            missing.add("settings.open");
+            rerender();
+            return;
+          }
+          host.request("settings.open", { section }).catch((error) => {
+            if (unsupportedMethod(error)) {
+              missing.add("settings.open");
+              rerender();
+            } else say2(errorText(error), true);
+          });
+        });
+        control = el("div", { className: "row" }, tag, open);
+      }
+      const help = item.state === "ok" ? "" : `${missing.has("settings.open") && section ? `${t2.noOpen} ` : ""}${path}`;
+      return settingRow(`${label}${item.count ? t2.count(item.count) : ""}`, help, control);
+    });
+    const checklist = el("div", { className: "setting-group" }, ...rows);
+    const list = v.settings.projects.length ? el("div", { className: "setting-group" }, ...v.settings.projects.map((project) => {
+      const remove = el("button", { type: "button", className: "link-button", textContent: t2.remove, disabled: busy });
+      remove.addEventListener("click", () => act(() => host.service.request(SERVICE, "conductor.removeProject", { projectId: project.id })));
+      return settingRow(project.name, project.path, remove);
+    })) : el("p", { className: "muted", textContent: t2.noProjects });
+    const add = (path) => act(async () => {
+      const answer = await host.service.request(SERVICE, "conductor.addProject", { path });
+      if (answer.refused) hint = t2.refused[answer.refused] ?? answer.refused;
+      else {
+        draftPath = "";
+        say2(t2.saved);
+      }
+    });
+    const input = el("input", { className: "input", name: "projectPath", value: draftPath, maxLength: 1024, spellcheck: false, placeholder: t2.pathPlaceholder });
+    input.addEventListener("input", () => {
+      draftPath = input.value;
+    });
+    input.addEventListener("keydown", (event) => {
+      if (event.key === "Enter" && draftPath.trim()) add(draftPath);
+    });
+    const addButton = el("button", { type: "button", className: "button", textContent: t2.add, disabled: busy });
+    addButton.addEventListener("click", () => {
+      if (draftPath.trim()) add(draftPath);
+    });
+    const pick = missing.has("folders.pick") || !host.request ? null : el("button", { type: "button", className: "link-button", textContent: t2.pick, disabled: busy });
+    pick?.addEventListener("click", () => {
+      host.request("folders.pick", {}).then((picked) => {
+        const path = typeof picked === "string" ? picked : picked && typeof picked === "object" && typeof picked.path === "string" ? picked.path : "";
+        if (path) add(path);
+      }, (error) => {
+        if (unsupportedMethod(error)) {
+          missing.add("folders.pick");
+          rerender();
+        } else say2(errorText(error), true);
+      });
+    });
+    const suggestions = v.suggestions.length ? el(
+      "div",
+      { className: "setting-group" },
+      el("div", { className: "muted", textContent: t2.suggest }),
+      ...v.suggestions.map((path) => {
+        const button = el("button", { type: "button", className: "link-button", textContent: t2.add, disabled: busy });
+        button.addEventListener("click", () => add(path));
+        return settingRow(path.split(/[\\/]/u).filter(Boolean).at(-1) ?? path, path, button);
+      })
+    ) : null;
+    const save2 = (change) => act(() => host.service.request(SERVICE, "conductor.save", { settings: change }).then(() => say2(t2.saved)));
+    const max = el("select", { className: "select", name: "maxProjects", disabled: busy }, ...[1, 2, 3, 4, 5, 6, 8, 10, 12, 15].map((n) => el("option", { value: String(n), textContent: String(n), selected: n === v.settings.maxProjects })));
+    max.addEventListener("change", () => save2({ maxProjects: Number(max.value) }));
+    return el(
+      "section",
+      { className: "card" },
+      el("h2", { className: "card__title", textContent: t2.title }),
+      el("p", { className: "muted", textContent: t2.help }),
+      head,
+      hint ? el("p", { className: "notice", textContent: hint }) : null,
+      el("h3", { className: "card__title", textContent: t2.checklist }),
+      checklist,
+      el("div", { className: "row" }, bundle, el("span", { className: "muted", textContent: missing.has("grants.request") ? t2.noBundle : t2.allowHelp })),
+      el("h3", { className: "card__title", textContent: t2.projects }),
+      el("p", { className: "muted", textContent: t2.projectsHelp }),
+      list,
+      el("div", { className: "row" }, input, addButton, pick),
+      suggestions,
+      el(
+        "div",
+        { className: "setting-group" },
+        settingRow(t2.push, t2.pushHelp, toggle("conductorPush", v.settings.push, t2.push, (value) => save2({ push: value }))),
+        settingRow(t2.max, t2.maxHelp, max)
+      ),
+      el("p", { className: "muted", textContent: t2.folderLine(v.folder) })
+    );
+  }
+  async function focus(sessionId, old, say2) {
+    if (!host.request) {
+      say2(old, true);
+      return;
+    }
+    try {
+      await host.request("sessions.focus", { sessionId });
+    } catch (error) {
+      say2(unsupportedMethod(error) ? old : errorText(error), true);
+    }
+  }
+
   // src/ui/harnessSettings.ts
   var STRINGS = {
     en: {
@@ -184,11 +511,12 @@
     }
   };
   var t = STRINGS.en;
+  var pageLocale = "en";
   var state = null;
   var entry = null;
   var draft = { task: "", folder: "", server: false };
   var starting = false;
-  var hint = null;
+  var hint2 = null;
   var root = document.querySelector("#app");
   var status = document.querySelector("#status");
   var say = (message, error = false) => {
@@ -198,6 +526,7 @@
   async function load() {
     state = await host.service.request(SERVICE, "harness.settings");
     entry = await host.service.request(SERVICE, "autopilot.entry").catch(() => null);
+    await loadConductor();
     if (entry && !draft.folder && entry.folders[0]) draft.folder = entry.folders[0];
     render();
   }
@@ -223,7 +552,7 @@
   function startAuto() {
     if (starting) return;
     starting = true;
-    hint = null;
+    hint2 = null;
     render();
     host.service.request(SERVICE, "autopilot.start", { task: draft.task, cwd: draft.folder.trim(), server: draft.server }).then((raw) => {
       const answer = raw;
@@ -232,9 +561,9 @@
         say(t.start.started(answer.route));
         return;
       }
-      hint = { code: answer.code, ...answer.detail ? { detail: answer.detail } : {} };
+      hint2 = { code: answer.code, ...answer.detail ? { detail: answer.detail } : {} };
     }, (error) => {
-      hint = { code: "refused", detail: errorText(error) };
+      hint2 = { code: "refused", detail: errorText(error) };
     }).finally(() => {
       starting = false;
       render();
@@ -264,7 +593,7 @@
       entry.servers ? settingRow(t.start.server, "", toggle("autoServer", draft.server, t.start.server, (value) => {
         draft.server = value;
       })) : null,
-      hint ? el("p", { className: "notice", textContent: `${t.start.codes[hint.code] ?? t.start.codes.refused}${hint.detail ? ` ${hint.detail}` : ""}` }) : null,
+      hint2 ? el("p", { className: "notice", textContent: `${t.start.codes[hint2.code] ?? t.start.codes.refused}${hint2.detail ? ` ${hint2.detail}` : ""}` }) : null,
       el("div", { className: "row row--end" }, button)
     );
   }
@@ -297,16 +626,21 @@
         settingRow(t.flows, t.flowsHelp, toggle("flows", s.flows, t.flows, (value) => save({ flows: value })))
       ),
       el("div", { className: "row" }, el("span", { className: "muted", textContent: t.models(s.models) }), openModels, openTree),
-      ...[startCard()].filter((node) => node !== null)
+      ...[conductorSection(pageLocale, render, say), startCard()].filter((node) => node !== null)
     );
   }
   onContext((locale) => {
     t = STRINGS[locale];
+    pageLocale = locale;
     render();
   });
   host.service.onEvent(({ serviceId, event }) => {
-    if (serviceId === SERVICE && event === "settings") whenIdle(() => {
+    if (serviceId !== SERVICE) return;
+    if (event === "settings") whenIdle(() => {
       void load().catch((error) => say(errorText(error), true));
+    });
+    if (event === "conductor") whenIdle(() => {
+      void loadConductor().then(render, (error) => say(errorText(error), true));
     });
   });
   load().catch((error) => say(errorText(error), true));

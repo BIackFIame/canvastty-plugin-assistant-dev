@@ -165,6 +165,10 @@ export class AccountsFeed {
     return round();
   }
 
+  /** The last answers without reading (the agent tree and the main agent's status lines). */
+  peekQuota(): unknown { return this.quotaCache?.value ?? null; }
+  peekRoutes(): { rows: AccountRow[]; pools: PoolRoute[] } | null { return this.routesCache?.value ?? null; }
+
   state(): { mode: PeerMode; reason: string | null; routesAt: number | null; quotaAt: number | null } {
     return { mode: this.mode, reason: this.reason, routesAt: this.routesCache?.at ?? null, quotaAt: this.quotaCache?.at ?? null };
   }
