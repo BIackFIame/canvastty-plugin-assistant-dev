@@ -36,6 +36,8 @@ export function withoutCoreAllKeys(manifest) {
   return { ...rest, permissions: manifest.permissions.filter(permission => permission !== 'providers:read' && permission !== 'usage:read' && permission !== 'accounts:broker') };
 }
 
+/** The manifest lists own-cards tools (the Edge build; the core-all variant has none). */
+const hasOwnCards = manifest => manifest.services.some(service => (service.tools ?? []).some(tool => tool.audience === 'own-cards'));
 const declaresPolicy = manifest => manifest.services.some(service => service.launch?.policy !== undefined);
 
 /**
@@ -48,7 +50,7 @@ export function manifestForCore(validatePluginManifest, manifest) {
   for (let attempt = 0; attempt < 5; attempt++) {
     try {
       validatePluginManifest(current);
-      return { manifest: current, localized, policy: policy && declaresPolicy(current), ownCards };
+      return { manifest: current, localized, policy: policy && declaresPolicy(current), ownCards: ownCards && hasOwnCards(current) };
     } catch (error) {
       const message = String(error?.message);
       // A core without own-cards tools (C4) and launcher entries (C5): the core-all variant (scripts/manifest-variant.mjs).
@@ -60,5 +62,5 @@ export function manifestForCore(validatePluginManifest, manifest) {
     }
   }
   validatePluginManifest(current);
-  return { manifest: current, localized, policy: policy && declaresPolicy(current), ownCards };
+  return { manifest: current, localized, policy: policy && declaresPolicy(current), ownCards: ownCards && hasOwnCards(current) };
 }
